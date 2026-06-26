@@ -504,12 +504,17 @@ def get_images():
     return jsonify({'images': images})
 
 @app.route('/', defaults={'path': ''})
-@app.route('/<path:path>', methods=['GET'])
+@app.route('/<path:path>')
 def serve(path):
-    full_path = os.path.join(app.static_folder, path)
+    # Don't intercept API calls
+    if path.startswith('api/'):
+        from flask import abort
+        abort(404)
+    static_dir = os.path.join(os.path.dirname(__file__), 'static')
+    full_path = os.path.join(static_dir, path)
     if path and os.path.exists(full_path):
-        return send_from_directory(app.static_folder, path)
-    return send_from_directory(app.static_folder, 'index.html')
+        return send_from_directory(static_dir, path)
+    return send_from_directory(static_dir, 'index.html')
 
 # ============================================================================
 # INITIALIZATION
