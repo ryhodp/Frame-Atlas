@@ -17,6 +17,7 @@ import threading
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)
+os.makedirs('/app/data', exist_ok=True)
 
 # Global state for sync progress
 sync_state = {
