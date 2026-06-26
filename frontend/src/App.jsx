@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import Header from './components/Header'
 import Home from './pages/Home'
+import SyncManager from './components/SyncManager'
 import './App.css'
 
 function App() {
@@ -27,8 +28,9 @@ function App() {
         <Header />
         {backendHealthy ? (
           <Routes>
-            <Route path="/" element={<Home />} />
-          </Routes>
+  <Route path="/" element={<Home />} />
+  <Route path="/sync" element={<SyncManager />} />
+</Routes>
         ) : (
           <div className="flex items-center justify-center h-96">
             <p className="text-center text-gray-600">Connecting to backend...</p>
