@@ -4,7 +4,7 @@ import base64
 import io
 import sqlite3
 from datetime import datetime
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from PIL import Image
 import google.auth.transport.requests
@@ -15,7 +15,7 @@ from googleapiclient.http import MediaIoBaseDownload
 import google.generativeai as genai
 import threading
 
-app = Flask(__name__, static_folder='../frontend/dist', static_url_path='')
+app = Flask(__name__, static_folder='static', static_url_path='')
 CORS(app)
 
 # Global state for sync progress
@@ -503,10 +503,13 @@ def get_images():
     conn.close()
     return jsonify({'images': images})
 
-@app.route('/')
-def serve_spa():
-    """Serve the React SPA"""
-    return send_file('static/index.html')
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    full_path = os.path.join(app.static_folder, path)
+    if path and os.path.exists(full_path):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, 'index.html')
 
 # ============================================================================
 # INITIALIZATION
