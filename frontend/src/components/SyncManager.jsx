@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 // ── Circular progress ring ──────────────────────────────────────────────────
-function ProgressRing({ pct, size = 120, stroke = 8 }) {
+function ProgressRing({ pct, size = 120, stroke = 8, color }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const offset = circ - (pct / 100) * circ;
-  const isDone = pct >= 100;
 
   return (
     <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
@@ -18,7 +17,7 @@ function ProgressRing({ pct, size = 120, stroke = 8 }) {
       <circle
         cx={size / 2} cy={size / 2} r={r}
         fill="none"
-        stroke={isDone ? '#6ee7b7' : '#c9a253'}
+        stroke={color}
         strokeWidth={stroke}
         strokeLinecap="round"
         strokeDasharray={circ}
@@ -29,42 +28,103 @@ function ProgressRing({ pct, size = 120, stroke = 8 }) {
   );
 }
 
+// ── Single phase card ───────────────────────────────────────────────────────
+function PhaseCard({ phase, pct, label, sublabel, status }) {
+  const color = status === 'complete' ? '#6ee7b7'
+              : status === 'running'  ? (phase === 1 ? '#c9a253' : '#818cf8')
+              : 'rgba(255,255,255,0.12)';
+  const textColor = status === 'waiting' ? '#65625a' : color;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', flex: 1 }}>
+      <div style={{ position: 'relative', width: '110px', height: '110px' }}>
+        <ProgressRing pct={status === 'waiting' ? 0 : pct} size={110} stroke={7} color={color} />
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          {status === 'idle' ? (
+            <span style={{ fontSize: '22px', opacity: 0.2 }}>—</span>
+          ) : (
+            <>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '20px', fontWeight: 600, color: textColor, transition: 'color 0.4s' }}>
+                {Math.round(pct)}%
+              </span>
+              <span style={{ fontSize: '9px', color: '#65625a', marginTop: '2px', letterSpacing: '0.05em' }}>
+                {status === 'complete' ? 'DONE' : (phase === 1 ? 'SYNCING' : 'TAGGING')}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ fontSize: '12px', fontWeight: 600, color: textColor, letterSpacing: '0.08em', marginBottom: '4px', transition: 'color 0.4s' }}>
+          {label}
+        </p>
+        {sublabel && (
+          <p style={{ fontSize: '11px', color: '#65625a', lineHeight: 1.4 }}>{sublabel}</p>
+        )}
+      </div>
+      <div style={{ width: '100%', height: '3px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+        <div style={{
+          width: `${status === 'idle' ? 0 : pct}%`,
+          height: '100%',
+          borderRadius: '2px',
+          background: status === 'complete'
+            ? 'linear-gradient(90deg, #6ee7b7, #34d399)'
+            : phase === 1
+              ? 'linear-gradient(90deg, #c9a253, #dcbd76)'
+              : 'linear-gradient(90deg, #818cf8, #a5b4fc)',
+          transition: 'width 0.4s ease'
+        }} />
+      </div>
+    </div>
+  );
+}
+
 export default function SyncManager() {
   const [folders, setFolders] = useState([]);
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [selectedFolderName, setSelectedFolderName] = useState('');
   const [currentSyncFolder, setCurrentSyncFolder] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState('');
-  const [syncError, setSyncError] = useState('');
+
+  const [syncStatus, setSyncStatus] = useState('idle');
+  const [syncPct, setSyncPct] = useState(0);
+  const [syncProcessed, setSyncProcessed] = useState(0);
+  const [syncTotal, setSyncTotal] = useState(0);
+  const [syncSubLabel, setSyncSubLabel] = useState('');
 
   const [tagStatus, setTagStatus] = useState('idle');
   const [tagPct, setTagPct] = useState(0);
   const [tagDone, setTagDone] = useState(0);
   const [tagTotal, setTagTotal] = useState(0);
-  const [tagMsg, setTagMsg] = useState('');
+  const [tagSubLabel, setTagSubLabel] = useState('');
+
+  const [errorMsg, setErrorMsg] = useState('');
 
   const esRef = useRef(null);
+  const syncPollRef = useRef(null);
 
-  // ── On mount: load folders, check settings, check if tagging already running
   useEffect(() => {
     fetchFolders();
     checkSyncSettings();
     fetch('/api/tag-progress')
       .then(r => r.json())
       .then(d => {
-        setTagStatus(d.status);
-        setTagPct(d.pct || 0);
-        setTagDone(d.done || 0);
-        setTagTotal(d.total || 0);
-        setTagMsg(d.message || '');
-        if (d.status === 'running') startSSE();
+        if (d.status === 'running') {
+          setSyncStatus('complete'); setSyncPct(100);
+          setTagStatus('running'); setTagPct(d.pct || 0);
+          setTagDone(d.done || 0); setTagTotal(d.total || 0);
+          setTagSubLabel(d.message || '');
+          startSSE();
+        } else if (d.status === 'complete') {
+          setSyncStatus('complete'); setSyncPct(100);
+          setTagStatus('complete'); setTagPct(100);
+          setTagSubLabel(d.message || '');
+        }
       })
       .catch(() => {});
   }, []);
 
-  useEffect(() => () => { esRef.current?.close(); }, []);
+  useEffect(() => () => { esRef.current?.close(); clearInterval(syncPollRef.current); }, []);
 
   const startSSE = useCallback(() => {
     if (esRef.current) return;
@@ -73,15 +133,12 @@ export default function SyncManager() {
     es.onmessage = (e) => {
       try {
         const d = JSON.parse(e.data);
-        setTagStatus(d.status);
+        setTagStatus(d.status === 'complete' ? 'complete' : 'running');
         setTagPct(d.pct || 0);
         setTagDone(d.done || 0);
         setTagTotal(d.total || 0);
-        setTagMsg(d.message || '');
-        if (d.status === 'complete' || d.status === 'error') {
-          es.close();
-          esRef.current = null;
-        }
+        setTagSubLabel(d.message || '');
+        if (d.status === 'complete' || d.status === 'error') { es.close(); esRef.current = null; }
       } catch {}
     };
     es.onerror = () => { es.close(); esRef.current = null; };
@@ -89,11 +146,7 @@ export default function SyncManager() {
 
   const fetchFolders = async () => {
     setLoading(true);
-    try {
-      const res = await fetch('/api/folders');
-      const data = await res.json();
-      setFolders(data.folders || []);
-    } catch {}
+    try { const res = await fetch('/api/folders'); const data = await res.json(); setFolders(data.folders || []); } catch {}
     setLoading(false);
   };
 
@@ -101,267 +154,110 @@ export default function SyncManager() {
     try {
       const res = await fetch('/api/sync/settings');
       const data = await res.json();
-      if (data.folder_id) {
-        setCurrentSyncFolder({ id: data.folder_id, name: data.folder_name });
-      }
+      if (data.folder_id) setCurrentSyncFolder({ id: data.folder_id, name: data.folder_name });
     } catch {}
   };
 
   const handleSetFolder = async () => {
     if (!selectedFolder) return;
     try {
-      await fetch('/api/sync/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder_id: selectedFolder, folder_name: selectedFolderName })
-      });
+      await fetch('/api/sync/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder_id: selectedFolder, folder_name: selectedFolderName }) });
       setCurrentSyncFolder({ id: selectedFolder, name: selectedFolderName });
-      setSelectedFolder(null);
-      setSelectedFolderName('');
+      setSelectedFolder(null); setSelectedFolderName('');
     } catch {}
   };
 
   const handleStartSync = async () => {
     if (!currentSyncFolder) return;
-    setSyncing(true);
-    setSyncMsg('Syncing with Google Drive…');
-    setSyncError('');
-    setTagStatus('idle');
-    setTagPct(0);
-    setTagDone(0);
-    setTagTotal(0);
-    setTagMsg('');
+    setErrorMsg('');
+    setSyncStatus('running'); setSyncPct(0); setSyncProcessed(0); setSyncTotal(0); setSyncSubLabel('Connecting to Google Drive…');
+    setTagStatus('idle'); setTagPct(0); setTagDone(0); setTagTotal(0); setTagSubLabel('');
 
     try {
       const res = await fetch('/api/sync/start', { method: 'POST' });
       const data = await res.json();
-      if (!data.success) {
-        setSyncError(data.error || 'Sync failed');
-        setSyncing(false);
-        return;
-      }
+      if (!data.success) { setErrorMsg(data.error || 'Sync failed'); setSyncStatus('idle'); return; }
 
-      // Poll until sync finishes, then start SSE for tagging
-      const poll = setInterval(async () => {
+      syncPollRef.current = setInterval(async () => {
         try {
           const s = await fetch('/api/sync/status').then(r => r.json());
+          const processed = s.processed || 0;
+          const total = s.total || 0;
+          const pct = total > 0 ? Math.round((processed / total) * 100) : 5;
+          setSyncProcessed(processed); setSyncTotal(total); setSyncPct(pct);
+          setSyncSubLabel(
+            s.current_file ? `${processed} / ${total} — ${s.current_file.substring(0, 28)}…`
+            : total > 0 ? `${processed} / ${total} images`
+            : 'Listing files in Drive…'
+          );
           if (!s.in_progress) {
-            clearInterval(poll);
-            setSyncing(false);
-            const newCount = s.processed || 0;
-            setSyncMsg(`Drive sync done — ${newCount} images processed.`);
-            // Tagging auto-starts on the server; connect SSE to watch it
-            setTimeout(() => {
-              setTagStatus('running');
-              setTagMsg('Starting tagging queue…');
-              startSSE();
-            }, 800);
+            clearInterval(syncPollRef.current);
+            setSyncStatus('complete'); setSyncPct(100);
+            setSyncSubLabel(`${processed} images processed`);
+            setTimeout(() => { setTagStatus('running'); setTagSubLabel('Starting AI tagging…'); startSSE(); }, 600);
           }
         } catch {}
-      }, 1000);
-    } catch (err) {
-      setSyncError('Could not reach server.');
-      setSyncing(false);
-    }
+      }, 800);
+    } catch { setErrorMsg('Could not reach server.'); setSyncStatus('idle'); }
   };
 
-  const showRing = tagStatus === 'running' || tagStatus === 'complete';
+  const bothDone = syncStatus === 'complete' && tagStatus === 'complete';
+  const isRunning = syncStatus === 'running' || tagStatus === 'running';
+  const showProgress = syncStatus !== 'idle' || tagStatus !== 'idle';
 
   return (
-    <div style={{
-      padding: '40px',
-      maxWidth: '520px',
-      margin: '0 auto',
-      fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
-      color: '#efeadd'
-    }}>
-      <h2 style={{
-        fontFamily: "'Cinzel', serif",
-        letterSpacing: '0.14em',
-        fontSize: '17px',
-        marginBottom: '28px',
-        color: '#c9a253'
-      }}>
+    <div style={{ padding: '40px', maxWidth: '540px', margin: '0 auto', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: '#efeadd' }}>
+      <h2 style={{ fontFamily: "'Cinzel', serif", letterSpacing: '0.14em', fontSize: '17px', marginBottom: '28px', color: '#c9a253' }}>
         IMPORT / SYNC
       </h2>
 
       {/* Folder selector */}
       <div style={{ marginBottom: '24px' }}>
         {currentSyncFolder && (
-          <div style={{
-            marginBottom: '14px',
-            padding: '12px 14px',
-            background: 'rgba(201,162,83,0.08)',
-            border: '1px solid rgba(201,162,83,0.25)',
-            borderRadius: '8px',
-            fontSize: '13px',
-            color: '#9c988d'
-          }}>
+          <div style={{ marginBottom: '14px', padding: '12px 14px', background: 'rgba(201,162,83,0.08)', border: '1px solid rgba(201,162,83,0.25)', borderRadius: '8px', fontSize: '13px', color: '#9c988d' }}>
             Syncing from: <span style={{ color: '#c9a253', fontWeight: 600 }}>📁 {currentSyncFolder.name}</span>
           </div>
         )}
-
-        {loading ? (
-          <p style={{ fontSize: '13px', color: '#65625a' }}>Loading folders…</p>
-        ) : (
+        {loading ? <p style={{ fontSize: '13px', color: '#65625a' }}>Loading folders…</p> : (
           <div style={{ display: 'flex', gap: '10px' }}>
-            <select
-              value={selectedFolder || ''}
-              onChange={e => {
-                const id = e.target.value;
-                const obj = folders.find(f => f.id === id);
-                setSelectedFolder(id);
-                setSelectedFolderName(obj?.name || '');
-              }}
-              style={{
-                flex: 1,
-                background: '#18181b',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: '8px',
-                color: '#efeadd',
-                padding: '10px 12px',
-                fontFamily: 'inherit',
-                fontSize: '13px'
-              }}
-            >
+            <select value={selectedFolder || ''} onChange={e => { const id = e.target.value; const obj = folders.find(f => f.id === id); setSelectedFolder(id); setSelectedFolderName(obj?.name || ''); }}
+              style={{ flex: 1, background: '#18181b', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', color: '#efeadd', padding: '10px 12px', fontFamily: 'inherit', fontSize: '13px' }}>
               <option value="">Choose a folder…</option>
-              {folders.map(f => (
-                <option key={f.id} value={f.id}>📁 {f.name}</option>
-              ))}
+              {folders.map(f => <option key={f.id} value={f.id}>📁 {f.name}</option>)}
             </select>
             {selectedFolder && (
-              <button
-                onClick={handleSetFolder}
-                style={{
-                  background: 'rgba(201,162,83,0.15)',
-                  border: '1px solid rgba(201,162,83,0.35)',
-                  borderRadius: '8px',
-                  color: '#c9a253',
-                  padding: '10px 16px',
-                  fontFamily: 'inherit',
-                  fontSize: '13px',
-                  cursor: 'pointer'
-                }}
-              >
-                Set
-              </button>
+              <button onClick={handleSetFolder} style={{ background: 'rgba(201,162,83,0.15)', border: '1px solid rgba(201,162,83,0.35)', borderRadius: '8px', color: '#c9a253', padding: '10px 16px', fontFamily: 'inherit', fontSize: '13px', cursor: 'pointer' }}>Set</button>
             )}
           </div>
         )}
       </div>
 
-      {/* Sync Now button */}
-      <button
-        onClick={handleStartSync}
-        disabled={syncing || !currentSyncFolder || tagStatus === 'running'}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          background: 'rgba(201,162,83,0.16)',
-          border: '1px solid rgba(201,162,83,0.4)',
-          borderRadius: '10px',
-          color: '#c9a253',
-          padding: '13px 22px',
-          fontFamily: 'inherit',
-          fontSize: '14px',
-          fontWeight: 500,
-          cursor: (syncing || !currentSyncFolder || tagStatus === 'running') ? 'not-allowed' : 'pointer',
-          opacity: (syncing || !currentSyncFolder || tagStatus === 'running') ? 0.5 : 1,
-          marginBottom: '20px',
-          transition: 'opacity 0.2s'
-        }}
-      >
-        {syncing ? (
-          <span style={{
-            width: '14px', height: '14px',
-            border: '2px solid rgba(201,162,83,0.3)',
-            borderTopColor: '#c9a253',
-            borderRadius: '50%',
-            display: 'inline-block',
-            animation: 'spin 0.7s linear infinite'
-          }} />
+      {/* Sync button */}
+      <button onClick={handleStartSync} disabled={isRunning || !currentSyncFolder}
+        style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(201,162,83,0.16)', border: '1px solid rgba(201,162,83,0.4)', borderRadius: '10px', color: '#c9a253', padding: '13px 22px', fontFamily: 'inherit', fontSize: '14px', fontWeight: 500, cursor: (isRunning || !currentSyncFolder) ? 'not-allowed' : 'pointer', opacity: (isRunning || !currentSyncFolder) ? 0.5 : 1, marginBottom: '28px', transition: 'opacity 0.2s' }}>
+        {isRunning ? (
+          <span style={{ width: '14px', height: '14px', border: '2px solid rgba(201,162,83,0.3)', borderTopColor: '#c9a253', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
         ) : (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 2v6h-6M3 12a9 9 0 0115-6.7L21 8M3 22v-6h6M21 12a9 9 0 01-15 6.7L3 16"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2v6h-6M3 12a9 9 0 0115-6.7L21 8M3 22v-6h6M21 12a9 9 0 01-15 6.7L3 16"/></svg>
         )}
-        {syncing ? 'Syncing Drive…' : 'Sync Now'}
+        {isRunning ? 'Running…' : bothDone ? 'Sync Again' : 'Sync Now'}
       </button>
 
-      {syncMsg && <p style={{ fontSize: '13px', color: '#9c988d', marginBottom: '8px' }}>{syncMsg}</p>}
-      {syncError && <p style={{ fontSize: '13px', color: '#cf7152', marginBottom: '8px' }}>{syncError}</p>}
+      {errorMsg && <p style={{ fontSize: '13px', color: '#cf7152', marginBottom: '16px' }}>{errorMsg}</p>}
 
-      {/* Tagging progress ring */}
-      {showRing && (
-        <div style={{
-          marginTop: '28px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '16px',
-          background: 'rgba(255,255,255,0.03)',
-          border: '1px solid rgba(255,255,255,0.07)',
-          borderRadius: '14px',
-          padding: '32px 24px',
-          animation: 'fadein 0.3s ease'
-        }}>
-          {/* Ring */}
-          <div style={{ position: 'relative', width: '120px', height: '120px' }}>
-            <ProgressRing pct={tagPct} />
-            <div style={{
-              position: 'absolute', inset: 0,
-              display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center'
-            }}>
-              <span style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '22px',
-                fontWeight: 600,
-                color: tagStatus === 'complete' ? '#6ee7b7' : '#c9a253',
-                transition: 'color 0.4s'
-              }}>
-                {tagPct}%
-              </span>
-              <span style={{ fontSize: '10px', color: '#65625a', marginTop: '2px', letterSpacing: '0.05em' }}>
-                {tagStatus === 'complete' ? 'DONE' : 'TAGGING'}
-              </span>
+      {/* Two-phase progress cards */}
+      {showProgress && (
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '16px', padding: '28px 24px', animation: 'fadein 0.3s ease' }}>
+          {bothDone && (
+            <div style={{ textAlign: 'center', marginBottom: '24px', padding: '10px', background: 'rgba(110,231,183,0.08)', borderRadius: '8px', border: '1px solid rgba(110,231,183,0.2)' }}>
+              <span style={{ fontSize: '14px', color: '#6ee7b7', fontWeight: 600 }}>✓ All done! Your library is ready.</span>
             </div>
-          </div>
-
-          {/* Status text */}
-          <div style={{ textAlign: 'center' }}>
-            <p style={{
-              fontSize: '14px',
-              fontWeight: 500,
-              color: tagStatus === 'complete' ? '#6ee7b7' : '#efeadd',
-              marginBottom: '6px',
-              transition: 'color 0.4s'
-            }}>
-              {tagStatus === 'complete' ? 'Sync Complete!' : 'Syncing…'}
-            </p>
-            <p style={{ fontSize: '12px', color: '#65625a', lineHeight: 1.5 }}>{tagMsg}</p>
-            {tagTotal > 0 && tagStatus === 'running' && (
-              <p style={{
-                fontSize: '11px', color: '#65625a', marginTop: '6px',
-                fontFamily: "'JetBrains Mono', monospace"
-              }}>
-                {tagDone} / {tagTotal}
-              </p>
-            )}
-          </div>
-
-          {/* Progress bar */}
-          <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
-            <div style={{
-              width: `${tagPct}%`,
-              height: '100%',
-              borderRadius: '2px',
-              background: tagStatus === 'complete'
-                ? 'linear-gradient(90deg, #6ee7b7, #34d399)'
-                : 'linear-gradient(90deg, #c9a253, #dcbd76)',
-              transition: 'width 0.4s ease, background 0.4s ease'
-            }} />
+          )}
+          <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+            <PhaseCard phase={1} pct={syncPct} status={syncStatus} label="DRIVE SYNC" sublabel={syncSubLabel} />
+            <div style={{ display: 'flex', alignItems: 'center', paddingTop: '45px', color: syncStatus === 'complete' ? '#c9a253' : 'rgba(255,255,255,0.1)', fontSize: '20px', transition: 'color 0.6s', flexShrink: 0 }}>→</div>
+            <PhaseCard phase={2} pct={tagPct} status={tagStatus} label="AI TAGGING"
+              sublabel={tagStatus === 'idle' ? 'Starts after sync' : tagTotal > 0 ? `${tagDone} / ${tagTotal} images` : tagSubLabel} />
           </div>
         </div>
       )}
