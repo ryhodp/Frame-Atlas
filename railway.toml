@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+
+[build.buildpacks]
+nixpacks = ["python", "nodejs"]
+
+[deploy]
+startCommand = "sh start.sh"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
