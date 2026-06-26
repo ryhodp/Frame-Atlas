@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
+
 export default function SyncManager() {
   const [folders, setFolders] = useState([]);
   const [selectedFolder, setSelectedFolder] = useState(null);
