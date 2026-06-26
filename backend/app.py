@@ -33,7 +33,7 @@ sync_state = {
 
 def get_db():
     """Get database connection"""
-    conn = sqlite3.connect('library.db')
+    conn = sqlite3.connect('/app/data/library.db')
     conn.row_factory = sqlite3.Row
     return conn
 
