@@ -12,7 +12,7 @@ from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from google.generativeai import genai
+import google.generativeai as genai
 import threading
 
 app = Flask(__name__, static_folder='../frontend/dist', static_url_path='')
