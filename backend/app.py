@@ -376,6 +376,15 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'ok'})
 
+@app.route('/api/debug', methods=['GET'])
+def debug():
+    creds = os.environ.get('GOOGLE_DRIVE_CREDENTIALS')
+    return jsonify({
+        'has_creds': creds is not None,
+        'creds_length': len(creds) if creds else 0,
+        'env_keys': list(os.environ.keys())
+    })
+
 @app.route('/api/config', methods=['GET'])
 def config():
     """Get app configuration"""
