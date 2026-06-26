@@ -22,7 +22,6 @@ CORS(app)
 
 DB_PATH = '/app/data/library.db'
 
-# Global state for sync progress
 sync_state = {
     'in_progress': False,
     'processed': 0,
@@ -31,7 +30,6 @@ sync_state = {
     'errors': []
 }
 
-# Global state for tagging progress
 _tag_progress = {
     'running': False,
     'total': 0,
@@ -248,16 +246,13 @@ def init_db():
 
     conn.commit()
 
-    # Safe migration: add tagging_status column if it doesn't exist yet
-    # (for existing databases that were created before Day 4)
     try:
         c.execute("ALTER TABLE images ADD COLUMN tagging_status TEXT DEFAULT 'pending'")
         conn.commit()
         print("[migration] Added tagging_status column")
     except Exception:
-        pass  # Column already exists, that's fine
+        pass
 
-    # Mark any images that already have tags as 'done'
     c.execute("""
         UPDATE images SET tagging_status = 'done'
         WHERE id IN (SELECT DISTINCT image_id FROM tags)
@@ -297,12 +292,11 @@ def _run_tagging_job():
         _broadcast_progress()
         return
 
-   client = genai_client.Client(api_key=gemini_api_key)
+    client = genai_client.Client(api_key=gemini_api_key)
 
     conn = get_db()
     c = conn.cursor()
 
-    # Untagged first, then failed — skip done
     c.execute("""
         SELECT id, thumbnail_blob, filename
         FROM images
@@ -335,18 +329,14 @@ def _run_tagging_job():
         filename = img['filename']
 
         try:
-            # Load image from blob
             pil_img = Image.open(io.BytesIO(thumb_blob))
 
-            # Call Gemini with the image
-            import PIL.Image
-response = client.models.generate_content(
-    model='gemini-2.0-flash',
-    contents=[GEMINI_TAGGING_PROMPT, pil_img]
-)
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=[GEMINI_TAGGING_PROMPT, pil_img]
+            )
             raw = response.text.strip()
 
-            # Strip markdown fences if Gemini adds them
             if raw.startswith('```'):
                 raw = raw.split('\n', 1)[1].rsplit('```', 1)[0].strip()
 
@@ -355,7 +345,6 @@ response = client.models.generate_content(
             conn = get_db()
             c = conn.cursor()
 
-            # Write tags
             c.execute("DELETE FROM tags WHERE image_id = ?", (img_id,))
             for category, values in data.get('tags', {}).items():
                 for val in values:
@@ -365,12 +354,10 @@ response = client.models.generate_content(
                             (img_id, category, val.strip())
                         )
 
-            # Write caption
             caption = data.get('caption', '')
             if caption:
                 c.execute("UPDATE images SET caption = ? WHERE id = ?", (caption, img_id))
 
-            # Write filmography if present
             film = data.get('filmography', {})
             if any(film.get(k) for k in ['title', 'director', 'dp', 'year']):
                 c.execute("DELETE FROM filmography WHERE image_id = ?", (img_id,))
@@ -379,7 +366,6 @@ response = client.models.generate_content(
                     (img_id, film.get('title'), film.get('director'), film.get('dp'), str(film.get('year', '')))
                 )
 
-            # Mark done
             c.execute("UPDATE images SET tagging_status = 'done' WHERE id = ?", (img_id,))
             conn.commit()
             conn.close()
@@ -404,7 +390,7 @@ response = client.models.generate_content(
                 _tag_progress['done'] += 1
 
         _broadcast_progress()
-        time.sleep(0.05)  # small pause to avoid rate limiting
+        time.sleep(0.05)
 
     with _tag_progress_lock:
         failed = _tag_progress['failed']
@@ -418,7 +404,6 @@ response = client.models.generate_content(
 
 
 def trigger_tagging():
-    """Start the tagging job in a background thread. Safe to call multiple times."""
     with _tag_progress_lock:
         if _tag_progress['running']:
             return
@@ -439,23 +424,7 @@ def get_drive_service():
         creds_dict,
         scopes=['https://www.googleapis.com/auth/drive.readonly']
     )
-
     return build('drive', 'v3', credentials=credentials)
-
-def list_drive_folders():
-    try:
-        service = get_drive_service()
-        query = "mimeType='application/vnd.google-apps.folder' and trashed=false"
-        results = service.files().list(
-            q=query,
-            spaces='drive',
-            fields='files(id, name)',
-            pageSize=100
-        ).execute()
-        folders = results.get('files', [])
-        return sorted(folders, key=lambda x: x['name'])
-    except Exception as e:
-        return []
 
 def list_images_in_folder(service, folder_id, page_token=None):
     images = []
@@ -488,14 +457,13 @@ def generate_thumbnail(image_data, max_size=(400, 400)):
         img.save(thumb_io, format='JPEG', quality=85)
         thumb_io.seek(0)
         return thumb_io.getvalue()
-    except Exception as e:
+    except Exception:
         return None
 
 def get_image_aspect_ratio(image_data):
     try:
         img = Image.open(io.BytesIO(image_data))
         width, height = img.size
-        # Return as a clean ratio string e.g. "16:9"
         from math import gcd
         g = gcd(width, height)
         return f"{width // g}:{height // g}"
@@ -534,7 +502,6 @@ def sync_folder_worker(folder_id, user_id):
 
                 sync_state['current_file'] = filename
 
-                # Download image
                 req = service.files().get_media(fileId=file_id)
                 fh = io.BytesIO()
                 downloader = MediaIoBaseDownload(fh, req)
@@ -543,7 +510,6 @@ def sync_folder_worker(folder_id, user_id):
                     status, done = downloader.next_chunk()
 
                 image_data = fh.getvalue()
-
                 thumbnail = generate_thumbnail(image_data)
                 if not thumbnail:
                     sync_state['errors'].append(f"Failed thumbnail: {filename}")
@@ -569,7 +535,6 @@ def sync_folder_worker(folder_id, user_id):
                 sync_state['processed'] += 1
                 continue
 
-        # Update last sync time
         conn = get_db()
         c = conn.cursor()
         c.execute('''
@@ -585,7 +550,6 @@ def sync_folder_worker(folder_id, user_id):
         sync_state['errors'].append(f"Sync failed: {str(e)}")
     finally:
         sync_state['in_progress'] = False
-        # Auto-trigger tagging after sync finishes
         trigger_tagging()
 
 # ============================================================================
@@ -674,8 +638,6 @@ def start_sync():
 def sync_status():
     return jsonify(sync_state)
 
-# ── Tagging progress: live stream (SSE) ──────────────────────────────────────
-
 @app.route('/api/tag-progress/stream')
 def tag_progress_stream():
     def generate():
@@ -683,7 +645,6 @@ def tag_progress_stream():
         with _sse_lock:
             _sse_queues.append(q)
         try:
-            # Send current state immediately on connect
             with _tag_progress_lock:
                 data = dict(_tag_progress)
             pct = int(data['done'] / data['total'] * 100) if data['total'] > 0 else 0
@@ -709,16 +670,12 @@ def tag_progress_stream():
         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
     )
 
-# ── Tagging progress: snapshot (non-streaming) ────────────────────────────────
-
 @app.route('/api/tag-progress')
 def tag_progress_snapshot():
     with _tag_progress_lock:
         data = dict(_tag_progress)
     pct = int(data['done'] / data['total'] * 100) if data['total'] > 0 else 0
     return jsonify({**data, 'pct': pct})
-
-# ── Autocomplete ──────────────────────────────────────────────────────────────
 
 @app.route('/api/autocomplete')
 def autocomplete():
@@ -761,37 +718,23 @@ def autocomplete():
     conn.close()
 
     CAT_COLORS = {
-        'mood': '#8b7cf6',
-        'lighting_quality': '#f59e0b',
-        'lighting_color_temperature': '#f97316',
-        'color_palette': '#ec4899',
-        'shot_type': '#06b6d4',
-        'framing_composition': '#10b981',
-        'location_type': '#84cc16',
-        'time_of_day_weather': '#c9a253',
-        'source_type': '#6366f1',
-        'subject_count': '#94a3b8',
-        'subject_camera_relationship': '#a78bfa',
-        'genre_aesthetic': '#f43f5e',
-        'era_decade': '#fb923c',
-        'camera_format': '#22d3ee',
+        'mood': '#8b7cf6', 'lighting_quality': '#f59e0b',
+        'lighting_color_temperature': '#f97316', 'color_palette': '#ec4899',
+        'shot_type': '#06b6d4', 'framing_composition': '#10b981',
+        'location_type': '#84cc16', 'time_of_day_weather': '#c9a253',
+        'source_type': '#6366f1', 'subject_count': '#94a3b8',
+        'subject_camera_relationship': '#a78bfa', 'genre_aesthetic': '#f43f5e',
+        'era_decade': '#fb923c', 'camera_format': '#22d3ee',
         'performance_emotion': '#e879f9',
     }
     CAT_LABELS = {
-        'mood': 'Mood',
-        'lighting_quality': 'Lighting',
-        'lighting_color_temperature': 'Color Temp',
-        'color_palette': 'Palette',
-        'shot_type': 'Shot',
-        'framing_composition': 'Framing',
-        'location_type': 'Location',
-        'time_of_day_weather': 'Time / Weather',
-        'source_type': 'Source',
-        'subject_count': 'Subjects',
-        'subject_camera_relationship': 'Camera Rel.',
-        'genre_aesthetic': 'Genre',
-        'era_decade': 'Era',
-        'camera_format': 'Format',
+        'mood': 'Mood', 'lighting_quality': 'Lighting',
+        'lighting_color_temperature': 'Color Temp', 'color_palette': 'Palette',
+        'shot_type': 'Shot', 'framing_composition': 'Framing',
+        'location_type': 'Location', 'time_of_day_weather': 'Time / Weather',
+        'source_type': 'Source', 'subject_count': 'Subjects',
+        'subject_camera_relationship': 'Camera Rel.', 'genre_aesthetic': 'Genre',
+        'era_decade': 'Era', 'camera_format': 'Format',
         'performance_emotion': 'Emotion',
     }
 
@@ -803,14 +746,11 @@ def autocomplete():
         'count': row['cnt']
     } for row in rows])
 
-# ── Search / filter ───────────────────────────────────────────────────────────
-
 @app.route('/api/search')
 def search():
     chips_raw = request.args.get('chips', '').strip()
     page = int(request.args.get('page', 0))
     per = int(request.args.get('per', 50))
-
     active_chips = [t.strip() for t in chips_raw.split(',') if t.strip()] if chips_raw else []
 
     conn = get_db()
@@ -819,9 +759,7 @@ def search():
     if not active_chips:
         rows = c.execute('''
             SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
-            FROM images
-            ORDER BY date_added DESC
-            LIMIT ? OFFSET ?
+            FROM images ORDER BY date_added DESC LIMIT ? OFFSET ?
         ''', (per, page * per)).fetchall()
         total = c.execute('SELECT COUNT(*) FROM images').fetchone()[0]
     else:
@@ -830,21 +768,16 @@ def search():
             SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
             FROM images
             WHERE id IN (
-                SELECT image_id FROM tags
-                WHERE value IN ({placeholders})
-                GROUP BY image_id
-                HAVING COUNT(DISTINCT value) = ?
+                SELECT image_id FROM tags WHERE value IN ({placeholders})
+                GROUP BY image_id HAVING COUNT(DISTINCT value) = ?
             )
-            ORDER BY date_added DESC
-            LIMIT ? OFFSET ?
+            ORDER BY date_added DESC LIMIT ? OFFSET ?
         ''', active_chips + [len(active_chips), per, page * per]).fetchall()
         total = c.execute(f'''
             SELECT COUNT(*) FROM images
             WHERE id IN (
-                SELECT image_id FROM tags
-                WHERE value IN ({placeholders})
-                GROUP BY image_id
-                HAVING COUNT(DISTINCT value) = ?
+                SELECT image_id FROM tags WHERE value IN ({placeholders})
+                GROUP BY image_id HAVING COUNT(DISTINCT value) = ?
             )
         ''', active_chips + [len(active_chips)]).fetchone()[0]
 
@@ -865,17 +798,12 @@ def search():
     for r in rows:
         ar_str = r['aspect_ratio'] or '16:9'
         try:
-            if ':' in ar_str:
-                w, h = ar_str.split(':', 1)
-                ar_float = float(w) / float(h)
-            else:
-                ar_float = float(ar_str)
+            w, h = ar_str.split(':', 1) if ':' in ar_str else (ar_str, '1')
+            ar_float = float(w) / float(h)
         except Exception:
             ar_float = 16 / 9
 
-        # Convert blob to base64 for the frontend
         thumb_b64 = base64.b64encode(r['thumbnail_blob']).decode('utf-8')
-
         images_out.append({
             'id': r['id'],
             'filename': r['filename'],
@@ -889,15 +817,7 @@ def search():
             'palette': colors_map.get(r['id'], [])
         })
 
-    return jsonify({
-        'images': images_out,
-        'total': total,
-        'page': page,
-        'per': per,
-        'has_more': (page + 1) * per < total
-    })
-
-# ── Original images endpoint (kept for backwards compat) ──────────────────────
+    return jsonify({'images': images_out, 'total': total, 'page': page, 'per': per, 'has_more': (page + 1) * per < total})
 
 @app.route('/api/images', methods=['GET'])
 def get_images():
@@ -906,28 +826,19 @@ def get_images():
     c = conn.cursor()
     c.execute('''
         SELECT id, filename, thumbnail_blob, aspect_ratio, date_added, is_favorite, is_flagged
-        FROM images
-        WHERE user_id = ?
-        ORDER BY date_added DESC
+        FROM images WHERE user_id = ? ORDER BY date_added DESC
     ''', (user_id,))
-
     images = []
     for row in c.fetchall():
         thumb_b64 = base64.b64encode(row[2]).decode('utf-8')
         images.append({
-            'id': row[0],
-            'filename': row[1],
+            'id': row[0], 'filename': row[1],
             'thumbnail': f'data:image/jpeg;base64,{thumb_b64}',
-            'aspect_ratio': row[3],
-            'date_added': row[4],
-            'is_favorite': row[5],
-            'is_flagged': row[6]
+            'aspect_ratio': row[3], 'date_added': row[4],
+            'is_favorite': row[5], 'is_flagged': row[6]
         })
-
     conn.close()
     return jsonify({'images': images})
-
-# ── Static / catch-all ────────────────────────────────────────────────────────
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
