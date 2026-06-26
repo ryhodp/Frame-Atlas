@@ -297,8 +297,7 @@ def _run_tagging_job():
         _broadcast_progress()
         return
 
-    genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+   client = genai_client.Client(api_key=gemini_api_key)
 
     conn = get_db()
     c = conn.cursor()
@@ -340,7 +339,11 @@ def _run_tagging_job():
             pil_img = Image.open(io.BytesIO(thumb_blob))
 
             # Call Gemini with the image
-            response = model.generate_content([GEMINI_TAGGING_PROMPT, pil_img])
+            import PIL.Image
+response = client.models.generate_content(
+    model='gemini-2.0-flash',
+    contents=[GEMINI_TAGGING_PROMPT, pil_img]
+)
             raw = response.text.strip()
 
             # Strip markdown fences if Gemini adds them
