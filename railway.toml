@@ -1,10 +1,6 @@
 [build]
-builder = "nixpacks"
-
-[build.buildpacks]
-nixpacks = ["python", "nodejs"]
+builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "sh start.sh"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
