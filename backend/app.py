@@ -387,11 +387,9 @@ def config():
 @app.route('/api/folders', methods=['GET'])
 def get_folders():
     """List all folders in Drive"""
-    try:
-        folders = list_drive_folders()
-        return jsonify({'folders': folders})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return jsonify({'folders': [
+        {'id': '1LHPVyo3QjOEcizc1Io2UVjxzX4FQ7yDG', 'name': 'Inspiration Images'}
+    ]})
 
 @app.route('/api/sync/settings', methods=['GET', 'POST'])
 def sync_settings():
