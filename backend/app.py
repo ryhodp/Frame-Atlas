@@ -298,7 +298,7 @@ def _run_tagging_job():
         return
 
     genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
     conn = get_db()
     c = conn.cursor()
