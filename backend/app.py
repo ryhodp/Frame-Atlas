@@ -504,7 +504,7 @@ def get_images():
     return jsonify({'images': images})
 
 @app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
+@app.route('/<path:path>', methods=['GET'])
 def serve(path):
     full_path = os.path.join(app.static_folder, path)
     if path and os.path.exists(full_path):
