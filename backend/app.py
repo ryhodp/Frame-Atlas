@@ -15,7 +15,7 @@ from googleapiclient.http import MediaIoBaseDownload
 import google.generativeai as genai
 import threading
 
-app = Flask(__name__, static_folder='static', static_url_path='')
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)
 
 # Global state for sync progress
