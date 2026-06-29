@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Frame Atlas | Cinematic Explorer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500&family=JetBrains+Mono:wght@500&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@100..900&family=Manrope:wght@100..900&display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        .fill-icon {
+            font-variation-settings: 'FILL' 1, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        ::-webkit-scrollbar {
+            display: none;
+        }
+        .glass-fill {
+            background: rgba(23, 26, 32, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .masonry-grid {
+            column-count: 2;
+            column-gap: 12px;
+        }
+        .masonry-item {
+            break-inside: avoid;
+            margin-bottom: 12px;
+        }
+        @keyframes subtle-zoom {
+            from { transform: scale(1); }
+            to { transform: scale(1.05); }
+        }
+        .image-hover:active img {
+            animation: subtle-zoom 0.4s ease forwards;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-surface": "#e2e2e8",
+                        "tertiary-container": "#77baa2",
+                        "surface-bright": "#37393e",
+                        "surface-tint": "#f5bd58",
+                        "tertiary-fixed-dim": "#90d4bb",
+                        "error-container": "#93000a",
+                        "tertiary": "#92d6bd",
+                        "on-secondary": "#2d3037",
+                        "on-secondary-container": "#b3b5bd",
+                        "inverse-surface": "#e2e2e8",
+                        "surface-container-high": "#282a2e",
+                        "error": "#ffb4ab",
+                        "inverse-primary": "#7d5700",
+                        "surface": "#0F1115",
+                        "outline-variant": "#4f4536",
+                        "surface-variant": "#333539",
+                        "outline": "#9c8f7d",
+                        "surface-container-lowest": "#0c0e12",
+                        "on-surface-variant": "#d3c4b1",
+                        "on-primary-container": "#573c00",
+                        "on-tertiary-fixed-variant": "#00513f",
+                        "on-primary": "#422c00",
+                        "tertiary-fixed": "#acf1d7",
+                        "background": "#0F1115",
+                        "secondary": "#c4c6ce",
+                        "on-tertiary-fixed": "#002117",
+                        "on-primary-fixed": "#271900",
+                        "primary": "#f7bf59",
+                        "on-secondary-fixed-variant": "#44474e",
+                        "primary-fixed": "#ffdeaa",
+                        "primary-container": "#d9a441",
+                        "on-secondary-fixed": "#191c22",
+                        "surface-dim": "#111317",
+                        "surface-container-low": "#1a1c20",
+                        "on-background": "#e2e2e8",
+                        "inverse-on-surface": "#2f3035",
+                        "secondary-fixed-dim": "#c4c6ce",
+                        "surface-container-highest": "#333539",
+                        "on-primary-fixed-variant": "#5f4100",
+                        "surface-container": "#1e2024",
+                        "on-error-container": "#ffdad6",
+                        "on-tertiary": "#00382a",
+                        "secondary-container": "#44474e",
+                        "primary-fixed-dim": "#f5bd58",
+                        "secondary-fixed": "#e1e2eb",
+                        "on-error": "#690005",
+                        "on-tertiary-container": "#004a39"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter-grid": "24px",
+                        "stack-md": "32px",
+                        "stack-sm": "16px",
+                        "margin-page": "20px",
+                        "stack-xl": "64px",
+                        "panel-padding": "20px"
+                    },
+                    "fontFamily": {
+                        "label-sm": ["JetBrains Mono"],
+                        "headline-lg-mobile": ["Manrope"],
+                        "headline-lg": ["Manrope"],
+                        "display-lg": ["Manrope"],
+                        "body-md": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "headline-md": ["Manrope"]
+                    },
+                    "fontSize": {
+                        "label-sm": ["12px", {"lineHeight": "1.0", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "headline-lg-mobile": ["28px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                        "headline-lg": ["32px", {"lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "display-lg": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "body-md": ["15px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "headline-md": ["24px", {"lineHeight": "1.3", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface font-body-md selection:bg-primary/30">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-surface/80 backdrop-blur-xl border-b border-outline-variant/30 flex items-center justify-between px-margin-page h-16">
+<button class="text-primary hover:opacity-80 transition-opacity active:scale-95 active:duration-100">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<h1 class="font-headline-md text-headline-md tracking-widest text-primary uppercase">FRAME ATLAS</h1>
+<button class="text-primary hover:opacity-80 transition-opacity active:scale-95 active:duration-100">
+<span class="material-symbols-outlined">search</span>
+</button>
+</header>
+<!-- Main Content -->
+<main class="pt-24 pb-32 px-margin-page">
+<!-- Category Chips -->
+<section class="mb-8">
+<div class="flex overflow-x-auto gap-3 no-scrollbar pb-2">
+<button class="flex-none px-5 py-2.5 rounded-full border border-outline-variant/50 bg-surface-container text-on-surface-variant font-label-sm text-label-sm hover:border-primary/50 transition-all">Mood</button>
+<button class="flex-none px-5 py-2.5 rounded-full border border-outline-variant/50 bg-surface-container text-on-surface-variant font-label-sm text-label-sm hover:border-primary/50 transition-all">Lighting</button>
+<button class="flex-none px-5 py-2.5 rounded-full border border-outline-variant/50 bg-surface-container text-on-surface-variant font-label-sm text-label-sm hover:border-primary/50 transition-all">Location</button>
+<button class="flex-none px-5 py-2.5 rounded-full border border-outline-variant/50 bg-surface-container text-on-surface-variant font-label-sm text-label-sm hover:border-primary/50 transition-all">Genre</button>
+</div>
+</section>
+<!-- Search Suggestion Chip -->
+<section class="mb-10">
+<div class="inline-flex items-center gap-3 bg-primary-container/20 border border-primary/30 px-4 py-3 rounded-xl max-w-full">
+<span class="material-symbols-outlined text-primary scale-90">auto_awesome</span>
+<span class="font-label-sm text-label-sm text-primary truncate">something unsettling in the crowd</span>
+<span class="material-symbols-outlined text-primary/60 scale-75">close</span>
+</div>
+</section>
+<!-- Masonry Grid -->
+<div class="masonry-grid">
+<!-- Item 1 -->
+<div class="masonry-item relative group overflow-hidden rounded-lg border border-white/5 image-hover">
+<img class="w-full object-cover" data-alt="A cinematic film still capturing a lonely figure standing under a flickering street lamp in a heavy midnight fog. The color palette is dominated by deep charcoal and misty greys, with a sharp gold light puncturing the gloom. The atmosphere is quiet, mysterious, and high-contrast, reminiscent of neo-noir cinematography." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDpI35VuwefemVa2IxCnST0Ufruu4v_GFSTn-lDKVToc6XymM9Rbw5Q11rsOfU1gpYQW9Qqkk3GMWbO5eYuGHQ2suATOEkRkMvdvk1CbBRpAgaYyEeoMCl0Cf9EvcI3W98vAnZJQDnTJWO3RU_n8yyhtyVh42iISlSPS0NjUamPUEcSSL6a6BN8JRsgL2s1bgMu6wRRPfCI7E3senfHvR-MDGGx_0CPmaU2RlyTUBBpS6j-FUzSrHTQtJJikoVDJlU9Z1Zt465ld4I"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-active:opacity-100 transition-opacity flex items-end p-3 justify-between">
+<span class="material-symbols-outlined text-white text-sm">bookmark</span>
+<span class="material-symbols-outlined text-white text-sm">add</span>
+</div>
+</div>
+<!-- Item 2 -->
+<div class="masonry-item relative group overflow-hidden rounded-lg border border-white/5 image-hover">
+<img class="w-full object-cover" data-alt="A wide cinematic landscape of a brutalist concrete structure at dusk. The sky is a gradient of deep indigo and soft amber. The lighting is low-key, highlighting the raw textures of the stone and the sharp geometric shadows. The aesthetic is scholarly and precise, with a focus on architectural symmetry and silent infinite depth." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBx1h86_fY-nJO-iaGzT0XmsZqsdCl48Pn0JG7Tr3STtX9KG0TRZ7294mRNCMM9Poy5X6L4Cs5EQxt_pCixgMYirq44hewZ5Fs_v0cwwwHFnu9efb7y9UCxZLFcmftIcYu96GG6HPq0c41N3WoS--EfXBtb5OJghITfSNtk42PHs8dJWJttws9z7A4-xBdD8pvabxbXRelux8w9CGz2_RqQd_uAh3VrF9uSO-IY-FuBhxO94vdK0GvTMXbu7RpgmdickEd7r-aAOIg"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-active:opacity-100 transition-opacity flex items-end p-3 justify-between">
+<span class="material-symbols-outlined text-white text-sm">bookmark</span>
+<span class="material-symbols-outlined text-white text-sm">add</span>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="masonry-item relative group overflow-hidden rounded-lg border border-white/5 image-hover">
+<img class="w-full object-cover" data-alt="An extreme close-up of a human eye reflecting a complex digital interface. The lighting is cool-toned with vibrant emerald accents, creating a futuristic, technical mood. The image has a sharp, high-definition quality with shallow depth of field, emphasizing the tactile nature of the iris and the glass-like surface of the eye." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCtZgsE5Wgw3_NgdO84a_3ZQh13zv8S4qdMf1sbUczlB-XCgplyz7LOTUf-DedxjM7RhhjEhOZoIxcalNMLyR0mVZ8q7sWcCFr22HkF8w01lRsLKCtAmPZXm8E9ptzQpwLmdoa9j4bWfSl6gAkK9bwNE7uo79odYEksbYJc_iDSJtg4xcQH2rYXrQ48KUYmKnkM3Sb_n7Z0oKkvU4A1IIUYKqrHsBphK7dql5iINfAuYphx58NZlp7mDg8EvReoFlPBjUTMKXitW3E"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-active:opacity-100 transition-opacity flex items-end p-3 justify-between">
+<span class="material-symbols-outlined text-white text-sm">bookmark</span>
+<span class="material-symbols-outlined text-white text-sm">add</span>
+</div>
+</div>
+<!-- Item 4 -->
+<div class="masonry-item relative group overflow-hidden rounded-lg border border-white/5 image-hover">
+<img class="w-full object-cover" data-alt="A blurred, unsettling crowd scene in a dark subway station. One face is slightly sharper than the rest, staring directly into the camera with an enigmatic expression. The color palette consists of muted earthy tones and deep blacks, with a gritty, film-grain texture that adds to the cinematic archive feel." src="https://lh3.googleusercontent.com/aida-public/AB6AXuASe46SKta30Wh8k5H9xfPHsjTOm_hgfVzjq9UHcZbTO2ngbwsTw5G4ThphoUXX2V9jR2CkaJV97TW0q2oY0zNVL-jclmAfQzKErFi0azndAUTIdon4xQI9V8xXzb4UdaptBo3ufaBoQoovC2ufwFU05nzSF_dUYHu4jimRbsNswjLGsopCE3wwc-BBNfq_HOwqOQnwyu_NK0LPr_XVbU9sWdZ5IFzYNMZMXNHY4t7AafNfZ9GqyFsUS6LFzHBaU9sPkug5Fdg6qr8"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-active:opacity-100 transition-opacity flex items-end p-3 justify-between">
+<span class="material-symbols-outlined text-white text-sm">bookmark</span>
+<span class="material-symbols-outlined text-white text-sm">add</span>
+</div>
+</div>
+<!-- Item 5 -->
+<div class="masonry-item relative group overflow-hidden rounded-lg border border-white/5 image-hover">
+<img class="w-full object-cover" data-alt="A minimalist overhead shot of an old library table scattered with film canisters and yellowed scripts. Warm gold light streams from a window, creating long, soft shadows. The visual style is archive-inspired, celebrating the history of cinema through a clean, modern lens with high-end tactile details." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCr1sxtxaDCUnXtKyqWqSpU5snuzhD97pcqVD3Mtjbibmhime0MCdW52sZSC-90MNYmTEaYb44jcT2x5OiENkP7ONolJ-kqU_u6wa3qgStsgoN0JDdbK7z3tZjBDPX-VjdvrbLbfgWmgGD4qm_Zdf95812r3cU8lyi6gu7lxfL7SNh5CyRh2UWJc9Ng22-1vb5mJOj8EUABIsfMsmLZduJBWccD1YL53l8LwIkA6GSSnLRSHr0VqD-v6wPh12QcRnAMisNN2lDUGUE"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-active:opacity-100 transition-opacity flex items-end p-3 justify-between">
+<span class="material-symbols-outlined text-white text-sm">bookmark</span>
+<span class="material-symbols-outlined text-white text-sm">add</span>
+</div>
+</div>
+<!-- Item 6 -->
+<div class="masonry-item relative group overflow-hidden rounded-lg border border-white/5 image-hover">
+<img class="w-full object-cover" data-alt="A vibrant, high-key shot of a neon-lit city street reflected in a puddle after a rainstorm. The palette is a mix of electric blues and warm golds against a void-like black background. The composition is staggered and asymmetric, prioritizing the visual rhythm of light and reflection over a literal subject." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAgv4xrTEjOYtMbvxNSs9smlNpwakcX7jNuFfbNNhP1Z2NBOKdH1nLQ6xQO4UiS2flFUycsqVSCn8ehFcn_oykX0n3u6pU2fR_E3_30xKpTzJvH6A2cqI7ppDZ-qhAb0Z4166LmNqind8Bs8ipReD2fhqmC3ypN6sm5UitTIjctrhmg7tngFQhlS2WgbnDJ3lqE3qoRV3Dj0lsGgS1ducO2dCBUBO9Hd7gUlfH1zY_qM4HXH-5QshMfFUBN0Md8zRtUVHq_YgRx-LU"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-active:opacity-100 transition-opacity flex items-end p-3 justify-between">
+<span class="material-symbols-outlined text-white text-sm">bookmark</span>
+<span class="material-symbols-outlined text-white text-sm">add</span>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 bg-surface/90 backdrop-blur-2xl border-t border-outline-variant/20 flex justify-around items-center px-6 pb-safe h-20 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] rounded-t-xl">
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 active:scale-90 transition-transform duration-200 hover:text-primary/80 transition-colors" href="#">
+<span class="material-symbols-outlined">home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-primary relative after:content-[''] after:absolute after:-bottom-1 after:w-1 after:h-1 after:bg-primary after:rounded-full active:scale-90 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined fill-icon" style="font-variation-settings: 'FILL' 1;">search</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 active:scale-90 transition-transform duration-200 hover:text-primary/80 transition-colors" href="#">
+<span class="material-symbols-outlined">bookmark</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 active:scale-90 transition-transform duration-200 hover:text-primary/80 transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+</a>
+</nav>
+<script>
+        // Simple micro-interaction for long-press simulation on mobile cards
+        const items = document.querySelectorAll('.image-hover');
+        items.forEach(item => {
+            let pressTimer;
+            
+            item.addEventListener('touchstart', (e) => {
+                pressTimer = setTimeout(() => {
+                    item.querySelector('.material-symbols-outlined').style.transform = 'scale(1.2)';
+                }, 500);
+            });
+            
+            item.addEventListener('touchend', () => {
+                clearTimeout(pressTimer);
+            });
+        });
+
+        // Hide navigation on scroll down for better immersive feel
+        let lastScrollTop = 0;
+        const nav = document.querySelector('nav');
+        const header = document.querySelector('header');
+        
+        window.addEventListener('scroll', () => {
+            let scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+            if (scrollTop > lastScrollTop && scrollTop > 100) {
+                nav.style.transform = 'translateY(100%)';
+                header.style.transform = 'translateY(-100%)';
+            } else {
+                nav.style.transform = 'translateY(0)';
+                header.style.transform = 'translateY(0)';
+            }
+            nav.style.transition = 'transform 0.3s ease-out';
+            header.style.transition = 'transform 0.3s ease-out';
+            lastScrollTop = scrollTop;
+        });
+    </script>
+</body></html>
