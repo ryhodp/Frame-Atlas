@@ -1,25 +1,42 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ImageDetail from '../components/ImageDetail';
 
+const PRESET_SWATCHES = [
+  '#D9A441', '#E08840', '#B33A3A', '#C75B8B',
+  '#7B5BC7', '#3A5BB3', '#2E8B8B', '#6FA3B8',
+  '#4E7A3A', '#8A7A3A', '#E8DFC8', '#1A1A1E'
+];
+
 export default function Home() {
   const [chips, setChips] = useState([]);
+  const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
+  const [color, setColor] = useState(null);           // active hex or null
   const [searchText, setSearchText] = useState('');
   const [autocomplete, setAutocomplete] = useState([]);
   const [showAuto, setShowAuto] = useState(false);
+  const [interpreting, setInterpreting] = useState(false);
   const [images, setImages] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [selectedImageId, setSelectedImageId] = useState(null);
+  const [selectedImage, setSelectedImage] = useState(null);
+
+  const [bookmarks, setBookmarks] = useState([]);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [saveName, setSaveName] = useState('');
 
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
 
-  // ── Fetch images whenever chips change ──────────────────────────────────────
-  const fetchImages = useCallback(async (activeChips) => {
+  const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color;
+
+  // ── Fetch images whenever any filter changes ────────────────────────────────
+  const fetchImages = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (activeChips.length) params.set('chips', activeChips.join(','));
+      if (chips.length) params.set('chips', chips.join(','));
+      if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
+      if (color) params.set('color', color);
       const res = await fetch(`/api/search?${params}`);
       const data = await res.json();
       setImages(data.images || []);
@@ -28,9 +45,19 @@ export default function Home() {
       console.error('Search failed', e);
     }
     setLoading(false);
+  }, [chips, nlChips, color]);
+
+  useEffect(() => { fetchImages(); }, [fetchImages]);
+
+  // ── Load bookmarks on mount ─────────────────────────────────────────────────
+  const loadBookmarks = useCallback(async () => {
+    try {
+      const res = await fetch('/api/bookmarks');
+      setBookmarks(await res.json());
+    } catch {}
   }, []);
 
-  useEffect(() => { fetchImages(chips); }, [chips]);
+  useEffect(() => { loadBookmarks(); }, [loadBookmarks]);
 
   // ── Autocomplete: fire 120ms after user stops typing ────────────────────────
   useEffect(() => {
@@ -52,10 +79,11 @@ export default function Home() {
     }, 120);
   }, [searchText, chips]);
 
-  // ── Close autocomplete when clicking outside ────────────────────────────────
+  // ── Close dropdowns when clicking outside ───────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
       if (!e.target.closest('[data-search-area]')) setShowAuto(false);
+      if (!e.target.closest('[data-bookmark-area]')) setShowBookmarks(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -70,11 +98,83 @@ export default function Home() {
   };
 
   const removeChip = (tag) => setChips(prev => prev.filter(t => t !== tag));
+  const removeNlChip = (phrase) => setNlChips(prev => prev.filter(n => n.phrase !== phrase));
+
+  const clearAll = () => {
+    setChips([]);
+    setNlChips([]);
+    setColor(null);
+  };
+
+  // ── NL fallback: interpret free text via Gemini ─────────────────────────────
+  const interpretPhrase = async (phrase) => {
+    setInterpreting(true);
+    setShowAuto(false);
+    try {
+      const res = await fetch('/api/interpret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phrase })
+      });
+      const data = await res.json();
+      if (data.tags && data.tags.length) {
+        setNlChips(prev =>
+          prev.some(n => n.phrase === phrase) ? prev : [...prev, { phrase, tags: data.tags }]
+        );
+        setSearchText('');
+      }
+    } catch (e) {
+      console.error('Interpret failed', e);
+    }
+    setInterpreting(false);
+    searchRef.current?.focus();
+  };
+
+  const handleEnter = () => {
+    const text = searchText.trim();
+    if (!text) return;
+    if (autocomplete.length > 0) {
+      addChip(autocomplete[0].value);
+    } else {
+      interpretPhrase(text);
+    }
+  };
+
+  // ── Bookmarks ───────────────────────────────────────────────────────────────
+  const saveBookmark = async () => {
+    const name = saveName.trim();
+    if (!name || !hasFilters) return;
+    try {
+      await fetch('/api/bookmarks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, state: { chips, nlChips, color } })
+      });
+      setSaveName('');
+      loadBookmarks();
+    } catch (e) {
+      console.error('Save bookmark failed', e);
+    }
+  };
+
+  const applyBookmark = (bm) => {
+    setChips(bm.state.chips || []);
+    setNlChips(bm.state.nlChips || []);
+    setColor(bm.state.color || null);
+    setShowBookmarks(false);
+  };
+
+  const deleteBookmark = async (id, e) => {
+    e.stopPropagation();
+    try {
+      await fetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
+      loadBookmarks();
+    } catch {}
+  };
 
   // ── Build masonry-style rows from images ────────────────────────────────────
   const buildRows = (imgs, rowH = 220, gap = 8) => {
-    // Use a wide estimate — the grid will flex to fill the actual container
-    const containerW = window.innerWidth - 280; // minus sidebar
+    const containerW = window.innerWidth - 280;
     const rows = [];
     let row = [];
     let rowW = 0;
@@ -116,46 +216,184 @@ export default function Home() {
           zIndex: 40
         }}
       >
-        {/* Input */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '12px',
-          background: '#18181b',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: '10px',
-          padding: '0 14px',
-          height: '46px'
-        }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-            stroke="rgba(255,255,255,0.3)" strokeWidth="2">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-          <input
-            ref={searchRef}
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && autocomplete.length > 0) addChip(autocomplete[0].value);
-              if (e.key === 'Escape') { setShowAuto(false); setSearchText(''); }
-            }}
-            onFocus={() => { if (autocomplete.length) setShowAuto(true); }}
-            placeholder="Search tags — type to filter…"
-            style={{
-              flex: 1, background: 'transparent', border: 'none', outline: 'none',
-              color: '#efeadd', fontFamily: 'inherit', fontSize: '14px'
-            }}
-          />
-          <span style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '10px', color: '#65625a',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: '4px', padding: '2px 6px'
-          }}>⌘K</span>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {/* Input */}
+          <div style={{
+            flex: 1,
+            display: 'flex', alignItems: 'center', gap: '12px',
+            background: '#18181b',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '10px',
+            padding: '0 14px',
+            height: '46px'
+          }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+              stroke="rgba(255,255,255,0.3)" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input
+              ref={searchRef}
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleEnter();
+                if (e.key === 'Escape') { setShowAuto(false); setSearchText(''); }
+              }}
+              onFocus={() => { if (autocomplete.length) setShowAuto(true); }}
+              placeholder="Search tags — or describe a feeling and press Enter…"
+              disabled={interpreting}
+              style={{
+                flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                color: '#efeadd', fontFamily: 'inherit', fontSize: '14px'
+              }}
+            />
+            {interpreting && (
+              <span style={{
+                fontSize: '11px', color: '#8b7cf6',
+                display: 'flex', alignItems: 'center', gap: '6px'
+              }}>
+                <span style={{
+                  width: '10px', height: '10px',
+                  border: '2px solid rgba(139,124,246,0.25)',
+                  borderTopColor: '#8b7cf6',
+                  borderRadius: '50%', display: 'inline-block',
+                  animation: 'spin 0.7s linear infinite'
+                }} />
+                interpreting…
+              </span>
+            )}
+          </div>
+
+          {/* Bookmark button + dropdown */}
+          <div data-bookmark-area style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowBookmarks(v => !v)}
+              title="Saved searches"
+              style={{
+                height: '46px', width: '46px',
+                background: '#18181b',
+                border: `1px solid ${showBookmarks ? 'rgba(201,162,83,0.5)' : 'rgba(255,255,255,0.12)'}`,
+                borderRadius: '10px',
+                cursor: 'pointer',
+                color: showBookmarks ? '#dcbd76' : '#9c988d',
+                fontSize: '16px'
+              }}
+            >
+              ☆
+            </button>
+
+            {showBookmarks && (
+              <div style={{
+                position: 'absolute', top: '54px', right: 0,
+                width: '300px',
+                background: '#18181b',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: '10px',
+                boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
+                zIndex: 60,
+                animation: 'fapop 0.12s ease',
+                overflow: 'hidden'
+              }}>
+                {/* Save current */}
+                {hasFilters && (
+                  <div style={{
+                    padding: '12px 13px',
+                    borderBottom: '1px solid rgba(255,255,255,0.065)',
+                    display: 'flex', gap: '6px'
+                  }}>
+                    <input
+                      value={saveName}
+                      onChange={e => setSaveName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') saveBookmark(); }}
+                      placeholder="Name this search…"
+                      style={{
+                        flex: 1, background: '#0a0a0b',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '6px', padding: '7px 10px',
+                        color: '#efeadd', fontSize: '12px',
+                        fontFamily: 'inherit', outline: 'none'
+                      }}
+                    />
+                    <button
+                      onClick={saveBookmark}
+                      style={{
+                        background: 'rgba(201,162,83,0.12)',
+                        border: '1px solid rgba(201,162,83,0.35)',
+                        color: '#dcbd76', borderRadius: '6px',
+                        padding: '0 12px', fontSize: '12px',
+                        cursor: 'pointer', fontFamily: 'inherit'
+                      }}
+                    >
+                      Save
+                    </button>
+                  </div>
+                )}
+
+                {/* Saved list */}
+                <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
+                  {bookmarks.length === 0 && (
+                    <div style={{ padding: '16px 13px', fontSize: '12px', color: '#65625a' }}>
+                      {hasFilters
+                        ? 'No saved searches yet — name this one above.'
+                        : 'No saved searches yet. Add some filters, then save them here.'}
+                    </div>
+                  )}
+                  {bookmarks.map(bm => (
+                    <div
+                      key={bm.id}
+                      onClick={() => applyBookmark(bm)}
+                      style={{
+                        padding: '10px 13px',
+                        cursor: 'pointer',
+                        display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'center', gap: '8px'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#222226'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', color: '#efeadd' }}>{bm.name}</div>
+                        <div style={{
+                          fontSize: '10.5px', color: '#65625a',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                        }}>
+                          {[
+                            ...(bm.state.chips || []),
+                            ...(bm.state.nlChips || []).map(n => `“${n.phrase}”`),
+                            ...(bm.state.color ? [bm.state.color] : [])
+                          ].join(' · ') || 'empty'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        {bm.state.color && (
+                          <span style={{
+                            width: '12px', height: '12px', borderRadius: '3px',
+                            background: bm.state.color,
+                            border: '1px solid rgba(255,255,255,0.15)'
+                          }} />
+                        )}
+                        <button
+                          onClick={(e) => deleteBookmark(bm.id, e)}
+                          style={{
+                            background: 'none', border: 'none', color: '#65625a',
+                            cursor: 'pointer', fontSize: '14px', padding: '2px'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.color = '#cf7152'}
+                          onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+                        >×</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Autocomplete dropdown */}
         {showAuto && autocomplete.length > 0 && (
           <div style={{
-            position: 'absolute', top: '68px', left: '20px', right: '20px',
+            position: 'absolute', top: '68px', left: '20px', right: '74px',
             background: '#18181b',
             border: '1px solid rgba(255,255,255,0.12)',
             borderRadius: '10px',
@@ -202,8 +440,73 @@ export default function Home() {
           </div>
         )}
 
-        {/* Active chips */}
-        {chips.length > 0 && (
+        {/* Color swatch strip */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '7px', marginTop: '12px'
+        }}>
+          <span style={{
+            fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em',
+            color: '#65625a', marginRight: '2px'
+          }}>COLOR</span>
+          {PRESET_SWATCHES.map(hex => (
+            <button
+              key={hex}
+              title={hex}
+              onClick={() => setColor(c => c === hex ? null : hex)}
+              style={{
+                width: '20px', height: '20px', borderRadius: '50%',
+                background: hex,
+                border: color === hex
+                  ? '2px solid #efeadd'
+                  : '1px solid rgba(255,255,255,0.15)',
+                cursor: 'pointer', padding: 0,
+                transform: color === hex ? 'scale(1.15)' : 'scale(1)',
+                transition: 'transform 0.12s ease'
+              }}
+            />
+          ))}
+          {/* Color wheel — custom pick, like Sidus Link */}
+          <label
+            title="Pick a custom color"
+            style={{
+              width: '20px', height: '20px', borderRadius: '50%',
+              background: 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)',
+              border: color && !PRESET_SWATCHES.includes(color)
+                ? '2px solid #efeadd'
+                : '1px solid rgba(255,255,255,0.15)',
+              cursor: 'pointer', position: 'relative', overflow: 'hidden',
+              transform: color && !PRESET_SWATCHES.includes(color) ? 'scale(1.15)' : 'scale(1)',
+              transition: 'transform 0.12s ease'
+            }}
+          >
+            <input
+              type="color"
+              value={color || '#D9A441'}
+              onChange={e => setColor(e.target.value)}
+              style={{
+                position: 'absolute', inset: 0, opacity: 0,
+                width: '100%', height: '100%', cursor: 'pointer'
+              }}
+            />
+          </label>
+          {color && (
+            <button
+              onClick={() => setColor(null)}
+              style={{
+                background: 'none', border: 'none', color: '#65625a',
+                cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
+                padding: '2px 4px'
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = '#cf7152'}
+              onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+            >
+              clear color
+            </button>
+          )}
+        </div>
+
+        {/* Active chips (tags + NL phrases) */}
+        {(chips.length > 0 || nlChips.length > 0) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginTop: '12px' }}>
             {chips.map(chip => (
               <span key={chip} style={{
@@ -226,8 +529,38 @@ export default function Home() {
                 >×</button>
               </span>
             ))}
+
+            {/* NL phrase chips — styled differently (violet, italic, quoted) */}
+            {nlChips.map(nl => (
+              <span
+                key={nl.phrase}
+                title={`Interpreted as: ${nl.tags.join(', ')}`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  background: 'rgba(139,124,246,0.12)',
+                  border: '1px dashed rgba(139,124,246,0.45)',
+                  borderRadius: '6px',
+                  padding: '4px 8px 4px 9px',
+                  fontSize: '12.5px', color: '#a99bf7',
+                  fontStyle: 'italic'
+                }}
+              >
+                “{nl.phrase}”
+                <button
+                  onClick={() => removeNlChip(nl.phrase)}
+                  style={{
+                    background: 'none', border: 'none', color: '#a99bf7',
+                    cursor: 'pointer', padding: 0, fontSize: '14px',
+                    lineHeight: 1, opacity: 0.6, fontStyle: 'normal'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
+                >×</button>
+              </span>
+            ))}
+
             <button
-              onClick={() => setChips([])}
+              onClick={clearAll}
               style={{
                 background: 'none', border: 'none', color: '#65625a',
                 cursor: 'pointer', fontSize: '12px', padding: '4px 6px',
@@ -253,9 +586,9 @@ export default function Home() {
           fontSize: '12px', color: '#9c988d'
         }}>
           <span style={{ color: '#efeadd', fontWeight: 500 }}>{total}</span> images
-          {chips.length > 0 && (
+          {hasFilters && (
             <span style={{ color: '#65625a' }}>
-              {' '}· {chips.length} filter{chips.length > 1 ? 's' : ''} active
+              {' '}· {chips.length + nlChips.length + (color ? 1 : 0)} filter{(chips.length + nlChips.length + (color ? 1 : 0)) > 1 ? 's' : ''} active
             </span>
           )}
         </span>
@@ -286,11 +619,11 @@ export default function Home() {
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
             </svg>
             <p style={{ fontSize: '14px', color: '#9c988d' }}>
-              {chips.length > 0 ? 'No images match this filter' : 'No images yet — run a sync first'}
+              {hasFilters ? 'No images match this filter' : 'No images yet — run a sync first'}
             </p>
-            {chips.length > 0 && (
+            {hasFilters && (
               <button
-                onClick={() => setChips([])}
+                onClick={clearAll}
                 style={{
                   fontSize: '12px', color: '#dcbd76', background: 'none',
                   border: '1px solid rgba(201,162,83,0.3)',
@@ -310,7 +643,7 @@ export default function Home() {
             {row.map(img => (
               <div
                 key={img.id}
-                onClick={() => setSelectedImageId(img.id)}
+                onClick={() => setSelectedImage(img)}
                 style={{
                   flex: `${img.ar_float || 1.78} 1 0`,
                   position: 'relative',
@@ -411,10 +744,10 @@ export default function Home() {
       </div>
 
       {/* Detail panel */}
-      {selectedImageId && (
+      {selectedImage && (
         <ImageDetail
-          imageId={selectedImageId}
-          onClose={() => setSelectedImageId(null)}
+          image={selectedImage}
+          onClose={() => setSelectedImage(null)}
         />
       )}
 

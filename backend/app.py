@@ -97,6 +97,30 @@ camera_format: 35mm-film, 16mm-film, anamorphic, spherical, digital, arri, red, 
 For filmography: only fill in if this is clearly a recognizable film still. Otherwise leave null.
 Return ONLY the JSON. No other text."""
 
+NL_INTERPRET_PROMPT = """You translate a cinematographer's search phrase into tags from a fixed taxonomy.
+
+ALLOWED TAGS (use ONLY these, exactly as written):
+mood: lonely, intimate, tense, ominous, serene, chaotic, melancholic, warm, euphoric, epic, mundane, dreamlike, claustrophobic, vast
+lighting_quality: hard, soft, motivated, unmotivated, single-source, practical-heavy, high-key, low-key, no-fill, bounce-heavy, silhouette, chiaroscuro
+lighting_color_temperature: warm-tungsten, cool-daylight, mixed-sources, green-practical, neon, firelight, moonlight
+color_palette: desaturated, high-contrast, monochromatic, warm-palette, cool-palette, earthy, high-saturation, bleach-bypass, golden, teal-orange
+shot_type: extreme-wide, wide, medium-wide, medium, close-up, extreme-close-up, aerial, POV, over-shoulder, two-shot
+framing_composition: centered, rule-of-thirds, dutch-angle, low-angle, high-angle, eye-level, negative-space, symmetrical, foreground-frame
+location_type: interior, exterior, diner, hospital, warehouse, rooftop, forest, urban-street, office, home, car, bar, stage, industrial, desert, water
+time_of_day_weather: golden-hour, magic-hour, midday, blue-hour, night, overcast, dawn, rain, fog, snow, harsh-sun
+source_type: film-still, BTS, production-still, mood-texture, abstract
+subject_count: no-subject, solo, pair, group, crowd
+subject_camera_relationship: looking-at-camera, looking-away, profile, back-to-camera
+performance_emotion: joy, grief, fear, rage, longing, neutral, shock, tenderness, defiance
+genre_aesthetic: horror, western, sci-fi, romance, documentary, thriller, noir, drama, comedy, action
+era_decade: period-piece, 70s, 80s, 90s, contemporary, futuristic
+camera_format: 35mm-film, 16mm-film, anamorphic, spherical, digital, arri, red, sony, blackmagic
+
+Pick the 2-5 tags that best capture the FEELING and VISUAL QUALITIES of the phrase.
+Return ONLY a JSON array of tag strings, e.g. ["lonely","low-key","night"]. No markdown, no explanation.
+
+Phrase: """
+
 # ============================================================================
 # DATABASE INITIALIZATION
 # ============================================================================
@@ -472,6 +496,43 @@ def get_image_aspect_ratio(image_data):
     except Exception:
         return "16:9"
 
+def extract_palette(image_data, num_colors=5):
+    try:
+        img = Image.open(io.BytesIO(image_data)).convert('RGB')
+        img.thumbnail((100, 100))
+        quantized = img.quantize(colors=num_colors)
+        palette = quantized.getpalette()
+        color_counts = sorted(quantized.getcolors(), reverse=True)
+        hexes = []
+        for count, idx in color_counts[:num_colors]:
+            r, g, b = palette[idx * 3: idx * 3 + 3]
+            hexes.append(f'#{r:02x}{g:02x}{b:02x}')
+        return hexes
+    except Exception:
+        return []
+
+def save_palette(image_id, user_id, hexes):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DELETE FROM colors WHERE image_id = ?', (image_id,))
+    for rank, hex_color in enumerate(hexes):
+        c.execute(
+            'INSERT INTO colors (image_id, user_id, hex, rank) VALUES (?, ?, ?, ?)',
+            (image_id, user_id, hex_color, rank)
+        )
+    conn.commit()
+    conn.close()
+
+def hex_to_rgb(hex_color):
+    h = hex_color.lstrip('#')
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+def color_distance(hex_a, hex_b):
+    ra, ga, ba = hex_to_rgb(hex_a)
+    rb, gb, bb = hex_to_rgb(hex_b)
+    # Weighted RGB distance — human eyes are most sensitive to green
+    return ((rb - ra) * 0.30) ** 2 + ((gb - ga) * 0.59) ** 2 + ((bb - ba) * 0.11) ** 2
+
 def sync_folder_worker(folder_id, user_id):
     global sync_state
     try:
@@ -526,8 +587,13 @@ def sync_folder_worker(folder_id, user_id):
                     INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio, tagging_status)
                     VALUES (?, ?, ?, ?, ?, 'pending')
                 ''', (user_id, file_id, filename, thumbnail, aspect_ratio))
+                new_image_id = c.lastrowid
                 conn.commit()
                 conn.close()
+
+                hexes = extract_palette(thumbnail)
+                if hexes:
+                    save_palette(new_image_id, user_id, hexes)
 
                 new_count += 1
                 sync_state['processed'] += 1
@@ -573,7 +639,7 @@ def debug():
 
 @app.route('/api/config', methods=['GET'])
 def config():
-    return jsonify({'app_name': 'Frame Atlas', 'version': 'V4'})
+    return jsonify({'app_name': 'Frame Atlas', 'version': 'V5'})
 
 @app.route('/api/folders', methods=['GET'])
 def get_folders():
@@ -677,7 +743,60 @@ def tag_progress_snapshot():
     with _tag_progress_lock:
         data = dict(_tag_progress)
     pct = int(data['done'] / data['total'] * 100) if data['total'] > 0 else 0
-    return jsonify({**data, 'pct': pct})
+
+    conn = get_db()
+    c = conn.cursor()
+    counts = {}
+    for row in c.execute("SELECT tagging_status, COUNT(*) as n FROM images GROUP BY tagging_status").fetchall():
+        counts[row['tagging_status']] = row['n']
+    tag_rows = c.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
+    conn.close()
+
+    return jsonify({**data, 'pct': pct, 'status_counts': counts, 'total_tag_rows': tag_rows})
+
+@app.route('/api/tag/start', methods=['POST'])
+def tag_start():
+    force = request.args.get('force') == 'true'
+    with _tag_progress_lock:
+        if _tag_progress['running']:
+            return jsonify({'error': 'Tagging already in progress'}), 400
+
+    if force:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("UPDATE images SET tagging_status = 'pending'")
+        conn.commit()
+        conn.close()
+
+    trigger_tagging()
+    return jsonify({'success': True, 'message': 'Tagging started', 'force': force})
+
+@app.route('/api/interpret', methods=['POST'])
+def interpret_nl():
+    phrase = (request.get_json() or {}).get('phrase', '').strip()
+    if not phrase:
+        return jsonify({'error': 'No phrase provided'}), 400
+
+    gemini_api_key = os.environ.get('GEMINI_API_KEY')
+    if not gemini_api_key:
+        return jsonify({'error': 'GEMINI_API_KEY not set'}), 500
+
+    try:
+        client = genai_client.Client(api_key=gemini_api_key)
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=[NL_INTERPRET_PROMPT + phrase]
+        )
+        raw = response.text.strip()
+        if raw.startswith('```'):
+            raw = raw.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+        tags = json.loads(raw)
+        if not isinstance(tags, list):
+            return jsonify({'error': 'Bad interpretation'}), 500
+        tags = [str(t).strip() for t in tags if str(t).strip()][:5]
+        return jsonify({'phrase': phrase, 'tags': tags})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/autocomplete')
 def autocomplete():
@@ -751,37 +870,65 @@ def autocomplete():
 @app.route('/api/search')
 def search():
     chips_raw = request.args.get('chips', '').strip()
+    nl_raw = request.args.get('nl', '').strip()
+    color_raw = request.args.get('color', '').strip()
     page = int(request.args.get('page', 0))
     per = int(request.args.get('per', 50))
     active_chips = [t.strip() for t in chips_raw.split(',') if t.strip()] if chips_raw else []
 
+    # NL groups: JSON array of tag arrays. Image must match >=1 tag per group.
+    nl_groups = []
+    if nl_raw:
+        try:
+            parsed = json.loads(nl_raw)
+            nl_groups = [[str(t) for t in g] for g in parsed if isinstance(g, list) and g]
+        except Exception:
+            nl_groups = []
+
     conn = get_db()
     c = conn.cursor()
 
-    if not active_chips:
-        rows = c.execute('''
-            SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
-            FROM images ORDER BY date_added DESC LIMIT ? OFFSET ?
-        ''', (per, page * per)).fetchall()
-        total = c.execute('SELECT COUNT(*) FROM images').fetchone()[0]
-    else:
+    conditions = []
+    params = []
+
+    if active_chips:
         placeholders = ','.join('?' * len(active_chips))
-        rows = c.execute(f'''
-            SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
-            FROM images
-            WHERE id IN (
-                SELECT image_id FROM tags WHERE value IN ({placeholders})
-                GROUP BY image_id HAVING COUNT(DISTINCT value) = ?
-            )
-            ORDER BY date_added DESC LIMIT ? OFFSET ?
-        ''', active_chips + [len(active_chips), per, page * per]).fetchall()
-        total = c.execute(f'''
-            SELECT COUNT(*) FROM images
-            WHERE id IN (
-                SELECT image_id FROM tags WHERE value IN ({placeholders})
-                GROUP BY image_id HAVING COUNT(DISTINCT value) = ?
-            )
-        ''', active_chips + [len(active_chips)]).fetchone()[0]
+        conditions.append(f'''id IN (
+            SELECT image_id FROM tags WHERE value IN ({placeholders})
+            GROUP BY image_id HAVING COUNT(DISTINCT value) = ?
+        )''')
+        params.extend(active_chips + [len(active_chips)])
+
+    for group in nl_groups:
+        gph = ','.join('?' * len(group))
+        conditions.append(f'id IN (SELECT image_id FROM tags WHERE value IN ({gph}))')
+        params.extend(group)
+
+    if color_raw:
+        # Small library — compute color matches in Python
+        threshold = 2200
+        matched_ids = set()
+        for row in c.execute('SELECT DISTINCT image_id, hex FROM colors').fetchall():
+            try:
+                if color_distance(color_raw, row['hex']) < threshold:
+                    matched_ids.add(row['image_id'])
+            except Exception:
+                continue
+        if matched_ids:
+            cph = ','.join('?' * len(matched_ids))
+            conditions.append(f'id IN ({cph})')
+            params.extend(list(matched_ids))
+        else:
+            conditions.append('1 = 0')
+
+    where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
+
+    rows = c.execute(f'''
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
+        FROM images {where}
+        ORDER BY date_added DESC LIMIT ? OFFSET ?
+    ''', params + [per, page * per]).fetchall()
+    total = c.execute(f'SELECT COUNT(*) FROM images {where}', params).fetchone()[0]
 
     img_ids = [r['id'] for r in rows]
     tags_map = {}
@@ -820,6 +967,51 @@ def search():
         })
 
     return jsonify({'images': images_out, 'total': total, 'page': page, 'per': per, 'has_more': (page + 1) * per < total})
+
+@app.route('/api/bookmarks', methods=['GET', 'POST'])
+def bookmarks():
+    user_id = request.args.get('user_id', 1)
+
+    if request.method == 'GET':
+        conn = get_db()
+        c = conn.cursor()
+        rows = c.execute('''
+            SELECT id, name, chips_json, created_at FROM saved_searches
+            WHERE user_id = ? ORDER BY created_at DESC
+        ''', (user_id,)).fetchall()
+        conn.close()
+        out = []
+        for r in rows:
+            try:
+                state = json.loads(r['chips_json'] or '{}')
+            except Exception:
+                state = {}
+            out.append({'id': r['id'], 'name': r['name'], 'state': state, 'created_at': r['created_at']})
+        return jsonify(out)
+
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    state = data.get('state') or {}
+    if not name:
+        return jsonify({'error': 'Name required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO saved_searches (user_id, name, chips_json) VALUES (?, ?, ?)',
+              (user_id, name, json.dumps(state)))
+    conn.commit()
+    new_id = c.lastrowid
+    conn.close()
+    return jsonify({'success': True, 'id': new_id})
+
+@app.route('/api/bookmarks/<int:bookmark_id>', methods=['DELETE'])
+def delete_bookmark(bookmark_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DELETE FROM saved_searches WHERE id = ?', (bookmark_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
 
 @app.route('/api/images', methods=['GET'])
 def get_images():
@@ -870,36 +1062,47 @@ def get_full_image(image_id):
 @app.route('/api/regenerate-thumbnails', methods=['POST'])
 def regenerate_thumbnails():
     def _regenerate_job():
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('SELECT id, drive_file_id FROM images ORDER BY id DESC')
-        images = c.fetchall()
-        conn.close()
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            c.execute('SELECT id, user_id, drive_file_id FROM images ORDER BY id DESC')
+            images = c.fetchall()
+            conn.close()
 
-        service = get_drive_service()
-        for img in images:
-            try:
-                file_id = img['drive_file_id']
-                req = service.files().get_media(fileId=file_id)
-                fh = io.BytesIO()
-                downloader = MediaIoBaseDownload(fh, req)
-                done = False
-                while not done:
-                    status, done = downloader.next_chunk()
+            sync_state['total'] = len(images)
+            sync_state['processed'] = 0
 
-                image_data = fh.getvalue()
-                thumbnail = generate_thumbnail(image_data)
+            service = get_drive_service()
+            for img in images:
+                try:
+                    sync_state['current_file'] = f"regenerating #{img['id']}"
+                    file_id = img['drive_file_id']
+                    req = service.files().get_media(fileId=file_id)
+                    fh = io.BytesIO()
+                    downloader = MediaIoBaseDownload(fh, req)
+                    done = False
+                    while not done:
+                        status, done = downloader.next_chunk()
 
-                if thumbnail:
-                    conn = get_db()
-                    c = conn.cursor()
-                    c.execute('UPDATE images SET thumbnail_blob = ? WHERE id = ?', (thumbnail, img['id']))
-                    conn.commit()
-                    conn.close()
-            except Exception as e:
-                print(f"[regenerate] Failed {img['id']}: {e}")
-                continue
-        print("[regenerate] All thumbnails updated")
+                    image_data = fh.getvalue()
+                    thumbnail = generate_thumbnail(image_data)
+
+                    if thumbnail:
+                        conn = get_db()
+                        c = conn.cursor()
+                        c.execute('UPDATE images SET thumbnail_blob = ? WHERE id = ?', (thumbnail, img['id']))
+                        conn.commit()
+                        conn.close()
+
+                        hexes = extract_palette(thumbnail)
+                        if hexes:
+                            save_palette(img['id'], img['user_id'], hexes)
+                except Exception as e:
+                    print(f"[regenerate] Failed {img['id']}: {e}")
+                sync_state['processed'] += 1
+            print("[regenerate] All thumbnails updated")
+        finally:
+            sync_state['in_progress'] = False
 
     if sync_state['in_progress']:
         return jsonify({'error': 'Sync already in progress'}), 400
@@ -909,6 +1112,27 @@ def regenerate_thumbnails():
     thread.start()
 
     return jsonify({'success': True, 'message': 'Thumbnail regeneration started'})
+
+@app.route('/api/extract-colors', methods=['POST'])
+def extract_colors():
+    """Backfill palettes from stored thumbnails — no Drive downloads needed."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, user_id, thumbnail_blob FROM images
+        WHERE id NOT IN (SELECT DISTINCT image_id FROM colors)
+    ''')
+    images = c.fetchall()
+    conn.close()
+
+    count = 0
+    for img in images:
+        hexes = extract_palette(img['thumbnail_blob'])
+        if hexes:
+            save_palette(img['id'], img['user_id'], hexes)
+            count += 1
+
+    return jsonify({'success': True, 'extracted': count, 'skipped': len(images) - count})
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

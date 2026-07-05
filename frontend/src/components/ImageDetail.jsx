@@ -1,36 +1,34 @@
 import { useEffect, useState } from 'react';
 
-export default function ImageDetail({ imageId, onClose }) {
-  const [image, setImage] = useState(null);
+export default function ImageDetail({ image, onClose }) {
   const [fullImage, setFullImage] = useState(null);
-  const [filmography, setFilmography] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [fullError, setFullError] = useState(false);
 
   useEffect(() => {
-    if (!imageId) return;
+    if (!image) return;
+    let objectUrl = null;
+    setFullImage(null);
+    setFullError(false);
 
-    const fetchImage = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/images?user_id=1`);
-        const data = await res.json();
-        const img = data.images.find(i => i.id === imageId);
-        if (img) {
-          setImage(img);
-          const fullRes = await fetch(`/api/images/${imageId}/full`);
-          if (fullRes.ok) {
-            const blob = await fullRes.blob();
-            setFullImage(URL.createObjectURL(blob));
-          }
-        }
-      } catch (e) {
-        console.error('Failed to load image detail', e);
-      }
-      setLoading(false);
-    };
+    fetch(`/api/images/${image.id}/full`)
+      .then(res => {
+        if (!res.ok) throw new Error('full-res failed');
+        return res.blob();
+      })
+      .then(blob => {
+        objectUrl = URL.createObjectURL(blob);
+        setFullImage(objectUrl);
+      })
+      .catch(() => setFullError(true));
 
-    fetchImage();
-  }, [imageId]);
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [image?.id]);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
 
   if (!image) return null;
 
@@ -57,6 +55,8 @@ export default function ImageDetail({ imageId, onClose }) {
     'source_type', 'subject_count', 'subject_camera_relationship', 'performance_emotion',
     'genre_aesthetic', 'era_decade', 'camera_format'
   ];
+
+  const hasTags = (image.tags || []).length > 0;
 
   return (
     <>
@@ -91,53 +91,63 @@ export default function ImageDetail({ imageId, onClose }) {
           borderBottom: '1px solid rgba(255,255,255,0.065)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center'
         }}>
-          <span style={{ fontSize: '13px', color: '#65625a' }}>{image.filename}</span>
+          <span style={{
+            fontSize: '13px', color: '#65625a',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+          }}>{image.filename}</span>
           <button
             onClick={onClose}
             style={{
               background: 'none', border: 'none', color: '#65625a',
-              cursor: 'pointer', fontSize: '20px', lineHeight: 1
+              cursor: 'pointer', fontSize: '20px', lineHeight: 1, flexShrink: 0
             }}
           >×</button>
         </div>
 
         {/* Scrollable content */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {/* Full-res image */}
+          {/* Full-res image (falls back to thumbnail while loading) */}
           <div style={{
             background: '#141318',
-            aspectRatio: image.aspect_ratio || '16/9',
-            maxHeight: '400px',
+            minHeight: '200px', maxHeight: '420px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
             overflow: 'hidden'
           }}>
-            {fullImage ? (
-              <img src={fullImage} alt="" style={{
-                width: '100%', height: '100%',
-                objectFit: 'contain'
-              }} />
-            ) : (
-              <div style={{
-                width: '100%', height: '100%',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#65625a', fontSize: '12px'
-              }}>
-                Loading full-res…
-              </div>
-            )}
+            <img
+              src={fullImage || image.thumbnail}
+              alt={image.filename}
+              style={{
+                maxWidth: '100%', maxHeight: '420px',
+                objectFit: 'contain',
+                filter: fullImage ? 'none' : 'blur(0.5px)',
+                transition: 'filter 0.3s ease'
+              }}
+            />
           </div>
+          {!fullImage && !fullError && (
+            <div style={{
+              padding: '6px 20px', fontSize: '10px', color: '#65625a',
+              fontFamily: "'JetBrains Mono', monospace"
+            }}>
+              loading full resolution…
+            </div>
+          )}
+          {fullError && (
+            <div style={{ padding: '6px 20px', fontSize: '10px', color: '#cf7152' }}>
+              Couldn't load full-res — showing thumbnail
+            </div>
+          )}
 
           {/* Metadata */}
           <div style={{ padding: '20px' }}>
             {/* Caption */}
             {image.caption && (
-              <div style={{ marginBottom: '20px' }}>
-                <p style={{
-                  fontSize: '13px', lineHeight: '1.5',
-                  color: '#dcbd76', margin: 0
-                }}>
-                  {image.caption}
-                </p>
-              </div>
+              <p style={{
+                fontSize: '13px', lineHeight: '1.5',
+                color: '#dcbd76', margin: '0 0 20px'
+              }}>
+                {image.caption}
+              </p>
             )}
 
             {/* Aspect Ratio & Date */}
@@ -152,14 +162,20 @@ export default function ImageDetail({ imageId, onClose }) {
                 <div style={{ fontSize: '13px', color: '#efeadd', marginTop: '4px' }}>{image.aspect_ratio}</div>
               </div>
               <div>
-                <div style={{ fontSize: '9px', fontWeight: 600, color: '#65625a', letterSpacing: '0.08em' }}>ADDED</div>
-                <div style={{ fontSize: '13px', color: '#efeadd', marginTop: '4px' }}>
-                  {new Date(image.date_added).toLocaleDateString()}
-                </div>
+                <div style={{ fontSize: '9px', fontWeight: 600, color: '#65625a', letterSpacing: '0.08em' }}>FILENAME</div>
+                <div style={{
+                  fontSize: '13px', color: '#efeadd', marginTop: '4px',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                }}>{image.filename}</div>
               </div>
             </div>
 
             {/* Tags by category */}
+            {!hasTags && (
+              <p style={{ fontSize: '12px', color: '#65625a' }}>
+                No tags yet — this image hasn't been through the AI tagging pass.
+              </p>
+            )}
             {catOrder.map(cat => {
               if (!categories[cat] || categories[cat].length === 0) return null;
               return (
@@ -168,11 +184,9 @@ export default function ImageDetail({ imageId, onClose }) {
                     fontSize: '9px', fontWeight: 600, color: '#65625a',
                     letterSpacing: '0.08em', marginBottom: '7px'
                   }}>
-                    {catLabels[cat] || cat}
+                    {(catLabels[cat] || cat).toUpperCase()}
                   </div>
-                  <div style={{
-                    display: 'flex', flexWrap: 'wrap', gap: '6px'
-                  }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {categories[cat].map(val => (
                       <span key={val} style={{
                         display: 'inline-block',
@@ -201,16 +215,11 @@ export default function ImageDetail({ imageId, onClose }) {
                 </div>
                 <div style={{ display: 'flex', gap: '4px' }}>
                   {image.palette.map((hex, i) => (
-                    <div key={i} style={{
+                    <div key={i} title={hex} style={{
                       flex: 1, height: '32px',
                       background: hex, borderRadius: '6px',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      cursor: 'pointer', title: hex,
-                      transition: 'opacity 0.15s'
-                    }}
-                      onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                      onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-                    />
+                      border: '1px solid rgba(255,255,255,0.08)'
+                    }} />
                   ))}
                 </div>
               </div>
