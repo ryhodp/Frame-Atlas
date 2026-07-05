@@ -79,7 +79,15 @@ Return exactly this structure:
   }
 }
 
-ONLY use tags from these allowed lists. Leave arrays empty [] if not applicable.
+ONLY use tags from these allowed lists.
+
+BE GENEROUS. This is a searchable reference library for a working cinematographer —
+more tags means more discoverability. Include every tag that plausibly applies, not
+just the single most obvious one per category. If an image sits between two moods,
+tag both. If the lighting could read as both soft and low-key, tag both.
+Aim for 12-25 tags total across all categories. Most categories should have at
+least one tag; only leave an array empty [] when the category truly does not apply
+(e.g. performance_emotion for a landscape with no people).
 
 mood: lonely, intimate, tense, ominous, serene, chaotic, melancholic, warm, euphoric, epic, mundane, dreamlike, claustrophobic, vast
 lighting_quality: hard, soft, motivated, unmotivated, single-source, practical-heavy, high-key, low-key, no-fill, bounce-heavy, silhouette, chiaroscuro
@@ -476,12 +484,16 @@ def list_images_in_folder(service, folder_id, page_token=None):
 
     return images
 
-def generate_thumbnail(image_data, width=600, quality=75):
+def generate_thumbnail(image_data, width=800, quality=85):
     try:
         img = Image.open(io.BytesIO(image_data))
         aspect_ratio = img.width / img.height if img.height > 0 else 1
-        height = int(width / aspect_ratio)
-        img = img.resize((width, height), Image.Resampling.LANCZOS)
+        # Never upscale — a source narrower than the target stays at native size
+        if img.width > width:
+            height = int(width / aspect_ratio)
+            img = img.resize((width, height), Image.Resampling.LANCZOS)
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
         thumb_io = io.BytesIO()
         img.save(thumb_io, format='JPEG', quality=quality)
         thumb_io.seek(0)
@@ -499,7 +511,27 @@ def get_image_aspect_ratio(image_data):
     except Exception:
         return "16:9"
 
-def extract_palette(image_data, num_colors=5):
+# Standard cinematography formats — raw ratios like 80:43 get displayed as the
+# nearest of these. The exact ratio stays in the DB for layout math.
+STANDARD_ASPECT_RATIOS = [
+    ('9:16', 9 / 16),
+    ('1:1', 1.0),
+    ('4:3', 4 / 3),
+    ('3:2', 3 / 2),
+    ('16:9', 16 / 9),
+    ('1.85:1', 1.85),
+    ('2:1', 2.0),
+    ('2.39:1', 2.39),
+]
+
+def normalize_ar_label(ar_float):
+    from math import log
+    if not ar_float or ar_float <= 0:
+        return '16:9'
+    # Log distance treats "too wide" and "too tall" symmetrically
+    return min(STANDARD_ASPECT_RATIOS, key=lambda s: abs(log(ar_float / s[1])))[0]
+
+def extract_palette(image_data, num_colors=15):
     try:
         img = Image.open(io.BytesIO(image_data)).convert('RGB')
         img.thumbnail((100, 100))
@@ -922,11 +954,13 @@ def search():
 
     if color_raw:
         # Small library — compute color matches in Python.
-        # Only the two dominant palette colors count, so a color pick means
-        # "images with this overall cast," not "images containing it anywhere."
-        threshold = 1500
+        # Palettes now hold 15 colors so subject colors (red dress in a blue
+        # room) survive extraction. Search checks the top 6 with a tight
+        # threshold: deep enough to catch the subject, tight enough that
+        # "blue" doesn't return gray.
+        threshold = 1000
         matched_ids = set()
-        for row in c.execute('SELECT DISTINCT image_id, hex FROM colors WHERE rank <= 1').fetchall():
+        for row in c.execute('SELECT DISTINCT image_id, hex FROM colors WHERE rank <= 5').fetchall():
             try:
                 if color_distance(color_raw, row['hex']) < threshold:
                     matched_ids.add(row['image_id'])
@@ -977,6 +1011,7 @@ def search():
             'thumbnail': f'data:image/jpeg;base64,{thumb_b64}',
             'caption': r['caption'] or '',
             'aspect_ratio': ar_str,
+            'ar_label': normalize_ar_label(ar_float),
             'ar_float': round(ar_float, 4),
             'is_favorite': bool(r['is_favorite']),
             'is_flagged': bool(r['is_flagged']),
@@ -1133,13 +1168,18 @@ def regenerate_thumbnails():
 
 @app.route('/api/extract-colors', methods=['POST'])
 def extract_colors():
-    """Backfill palettes from stored thumbnails — no Drive downloads needed."""
+    """Backfill palettes from stored thumbnails — no Drive downloads needed.
+    Pass ?force=true to re-extract every image (e.g. after a palette-size change)."""
+    force = request.args.get('force', '').lower() == 'true'
     conn = get_db()
     c = conn.cursor()
-    c.execute('''
-        SELECT id, user_id, thumbnail_blob FROM images
-        WHERE id NOT IN (SELECT DISTINCT image_id FROM colors)
-    ''')
+    if force:
+        c.execute('SELECT id, user_id, thumbnail_blob FROM images')
+    else:
+        c.execute('''
+            SELECT id, user_id, thumbnail_blob FROM images
+            WHERE id NOT IN (SELECT DISTINCT image_id FROM colors)
+        ''')
     images = c.fetchall()
     conn.close()
 

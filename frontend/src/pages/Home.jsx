@@ -7,6 +7,8 @@ const PRESET_SWATCHES = [
   '#4E7A3A', '#8A7A3A', '#E8DFC8', '#1A1A1E'
 ];
 
+const PER_PAGE = 60;
+
 export default function Home() {
   const [chips, setChips] = useState([]);
   const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
@@ -17,8 +19,10 @@ export default function Home() {
   const [interpreting, setInterpreting] = useState(false);
   const [images, setImages] = useState([]);
   const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [winW, setWinW] = useState(window.innerWidth);
 
   const [bookmarks, setBookmarks] = useState([]);
   const [showBookmarks, setShowBookmarks] = useState(false);
@@ -26,28 +30,59 @@ export default function Home() {
 
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
+  const pageRef = useRef(0);
+  const fetchingRef = useRef(false);
+  const sentinelRef = useRef(null);
 
   const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color;
 
-  // ── Fetch images whenever any filter changes ────────────────────────────────
-  const fetchImages = useCallback(async () => {
+  // ── Fetch one page of results; append=true keeps existing images ───────────
+  const fetchPage = useCallback(async (pageNum, append) => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (chips.length) params.set('chips', chips.join(','));
       if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
       if (color) params.set('color', color);
+      params.set('page', pageNum);
+      params.set('per', PER_PAGE);
       const res = await fetch(`/api/search?${params}`);
       const data = await res.json();
-      setImages(data.images || []);
+      setImages(prev => append ? [...prev, ...(data.images || [])] : (data.images || []));
       setTotal(data.total || 0);
+      setHasMore(!!data.has_more);
+      pageRef.current = pageNum;
     } catch (e) {
       console.error('Search failed', e);
     }
     setLoading(false);
+    fetchingRef.current = false;
   }, [chips, nlChips, color]);
 
-  useEffect(() => { fetchImages(); }, [fetchImages]);
+  // Filters changed → reset to page 0
+  useEffect(() => { fetchPage(0, false); }, [fetchPage]);
+
+  // ── Infinite scroll: load next page when the sentinel nears the viewport ───
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !fetchingRef.current) {
+        fetchPage(pageRef.current + 1, true);
+      }
+    }, { rootMargin: '800px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, fetchPage]);
+
+  // ── Track window width for responsive column count ─────────────────────────
+  useEffect(() => {
+    const onResize = () => setWinW(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // ── Load bookmarks on mount ─────────────────────────────────────────────────
   const loadBookmarks = useCallback(async () => {
@@ -172,29 +207,20 @@ export default function Home() {
     } catch {}
   };
 
-  // ── Build masonry-style rows from images ────────────────────────────────────
-  const buildRows = (imgs, rowH = 220, gap = 8) => {
-    const containerW = window.innerWidth - 280;
-    const rows = [];
-    let row = [];
-    let rowW = 0;
-
-    for (const img of imgs) {
-      const tileW = (img.ar_float || 1.78) * rowH;
-      if (row.length > 0 && rowW + tileW + gap > containerW) {
-        rows.push(row);
-        row = [img];
-        rowW = tileW;
-      } else {
-        row.push(img);
-        rowW += tileW + gap;
-      }
+  // ── True masonry: distribute images into columns, shortest-first ────────────
+  // Every image keeps its full aspect ratio — nothing is cropped.
+  // Placement is greedy in order, so appending a page never reshuffles
+  // images that are already on screen.
+  const colCount = Math.max(2, Math.min(5, Math.floor((winW - 280) / 320)));
+  const columns = (() => {
+    const cols = Array.from({ length: colCount }, () => ({ items: [], h: 0 }));
+    for (const img of images) {
+      const shortest = cols.reduce((a, b) => (a.h <= b.h ? a : b));
+      shortest.items.push(img);
+      shortest.h += 1 / (img.ar_float || 1.78); // height at unit width
     }
-    if (row.length) rows.push(row);
-    return rows;
-  };
-
-  const rows = buildRows(images);
+    return cols.map(c => c.items);
+  })();
 
   return (
     <div style={{
@@ -586,6 +612,9 @@ export default function Home() {
           fontSize: '12px', color: '#9c988d'
         }}>
           <span style={{ color: '#efeadd', fontWeight: 500 }}>{total}</span> images
+          {images.length > 0 && images.length < total && (
+            <span style={{ color: '#65625a' }}> · {images.length} loaded</span>
+          )}
           {hasFilters && (
             <span style={{ color: '#65625a' }}>
               {' '}· {chips.length + nlChips.length + (color ? 1 : 0)} filter{(chips.length + nlChips.length + (color ? 1 : 0)) > 1 ? 's' : ''} active
@@ -637,108 +666,126 @@ export default function Home() {
           </div>
         )}
 
-        {/* Masonry rows */}
-        {rows.map((row, ri) => (
-          <div key={ri} style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-            {row.map(img => (
-              <div
-                key={img.id}
-                onClick={() => setSelectedImage(img)}
-                style={{
-                  flex: `${img.ar_float || 1.78} 1 0`,
-                  position: 'relative',
-                  height: '220px',
-                  background: img.palette?.[0]
-                    ? `linear-gradient(135deg, ${img.palette[0]}, ${img.palette[1] || img.palette[0]})`
-                    : '#141318',
-                  borderRadius: '6px',
-                  overflow: 'hidden',
-                  cursor: 'pointer',
-                  border: '1px solid rgba(255,255,255,0.04)',
-                  transition: 'transform 0.15s ease'
-                }}
-                onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.01)'}
-                onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
-              >
-                {/* Thumbnail image */}
-                {img.thumbnail && (
-                  <img
-                    src={img.thumbnail}
-                    alt={img.filename}
-                    style={{
-                      position: 'absolute', inset: 0,
-                      width: '100%', height: '100%',
-                      objectFit: 'cover'
-                    }}
-                    loading="lazy"
-                  />
-                )}
-
-                {/* Gradient overlay */}
-                <div style={{
-                  position: 'absolute', inset: 0,
-                  background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.78) 100%)',
-                  pointerEvents: 'none'
-                }} />
-
-                {/* Aspect ratio label */}
-                <span style={{
-                  position: 'absolute', top: '7px', left: '7px',
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '8px', color: 'rgba(239,234,221,0.5)',
-                  background: 'rgba(0,0,0,0.4)',
-                  padding: '2px 5px', borderRadius: '3px'
-                }}>
-                  {img.aspect_ratio}
-                </span>
-
-                {/* Star / flag */}
-                {img.is_favorite && (
-                  <span style={{
-                    position: 'absolute', top: '6px', right: '7px',
-                    color: '#dcbd76', fontSize: '13px',
-                    filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
-                  }}>★</span>
-                )}
-                {img.is_flagged && (
-                  <span style={{
-                    position: 'absolute', top: '6px', right: '7px',
-                    color: '#cf7152', fontSize: '12px'
-                  }}>⚑</span>
-                )}
-
-                {/* Caption + color palette */}
-                <div style={{
-                  position: 'absolute', left: '9px', right: '9px', bottom: '9px',
-                  pointerEvents: 'none'
-                }}>
-                  {img.caption && (
-                    <div style={{
-                      fontSize: '10.5px', lineHeight: '1.35',
-                      color: 'rgba(239,234,221,0.9)',
-                      overflow: 'hidden',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      textShadow: '0 1px 3px rgba(0,0,0,0.6)',
-                      marginBottom: '5px'
-                    }}>
-                      {img.caption}
-                    </div>
+        {/* Masonry columns — full aspect ratio, no cropping */}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+          {columns.map((col, ci) => (
+            <div key={ci} style={{
+              flex: 1, minWidth: 0,
+              display: 'flex', flexDirection: 'column', gap: '10px'
+            }}>
+              {col.map(img => (
+                <div
+                  key={img.id}
+                  onClick={() => setSelectedImage(img)}
+                  style={{
+                    position: 'relative',
+                    width: '100%',
+                    aspectRatio: `${img.ar_float || 1.78}`,
+                    background: img.palette?.[0]
+                      ? `linear-gradient(135deg, ${img.palette[0]}, ${img.palette[1] || img.palette[0]})`
+                      : '#141318',
+                    borderRadius: '6px',
+                    overflow: 'hidden',
+                    cursor: 'pointer',
+                    border: '1px solid rgba(255,255,255,0.04)',
+                    transition: 'transform 0.15s ease'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.01)'}
+                  onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                  {/* Thumbnail — box matches the image's true ratio, so nothing crops */}
+                  {img.thumbnail && (
+                    <img
+                      src={img.thumbnail}
+                      alt={img.filename}
+                      style={{
+                        position: 'absolute', inset: 0,
+                        width: '100%', height: '100%',
+                        objectFit: 'cover'
+                      }}
+                      loading="lazy"
+                    />
                   )}
-                  <div style={{ display: 'flex', gap: '3px' }}>
-                    {(img.palette || []).slice(0, 5).map((hex, i) => (
-                      <span key={i} style={{
-                        width: '14px', height: '4px',
-                        borderRadius: '1px', background: hex
-                      }} />
-                    ))}
+
+                  {/* Gradient overlay */}
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.78) 100%)',
+                    pointerEvents: 'none'
+                  }} />
+
+                  {/* Aspect ratio label — normalized to standard formats */}
+                  <span style={{
+                    position: 'absolute', top: '7px', left: '7px',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '8px', color: 'rgba(239,234,221,0.5)',
+                    background: 'rgba(0,0,0,0.4)',
+                    padding: '2px 5px', borderRadius: '3px'
+                  }}>
+                    {img.ar_label || img.aspect_ratio}
+                  </span>
+
+                  {/* Star / flag */}
+                  {img.is_favorite && (
+                    <span style={{
+                      position: 'absolute', top: '6px', right: '7px',
+                      color: '#dcbd76', fontSize: '13px',
+                      filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                    }}>★</span>
+                  )}
+                  {img.is_flagged && (
+                    <span style={{
+                      position: 'absolute', top: '6px', right: '7px',
+                      color: '#cf7152', fontSize: '12px'
+                    }}>⚑</span>
+                  )}
+
+                  {/* Caption + color palette */}
+                  <div style={{
+                    position: 'absolute', left: '9px', right: '9px', bottom: '9px',
+                    pointerEvents: 'none'
+                  }}>
+                    {img.caption && (
+                      <div style={{
+                        fontSize: '10.5px', lineHeight: '1.35',
+                        color: 'rgba(239,234,221,0.9)',
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+                        marginBottom: '5px'
+                      }}>
+                        {img.caption}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: '3px' }}>
+                      {(img.palette || []).slice(0, 5).map((hex, i) => (
+                        <span key={i} style={{
+                          width: '14px', height: '4px',
+                          borderRadius: '1px', background: hex
+                        }} />
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Infinite-scroll sentinel — when this nears the viewport, load more */}
+        <div ref={sentinelRef} style={{ height: '1px' }} />
+
+        {hasMore && (
+          <div style={{
+            padding: '20px', textAlign: 'center',
+            fontSize: '12px', color: '#65625a',
+            fontFamily: "'JetBrains Mono', monospace"
+          }}>
+            loading more…
           </div>
-        ))}
+        )}
 
         <div style={{ height: '30px' }} />
       </div>
