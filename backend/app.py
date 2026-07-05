@@ -22,6 +22,9 @@ CORS(app)
 
 DB_PATH = '/app/data/library.db'
 
+# Gemini model — overridable via Railway env var if Google retires this one
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
+
 sync_state = {
     'in_progress': False,
     'processed': 0,
@@ -356,7 +359,7 @@ def _run_tagging_job():
             pil_img = Image.open(io.BytesIO(thumb_blob))
 
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model=GEMINI_MODEL,
                 contents=[GEMINI_TAGGING_PROMPT, pil_img]
             )
             raw = response.text.strip()
@@ -639,7 +642,20 @@ def debug():
 
 @app.route('/api/config', methods=['GET'])
 def config():
-    return jsonify({'app_name': 'Frame Atlas', 'version': 'V5'})
+    return jsonify({'app_name': 'Frame Atlas', 'version': 'V5', 'gemini_model': GEMINI_MODEL})
+
+@app.route('/api/models', methods=['GET'])
+def list_models():
+    """Debug: list Gemini models this API key can use. Remove before production (Day 13)."""
+    gemini_api_key = os.environ.get('GEMINI_API_KEY')
+    if not gemini_api_key:
+        return jsonify({'error': 'GEMINI_API_KEY not set'}), 500
+    try:
+        client = genai_client.Client(api_key=gemini_api_key)
+        names = [m.name for m in client.models.list()]
+        return jsonify({'current': GEMINI_MODEL, 'available': names})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/folders', methods=['GET'])
 def get_folders():
@@ -784,7 +800,7 @@ def interpret_nl():
     try:
         client = genai_client.Client(api_key=gemini_api_key)
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model=GEMINI_MODEL,
             contents=[NL_INTERPRET_PROMPT + phrase]
         )
         raw = response.text.strip()
