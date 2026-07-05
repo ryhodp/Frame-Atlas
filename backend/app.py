@@ -531,18 +531,64 @@ def normalize_ar_label(ar_float):
     # Log distance treats "too wide" and "too tall" symmetrically
     return min(STANDARD_ASPECT_RATIOS, key=lambda s: abs(log(ar_float / s[1])))[0]
 
-def extract_palette(image_data, num_colors=15):
+def extract_palette(image_data, num_colors=10):
+    """Vibrance-weighted palette. Colors are scored by area x saturation, so a
+    small patch of vivid red outranks a large gray wall. Binning happens in HSV,
+    which keeps vivid regions from being averaged into their muddy surroundings
+    (the old quantize approach turned bright gems on dark backgrounds into
+    sludge). Vivid colors fill the top ranks — color search reads those — and
+    neutrals ride along at the end."""
     try:
+        import colorsys
         img = Image.open(io.BytesIO(image_data)).convert('RGB')
-        img.thumbnail((100, 100))
-        quantized = img.quantize(colors=num_colors)
-        palette = quantized.getpalette()
-        color_counts = sorted(quantized.getcolors(), reverse=True)
-        hexes = []
-        for count, idx in color_counts[:num_colors]:
-            r, g, b = palette[idx * 3: idx * 3 + 3]
-            hexes.append(f'#{r:02x}{g:02x}{b:02x}')
-        return hexes
+        img.thumbnail((160, 160))
+
+        bins = {}
+        for r, g, b in img.getdata():
+            h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+            if s < 0.16 or v < 0.10:
+                key = ('n', min(int(v * 5), 4))
+            else:
+                key = ('c', min(int(h * 20), 19), min(int(s * 3), 2), min(int(v * 4), 3))
+            acc = bins.get(key)
+            if acc is None:
+                bins[key] = [1, r, g, b, s, v]
+            else:
+                acc[0] += 1; acc[1] += r; acc[2] += g; acc[3] += b; acc[4] += s; acc[5] += v
+
+        total_px = img.width * img.height
+        chromatic, neutrals = [], []
+        for key, (n, rs, gs, bs, ss, vs) in bins.items():
+            avg = (rs // n, gs // n, bs // n)
+            sat, val = ss / n, vs / n
+            share = n / total_px
+            if key[0] == 'c':
+                score = share * (0.15 + 2.5 * sat * sat) * (0.4 + 1.2 * val)
+                chromatic.append((score, share, avg))
+            else:
+                neutrals.append((share * 0.2, share, avg))
+
+        def _dist(a, b):
+            return ((a[0]-b[0]) * 0.30) ** 2 + ((a[1]-b[1]) * 0.59) ** 2 + ((a[2]-b[2]) * 0.11) ** 2
+
+        chromatic.sort(reverse=True)
+        neutrals.sort(reverse=True)
+
+        picked = []
+        for score, share, rgb in chromatic:
+            if len(picked) >= num_colors - 2:
+                break
+            if share < 0.001:  # under ~0.1% of pixels = JPEG noise, not a color
+                continue
+            if all(_dist(rgb, c) >= 450 for c in picked):
+                picked.append(rgb)
+        for score, share, rgb in neutrals:
+            if len(picked) >= num_colors:
+                break
+            if all(_dist(rgb, c) >= 450 for c in picked):
+                picked.append(rgb)
+
+        return ['#%02x%02x%02x' % c for c in picked]
     except Exception:
         return []
 

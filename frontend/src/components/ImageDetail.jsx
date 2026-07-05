@@ -159,7 +159,14 @@ export default function ImageDetail({ image, onClose }) {
             }}>
               <div>
                 <div style={{ fontSize: '9px', fontWeight: 600, color: '#65625a', letterSpacing: '0.08em' }}>ASPECT RATIO</div>
-                <div style={{ fontSize: '13px', color: '#efeadd', marginTop: '4px' }}>{image.aspect_ratio}</div>
+                <div style={{ fontSize: '13px', color: '#efeadd', marginTop: '4px' }}>
+                  {image.ar_label || image.aspect_ratio}
+                  {image.ar_label && image.ar_label !== image.aspect_ratio && (
+                    <span style={{ fontSize: '10px', color: '#65625a', marginLeft: '6px' }}>
+                      ({image.aspect_ratio})
+                    </span>
+                  )}
+                </div>
               </div>
               <div>
                 <div style={{ fontSize: '9px', fontWeight: 600, color: '#65625a', letterSpacing: '0.08em' }}>FILENAME</div>
@@ -169,6 +176,27 @@ export default function ImageDetail({ image, onClose }) {
                 }}>{image.filename}</div>
               </div>
             </div>
+
+            {/* Color palette — above tags */}
+            {image.palette && image.palette.length > 0 && (
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{
+                  fontSize: '9px', fontWeight: 600, color: '#65625a',
+                  letterSpacing: '0.08em', marginBottom: '7px'
+                }}>
+                  COLOR PALETTE
+                </div>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {image.palette.map((hex, i) => (
+                    <div key={i} title={hex} style={{
+                      flex: 1, height: '32px',
+                      background: hex, borderRadius: '6px',
+                      border: '1px solid rgba(255,255,255,0.08)'
+                    }} />
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Tags by category */}
             {!hasTags && (
@@ -204,26 +232,6 @@ export default function ImageDetail({ image, onClose }) {
               );
             })}
 
-            {/* Color palette */}
-            {image.palette && image.palette.length > 0 && (
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{
-                  fontSize: '9px', fontWeight: 600, color: '#65625a',
-                  letterSpacing: '0.08em', marginBottom: '7px'
-                }}>
-                  COLOR PALETTE
-                </div>
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  {image.palette.map((hex, i) => (
-                    <div key={i} title={hex} style={{
-                      flex: 1, height: '32px',
-                      background: hex, borderRadius: '6px',
-                      border: '1px solid rgba(255,255,255,0.08)'
-                    }} />
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
