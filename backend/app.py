@@ -718,6 +718,23 @@ def debug():
         'env_keys': list(os.environ.keys())
     })
 
+@app.route('/api/debug/failed-images', methods=['GET'])
+def debug_failed_images():
+    """Temporary: list all images that failed tagging. Remove after investigation (Day 8)."""
+    conn = get_db()
+    c = conn.cursor()
+    rows = c.execute('''
+        SELECT id, filename, date_added FROM images
+        WHERE tagging_status = 'failed'
+        ORDER BY id ASC
+    ''').fetchall()
+    conn.close()
+    return jsonify([{
+        'id': r['id'],
+        'filename': r['filename'],
+        'date_added': r['date_added']
+    } for r in rows])
+
 @app.route('/api/config', methods=['GET'])
 def config():
     return jsonify({'app_name': 'Frame Atlas', 'version': 'V5', 'gemini_model': GEMINI_MODEL})
