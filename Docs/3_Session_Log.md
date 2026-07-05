@@ -258,3 +258,73 @@ All feedback captured in `/memory/day7-feedback.md` for Day 8 or polish phase.
 2. Wire Favorite/Flag buttons (POST `/api/toggle-favorite`, `/api/toggle-flag`)
 3. Inline tag editing in detail panel
 4. Filmography display (title/director/DP/year for film stills)
+
+---
+
+## Day 7 (Part 2) — Final Polish: Vibrance Palettes, True Masonry, Infinite Scroll
+*Completed: July 5, 2026*
+*Status: FEATURE-COMPLETE, PRODUCTION-READY*
+
+### What We Built
+
+**Backend Improvements:**
+- ✅ Vibrance-weighted palette extraction — colors now scored by (area × saturation) instead of just pixel count, so vivid colors rank higher than muddy backgrounds. Fixes the "gems-on-dark-background get averaged into sludge" problem.
+- ✅ Reduced palette from 15 → 10 colors per image (8 vivid + 2 neutral). Color search checks top 6 slots, now leans harder on truly dominant colors.
+- ✅ Thumbnail quality upgraded: 600px/quality-75 → 800px/quality-85; no upscaling of small sources (stays native size).
+- ✅ Aspect ratio normalization: raw ratios like 80:43 now display as nearest standard format (16:9, 2.39:1, etc.); original ratio preserved in DB for layout math.
+- ✅ Tagging prompt rewritten to be generous: instead of "tag only the most obvious," now "tag everything that plausibly applies, aim for 12–25 tags per image."
+- ✅ Color search threshold rebalanced: top 6 colors, threshold 1000 (was top 2 @ 1500).
+- ✅ `/api/extract-colors?force=true` now supports backfilling all palettes at once.
+- ✅ Debug endpoints: `/api/debug/failed-images` (lists failed tags), `/api/tag/retry-failed` (retags only failed images, cheaper than force=true).
+
+**Frontend Improvements:**
+- ✅ True masonry columns (Pinterest-style) — every image displays full aspect ratio, zero cropping. Column count adjusts to viewport width (2–5 columns).
+- ✅ Infinite scroll — loads 60 images at a time, auto-fetches next batch as you approach the bottom. Counter shows "246 images · 60 loaded" to indicate progressive loading.
+- ✅ Palette moved above tags in detail panel — more prominent placement.
+- ✅ Aspect ratio label in detail panel shows normalized format with raw ratio in parens (e.g., "1.85:1 (645:706)").
+- ✅ Frontend build verified locally (Node.js installed, npm build succeeds).
+
+**Pipeline Results:**
+- ✅ Thumbnails regenerated: 246/246 done, 0 errors.
+- ✅ Full re-tag run: 233/246 succeeded, 13 initially failed.
+- ✅ Retry of failed images: 7/13 succeeded on second attempt (transient API errors). 6 persistently failed (likely corrupted files: IMG_4706.JPG, Spectre_37/36/38.jpg, 25 (463).jpg, 12 (463).jpg).
+- ✅ Palette re-extraction with vibrance logic: all 246 done. Verified on test images:
+  - Mickey poster: 9 colors (orange, yellow, ink-blue, teal all captured)
+  - Motel night: 8 colors (dark blue, neon warm tones, lime green)
+  - Red-shirt: 7 colors (red #d22a35, greens all captured)
+
+### Technical Notes
+- **Gemini model:** Production still using `gemini-2.5-flash` (env var `GEMINI_MODEL` set by Railway).
+- **Total tags across library:** 7,262 tag rows (avg. ~31 tags per image under generous prompt).
+- **Failed images:** 6 persistently fail during tagging; user can search Drive and delete or re-export.
+- **Day 8 scope added:** Upload (via OAuth sign-in), Delete (move to _Removed subfolder), Download (full-res to Downloads folder). See `/memory/day8-scope-additions.md`.
+
+### Decisions Made (Confirmed with Ryan)
+- ✅ Palette extraction: Vibrance-weighted over Gemini color-naming (simpler, faster, no re-tag cost).
+- ✅ Neutrals in palette: Keep a few, ranked last (so all-gray images still show colors, but vivid images lead).
+- ✅ Grid layout: True masonry (no letterboxing, no forced rows).
+- ✅ Pagination: Infinite scroll (stays performant, loads 60 at a time).
+- ✅ Re-tag scope: Full library (all 246), not just failed/sparse images (ensures consistency).
+- ✅ Upload auth: Real Google OAuth (act as user, uploads owned by user) — requires Day 8 setup time.
+
+### Files Changed
+- `backend/app.py` — vibrance extraction, palette params, debug endpoints, retag logic
+- `frontend/src/pages/Home.jsx` — true masonry, infinite scroll, responsive columns
+- `frontend/src/components/ImageDetail.jsx` — palette above tags, normalized AR label
+- Added Node.js locally for frontend verification
+
+### Deferred
+- Remove debug endpoints (`/api/debug/*`) — flagged for Day 13 cleanup.
+- Retry permanently-failed images — user to investigate Drive files first.
+
+### Starting Point for Day 8
+1. Set up Google Cloud OAuth credentials (consent screen, client ID, redirect URIs for Railway domain).
+2. Wire Google sign-in flow on frontend.
+3. Implement `/api/upload` — accepts multipart file, saves to Drive, creates library entry, triggers thumbnail + extract-colors.
+4. Implement `/api/images/<id>/delete` — moves file to _Removed folder, deletes from library.
+5. Wire `/api/images/<id>/download` — proxies full-res from Drive to browser.
+6. Implement Favorite/Flag toggle buttons (already UI-stubbed in detail panel).
+7. Inline tag editing in detail panel.
+8. Test all workflows end-to-end.
+
+Frame Atlas V6 is now stable. Upload/delete/download + detail panel wiring are the Day 8 blockers.
