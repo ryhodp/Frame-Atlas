@@ -735,6 +735,19 @@ def debug_failed_images():
         'date_added': r['date_added']
     } for r in rows])
 
+@app.route('/api/tag/retry-failed', methods=['POST'])
+def retry_failed():
+    """Reset only failed images to pending and trigger retag. Cheaper than force=true."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("UPDATE images SET tagging_status = 'pending' WHERE tagging_status = 'failed'")
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    if affected > 0:
+        trigger_tagging()
+    return jsonify({'success': True, 'reset': affected, 'message': f'Reset {affected} failed images, tagging started'})
+
 @app.route('/api/config', methods=['GET'])
 def config():
     return jsonify({'app_name': 'Frame Atlas', 'version': 'V5', 'gemini_model': GEMINI_MODEL})
