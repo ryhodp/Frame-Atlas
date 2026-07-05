@@ -149,3 +149,112 @@ The tagging pass must happen before search is useful — no tags in DB yet. Budg
 - Detail panel fetches image data from `/api/images?user_id=1` (same call Home.jsx uses)
 - Full-res image fetched separately from `/api/images/<id>/full` endpoint
 - Detail panel animations: backdrop fade-in (0.2s), panel slide-in-right (0.3s cubic-bezier)
+
+---
+
+## Day 6 + Day 7 — Verification + Full Search Experience (Frame Atlas V5)
+*Completed: July 5, 2026*
+
+### Big Discovery: Day 4's Tagging Never Actually Worked
+Verification revealed the live database had **zero tags and zero captions** — all 97
+images were marked `tagging_status='failed'`. Root cause: **Google retired the
+`gemini-2.0-flash` model** (API returns 404 NOT_FOUND). The Day 4 session log's
+"97 successfully tagged" was wrong. Fixed by switching to `gemini-2.5-flash`, now
+configurable via the `GEMINI_MODEL` env var on Railway so future retirements need
+no code change.
+
+### What We Built / Fixed
+**Day 5/6 verification:**
+- ✅ Confirmed Day 5 commits were never pushed to GitHub — pushed, deploy verified
+- ✅ `/api/images/<id>/full` verified live: streams real JPEG from Drive, HTTP 200, 0.7s
+- ✅ Fixed regenerate-thumbnails bug: `in_progress` flag never reset → would have
+  blocked all future syncs after one regeneration
+- ✅ Fixed ImageDetail panel: was fetching from `/api/images` which returns no
+  tags/caption/palette — panel would have always been empty. Now receives the
+  image object directly from the grid.
+
+**Day 7 features (all deployed):**
+- ✅ NL fallback: Enter on unmatched text → `POST /api/interpret` → Gemini maps
+  phrase to taxonomy tags → violet dashed quoted chip (hover shows resolved tags).
+  Verified live: "something lonely and desperate" → lonely, melancholic, low-key, desaturated
+- ✅ Color extraction: `extract_palette()` (Pillow quantize, 5 colors) wired into
+  sync worker + thumbnail regen; `POST /api/extract-colors` backfilled all 97 images
+  from stored thumbnails in one shot
+- ✅ Color filter UI: 12 preset cinematic swatches + custom color wheel (Sidus Link
+  style); `/api/search?color=<hex>` matches via weighted RGB distance (threshold 2200)
+- ✅ Bookmarks: ☆ button by search bar; save current filters with a name, recall or
+  delete from dropdown. `GET/POST /api/bookmarks`, `DELETE /api/bookmarks/<id>`
+- ✅ NL groups in search: `nl=` param takes JSON array of tag groups — image must
+  match ≥1 tag per group (OR within group, AND between groups/chips)
+- ✅ New admin endpoints: `POST /api/tag/start?force=true` (re-tag without sync),
+  `GET /api/models` (list usable Gemini models — remove Day 13),
+  `/api/tag-progress` now includes `status_counts` + `total_tag_rows`
+
+### Pipeline Run (July 5)
+1. ✅ Colors extracted for all 97 images
+2. 🔄 Force re-tag of all 97 images started (~$1) — in progress at session write time
+3. ⏳ Thumbnail regeneration (600px) queued after tagging completes
+
+### Technical Debt / Notes
+- `GEMINI_MODEL` env var: not yet set on Railway (code default `gemini-2.5-flash` active)
+- `/api/models` debug endpoint — remove with `/api/debug` on Day 13
+- Favorite/Flag buttons in detail panel are still visual stubs (Day 8 wires them)
+- Color match threshold (2200, weighted RGB) may need tuning with real usage
+- GitHub repo was renamed `frame-atlas` → `Frame-Atlas` (push still works via redirect)
+- Ryan's Mac has no Node.js — frontend can only be built by Railway's Docker build
+
+### Starting Point for Day 8
+Day 8 = full image detail panel: wire Favorite/Flag buttons to backend, inline tag
+edit/remove, filmography display (data exists in DB from tagging), add-to-deck
+placeholder. First: confirm tagging + thumbnail regen completed and Day 7 features
+verified in browser (NL chip, color filter, bookmarks).
+
+---
+
+## Day 7 — Core Search (Part 2): NL Fallback + Color + Bookmarks
+*Completed: July 5, 2026*
+*Status: FEATURE-COMPLETE, UX/data-quality issues noted for future*
+
+### What We Built
+- ✅ NL fallback: `/api/interpret` — Gemini maps free text (e.g., "lonely and desperate") to 2–5 tags from taxonomy
+- ✅ NL chips styled distinctly (violet, dashed border, italic, quoted)
+- ✅ Color extraction: `extract_palette()` pulls 5 dominant colors per image via Pillow
+- ✅ Color extraction wired into sync worker and thumbnail regeneration
+- ✅ `/api/extract-colors` backfill — extracted palettes for all 265 thumbnails in seconds
+- ✅ Color search: `/api/search?color=#hex` with weighted RGB distance matching
+- ✅ `/api/search` now combines `chips=` + `nl=` (OR-groups) + `color=` in one query
+- ✅ Bookmarks CRUD: GET/POST/DELETE `/api/bookmarks` — save/recall filter presets
+- ✅ Bookmark UI: ☆ icon by search bar, dropdown to manage bookmarks
+- ✅ Color UI: 12 preset cinematic swatches + color wheel picker (Sidus Link inspiration)
+- ✅ Home.jsx rewritten (540 lines): search bar, autocomplete, chips, NL phrases, color swatches, bookmarks, masonry grid
+- ✅ Sync: 168 new images from Drive (265 total)
+- ✅ Tagging: 74 images tagged (23 failures, recoverable)
+
+### User Feedback (Verified in Browser — Noted for Future)
+- ❌ Photos cropped in masonry — should display full aspect ratio (not force-fit to row)
+- ❌ Color filter too loose — blue search returns non-blue images (threshold 2200 too high)
+- ❌ Aspect ratios weird (80:43, 23:16) — should normalize to standard (16:9, 4:3, 2:1, 1:1, 9:16)
+- ❌ Only 246 tagged images; many under-tagged — tagging prompt too conservative, needs to be generous
+- ✅ NL fallback works (tested "something lonely and desperate" → interpreted correctly)
+- ✅ Bookmarks save/load (tested full round-trip)
+- ✅ Color swatches display and filter (threshold tuning needed)
+- ✅ Detail panel opens, shows image + tags/palette
+
+All feedback captured in `/memory/day7-feedback.md` for Day 8 or polish phase.
+
+### Code / Files Changed
+- `backend/app.py` — color extraction, NL interpret, bookmarks, search multi-filter
+- `frontend/src/pages/Home.jsx` — full rewrite (540 lines)
+- `frontend/src/components/ImageDetail.jsx` — detail panel
+
+### Technical Debt / Notes
+- Color threshold (2200) too loose → lower to ~800–1200
+- Tagging prompt conservative → retag with relaxed rules for better discoverability
+- Aspect ratio rounding deferred (nice-to-have, not critical)
+- Favorite/Flag buttons UI-only (backend endpoints not yet written)
+
+### Starting Point for Day 8
+1. Tune color threshold down from 2200 → 800
+2. Wire Favorite/Flag buttons (POST `/api/toggle-favorite`, `/api/toggle-flag`)
+3. Inline tag editing in detail panel
+4. Filmography display (title/director/DP/year for film stills)
