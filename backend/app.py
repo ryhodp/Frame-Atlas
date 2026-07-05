@@ -449,12 +449,14 @@ def list_images_in_folder(service, folder_id, page_token=None):
 
     return images
 
-def generate_thumbnail(image_data, max_size=(400, 400)):
+def generate_thumbnail(image_data, width=600, quality=75):
     try:
         img = Image.open(io.BytesIO(image_data))
-        img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        aspect_ratio = img.width / img.height if img.height > 0 else 1
+        height = int(width / aspect_ratio)
+        img = img.resize((width, height), Image.Resampling.LANCZOS)
         thumb_io = io.BytesIO()
-        img.save(thumb_io, format='JPEG', quality=85)
+        img.save(thumb_io, format='JPEG', quality=quality)
         thumb_io.seek(0)
         return thumb_io.getvalue()
     except Exception:
@@ -839,6 +841,74 @@ def get_images():
         })
     conn.close()
     return jsonify({'images': images})
+
+@app.route('/api/images/<int:image_id>/full')
+def get_full_image(image_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT drive_file_id FROM images WHERE id = ?', (image_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({'error': 'Image not found'}), 404
+
+    file_id = row['drive_file_id']
+    try:
+        service = get_drive_service()
+        req = service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, req)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        fh.seek(0)
+        return send_file(fh, mimetype='image/jpeg', as_attachment=False)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/regenerate-thumbnails', methods=['POST'])
+def regenerate_thumbnails():
+    def _regenerate_job():
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT id, drive_file_id FROM images ORDER BY id DESC')
+        images = c.fetchall()
+        conn.close()
+
+        service = get_drive_service()
+        for img in images:
+            try:
+                file_id = img['drive_file_id']
+                req = service.files().get_media(fileId=file_id)
+                fh = io.BytesIO()
+                downloader = MediaIoBaseDownload(fh, req)
+                done = False
+                while not done:
+                    status, done = downloader.next_chunk()
+
+                image_data = fh.getvalue()
+                thumbnail = generate_thumbnail(image_data)
+
+                if thumbnail:
+                    conn = get_db()
+                    c = conn.cursor()
+                    c.execute('UPDATE images SET thumbnail_blob = ? WHERE id = ?', (thumbnail, img['id']))
+                    conn.commit()
+                    conn.close()
+            except Exception as e:
+                print(f"[regenerate] Failed {img['id']}: {e}")
+                continue
+        print("[regenerate] All thumbnails updated")
+
+    if sync_state['in_progress']:
+        return jsonify({'error': 'Sync already in progress'}), 400
+
+    sync_state['in_progress'] = True
+    thread = threading.Thread(target=_regenerate_job, daemon=True)
+    thread.start()
+
+    return jsonify({'success': True, 'message': 'Thumbnail regeneration started'})
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

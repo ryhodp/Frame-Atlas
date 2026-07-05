@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import ImageDetail from '../components/ImageDetail';
 
 export default function Home() {
   const [chips, setChips] = useState([]);
@@ -8,6 +9,7 @@ export default function Home() {
   const [images, setImages] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [selectedImageId, setSelectedImageId] = useState(null);
 
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
@@ -308,6 +310,7 @@ export default function Home() {
             {row.map(img => (
               <div
                 key={img.id}
+                onClick={() => setSelectedImageId(img.id)}
                 style={{
                   flex: `${img.ar_float || 1.78} 1 0`,
                   position: 'relative',
@@ -406,6 +409,14 @@ export default function Home() {
 
         <div style={{ height: '30px' }} />
       </div>
+
+      {/* Detail panel */}
+      {selectedImageId && (
+        <ImageDetail
+          imageId={selectedImageId}
+          onClose={() => setSelectedImageId(null)}
+        />
+      )}
 
       <style>{`
         @keyframes fapop {
