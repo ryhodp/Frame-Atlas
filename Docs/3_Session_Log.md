@@ -106,3 +106,46 @@ The tagging pass must happen before search is useful — no tags in DB yet. Budg
 2. Replace with the new `Home.jsx` Claude provided in the Day 4 chat (search bar, autocomplete dropdown, chip filtering wired to `/api/search`)
 3. Commit → Railway redeploys → test search bar and chip filtering
 4. Once confirmed working, Day 4 is fully complete — proceed to Day 5 scope
+
+---
+
+## Day 5 — Thumbnail Upgrade + Full-Res Detail View
+*Status: DEPLOYED, waiting for Railway redeploy to complete*
+
+### What We Built
+- ✅ Updated `generate_thumbnail()` function: 600px width, quality 75 (was 400x400, quality 85)
+- ✅ New endpoint `/api/images/<id>/full` — streams full-resolution images from Drive to browser
+- ✅ New endpoint `/api/regenerate-thumbnails` — bulk regenerates all 97 existing thumbnails with new spec
+- ✅ Built `ImageDetail.jsx` component: side panel (slides in from right) showing:
+  - Full-res image via `/api/images/<id>/full`
+  - Caption (from Gemini tagging)
+  - All tags grouped by category (Mood, Lighting, Location, etc.) with colored badges
+  - Aspect ratio and date added
+  - Color palette swatches
+  - Favorite and Flag buttons
+- ✅ Wired up grid click handlers in `Home.jsx` to open detail panel
+- ✅ Added semi-transparent backdrop overlay when detail panel is open
+- ✅ Code committed to GitHub — Railway auto-deploying (~3 min total)
+
+### Code / Files Changed
+- `backend/app.py` — updated `generate_thumbnail()` with width/quality params, added two new endpoints
+- `frontend/src/components/ImageDetail.jsx` — new side panel component (256 lines)
+- `frontend/src/pages/Home.jsx` — imported ImageDetail, added state for selectedImageId, wired click handlers
+
+### Next Steps for Day 5 Verification
+1. Wait for Railway deployment to complete (~1-2 min from session log time)
+2. Test grid: click any image → detail panel should slide in from right with semi-transparent backdrop
+3. Verify full-res image loads (may be slightly pixelated if not regenerated yet)
+4. Verify metadata displays (caption, tags, aspect ratio, date, palette)
+5. Test close button and backdrop click to close panel
+6. POST to `/api/regenerate-thumbnails` to start bulk thumbnail rebuild
+7. Monitor `/api/sync/status` to see regeneration progress
+8. Once regeneration completes, grid thumbnails should appear sharper (600px vs 400px)
+
+### Technical Notes
+- `generate_thumbnail()` now resizes to width parameter, maintaining aspect ratio
+- `/api/images/<id>/full` streams directly from Drive service account (no browser credentials exposed)
+- Regenerate endpoint runs in background thread (non-blocking)
+- Detail panel fetches image data from `/api/images?user_id=1` (same call Home.jsx uses)
+- Full-res image fetched separately from `/api/images/<id>/full` endpoint
+- Detail panel animations: backdrop fade-in (0.2s), panel slide-in-right (0.3s cubic-bezier)
