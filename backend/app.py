@@ -921,10 +921,12 @@ def search():
         params.extend(group)
 
     if color_raw:
-        # Small library — compute color matches in Python
-        threshold = 2200
+        # Small library — compute color matches in Python.
+        # Only the two dominant palette colors count, so a color pick means
+        # "images with this overall cast," not "images containing it anywhere."
+        threshold = 1500
         matched_ids = set()
-        for row in c.execute('SELECT DISTINCT image_id, hex FROM colors').fetchall():
+        for row in c.execute('SELECT DISTINCT image_id, hex FROM colors WHERE rank <= 1').fetchall():
             try:
                 if color_distance(color_raw, row['hex']) < threshold:
                     matched_ids.add(row['image_id'])
