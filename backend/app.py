@@ -9,6 +9,7 @@ import queue as queue_module
 from datetime import datetime
 from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context, redirect, session
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 from PIL import Image
 import google.auth.transport.requests
 from google.oauth2.service_account import Credentials
@@ -20,6 +21,10 @@ from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from google import genai as genai_client
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
+# Railway's proxy terminates HTTPS in front of us; without this, Flask thinks
+# every request arrived over plain http and builds http:// URLs (which breaks
+# the Google OAuth redirect_uri).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 CORS(app)
 # Only needed to hold the OAuth CSRF state between /login and /callback — a
 # fresh secret each boot is fine since that round-trip finishes in seconds.
