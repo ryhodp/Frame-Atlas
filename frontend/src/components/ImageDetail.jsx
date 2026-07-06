@@ -85,16 +85,12 @@ export default function ImageDetail({ image, onClose }) {
           animation: 'slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
         }}
       >
-        {/* Header */}
+        {/* Header — filename lives in the metadata card below */}
         <div style={{
-          padding: '16px 20px',
+          padding: '12px 20px',
           borderBottom: '1px solid rgba(255,255,255,0.065)',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+          display: 'flex', justifyContent: 'flex-end', alignItems: 'center'
         }}>
-          <span style={{
-            fontSize: '13px', color: '#65625a',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-          }}>{image.filename}</span>
           <button
             onClick={onClose}
             style={{
@@ -161,11 +157,6 @@ export default function ImageDetail({ image, onClose }) {
                 <div style={{ fontSize: '9px', fontWeight: 600, color: '#65625a', letterSpacing: '0.08em' }}>ASPECT RATIO</div>
                 <div style={{ fontSize: '13px', color: '#efeadd', marginTop: '4px' }}>
                   {image.ar_label || image.aspect_ratio}
-                  {image.ar_label && image.ar_label !== image.aspect_ratio && (
-                    <span style={{ fontSize: '10px', color: '#65625a', marginLeft: '6px' }}>
-                      ({image.aspect_ratio})
-                    </span>
-                  )}
                 </div>
               </div>
               <div>

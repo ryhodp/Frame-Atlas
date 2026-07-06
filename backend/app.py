@@ -515,6 +515,9 @@ def get_image_aspect_ratio(image_data):
 # nearest of these. The exact ratio stays in the DB for layout math.
 STANDARD_ASPECT_RATIOS = [
     ('9:16', 9 / 16),
+    ('2:3', 2 / 3),
+    ('3:4', 3 / 4),
+    ('4:5', 4 / 5),
     ('1:1', 1.0),
     ('4:3', 4 / 3),
     ('3:2', 3 / 2),
@@ -571,6 +574,26 @@ def extract_palette(image_data, num_colors=10):
         def _dist(a, b):
             return ((a[0]-b[0]) * 0.30) ** 2 + ((a[1]-b[1]) * 0.59) ** 2 + ((a[2]-b[2]) * 0.11) ** 2
 
+        def _is_dup(rgb, chosen):
+            # Hue-aware dedupe: the brightness-weighted distance alone thinks
+            # dark green == dark brown and white == pale sage. Colors from
+            # different hue families never merge unless nearly identical.
+            h1, s1, v1 = colorsys.rgb_to_hsv(rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0)
+            for c in chosen:
+                h2, s2, v2 = colorsys.rgb_to_hsv(c[0]/255.0, c[1]/255.0, c[2]/255.0)
+                d = _dist(rgb, c)
+                if d < 120:  # nearly identical regardless of hue
+                    return True
+                if s1 > 0.16 and s2 > 0.16:
+                    hd = abs(h1 - h2)
+                    hd = min(hd, 1 - hd)  # hue wraps around the color wheel
+                    if d < 450 and hd < 0.09:
+                        return True
+                elif s1 <= 0.16 and s2 <= 0.16:
+                    if abs(v1 - v2) < 0.25:  # spread neutrals across brightness
+                        return True
+            return False
+
         chromatic.sort(reverse=True)
         neutrals.sort(reverse=True)
 
@@ -580,12 +603,14 @@ def extract_palette(image_data, num_colors=10):
                 break
             if share < 0.001:  # under ~0.1% of pixels = JPEG noise, not a color
                 continue
-            if all(_dist(rgb, c) >= 450 for c in picked):
+            if not _is_dup(rgb, picked):
                 picked.append(rgb)
         for score, share, rgb in neutrals:
             if len(picked) >= num_colors:
                 break
-            if all(_dist(rgb, c) >= 450 for c in picked):
+            if share < 0.01:  # a neutral must cover at least 1% of the frame
+                continue
+            if not _is_dup(rgb, picked):
                 picked.append(rgb)
 
         return ['#%02x%02x%02x' % c for c in picked]
