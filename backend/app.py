@@ -288,6 +288,17 @@ def init_db():
     except Exception:
         pass
 
+    # V7: fingerprints for duplicate detection.
+    # md5_checksum = exact-file fingerprint (comes free from Drive metadata)
+    # phash        = perceptual hash, a visual fingerprint that survives resizing/re-saving
+    for _col in ('md5_checksum', 'phash'):
+        try:
+            c.execute(f"ALTER TABLE images ADD COLUMN {_col} TEXT")
+            conn.commit()
+            print(f"[migration] Added {_col} column")
+        except Exception:
+            pass
+
     c.execute("""
         UPDATE images SET tagging_status = 'done'
         WHERE id IN (SELECT DISTINCT image_id FROM tags)
@@ -457,9 +468,14 @@ def get_drive_service():
     creds_dict = json.loads(creds_json)
     credentials = Credentials.from_service_account_info(
         creds_dict,
-        scopes=['https://www.googleapis.com/auth/drive.readonly']
+        # Full drive scope so delete can move files to _Removed. Actual power is
+        # still capped by what the folder share grants the service account
+        # (Viewer = read-only, Editor = can move files).
+        scopes=['https://www.googleapis.com/auth/drive']
     )
     return build('drive', 'v3', credentials=credentials)
+
+REMOVED_FOLDER_NAME = '_Removed'
 
 def list_images_in_folder(service, folder_id, page_token=None):
     images = []
@@ -467,7 +483,7 @@ def list_images_in_folder(service, folder_id, page_token=None):
     results = service.files().list(
         q=query,
         spaces='drive',
-        fields='files(id, name, mimeType, size), nextPageToken',
+        fields='files(id, name, mimeType, size, md5Checksum), nextPageToken',
         pageSize=100,
         pageToken=page_token
     ).execute()
@@ -475,6 +491,9 @@ def list_images_in_folder(service, folder_id, page_token=None):
     items = results.get('files', [])
     for item in items:
         if item['mimeType'] == 'application/vnd.google-apps.folder':
+            # Deleted images live in _Removed — never re-import them
+            if item['name'] == REMOVED_FOLDER_NAME:
+                continue
             images.extend(list_images_in_folder(service, item['id']))
         elif item['mimeType'] in ['image/jpeg', 'image/png', 'image/webp', 'image/gif']:
             images.append(item)
@@ -500,6 +519,56 @@ def generate_thumbnail(image_data, width=800, quality=85):
         return thumb_io.getvalue()
     except Exception:
         return None
+
+def compute_phash(image_data):
+    """Perceptual 'difference hash' — a 64-bit visual fingerprint.
+
+    Shrinks the image to a 9x8 grayscale grid and records, for each pixel,
+    whether it's brighter than its right-hand neighbor. Two visually identical
+    images (even resized, screenshotted, or re-saved) produce nearly identical
+    fingerprints; counting differing bits (hamming distance) measures how
+    visually different they are."""
+    try:
+        img = Image.open(io.BytesIO(image_data)).convert('L').resize(
+            (9, 8), Image.Resampling.LANCZOS)
+        px = list(img.getdata())
+        bits = 0
+        for row in range(8):
+            for col in range(8):
+                bits = (bits << 1) | (1 if px[row * 9 + col] > px[row * 9 + col + 1] else 0)
+        return f'{bits:016x}'
+    except Exception:
+        return None
+
+def phash_distance(a, b):
+    return bin(int(a, 16) ^ int(b, 16)).count('1')
+
+# At or below this many differing bits (out of 64), two images are considered
+# near-duplicates. 0 = pixel-identical layout; 6 tolerates resize/re-compress.
+PHASH_NEAR_DUP_THRESHOLD = 6
+
+def get_root_folder_id():
+    """The Drive folder being synced — where _Removed lives."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT folder_id FROM sync_settings ORDER BY id DESC LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    return row['folder_id'] if row else '1LHPVyo3QjOEcizc1Io2UVjxzX4FQ7yDG'
+
+def get_or_create_removed_folder(service, root_id):
+    q = (f"'{root_id}' in parents and name = '{REMOVED_FOLDER_NAME}' "
+         "and mimeType = 'application/vnd.google-apps.folder' and trashed = false")
+    res = service.files().list(q=q, fields='files(id)').execute()
+    found = res.get('files', [])
+    if found:
+        return found[0]['id']
+    meta = {
+        'name': REMOVED_FOLDER_NAME,
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [root_id],
+    }
+    return service.files().create(body=meta, fields='id').execute()['id']
 
 def get_image_aspect_ratio(image_data):
     try:
@@ -690,9 +759,10 @@ def sync_folder_worker(folder_id, user_id):
                 conn = get_db()
                 c = conn.cursor()
                 c.execute('''
-                    INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio, tagging_status)
-                    VALUES (?, ?, ?, ?, ?, 'pending')
-                ''', (user_id, file_id, filename, thumbnail, aspect_ratio))
+                    INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio, tagging_status, md5_checksum, phash)
+                    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+                ''', (user_id, file_id, filename, thumbnail, aspect_ratio,
+                      image.get('md5Checksum'), compute_phash(thumbnail)))
                 new_image_id = c.lastrowid
                 conn.commit()
                 conn.close()
@@ -1292,6 +1362,239 @@ def extract_colors():
             count += 1
 
     return jsonify({'success': True, 'extracted': count, 'skipped': len(images) - count})
+
+# ============================================================================
+# DAY 8 (V7): IMAGE ACTIONS — favorite, flag, tags, download, delete
+# ============================================================================
+
+@app.route('/api/images/<int:image_id>/favorite', methods=['POST'])
+def toggle_favorite(image_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('UPDATE images SET is_favorite = 1 - is_favorite WHERE id = ?', (image_id,))
+    if c.rowcount == 0:
+        conn.close()
+        return jsonify({'error': 'Image not found'}), 404
+    conn.commit()
+    c.execute('SELECT is_favorite FROM images WHERE id = ?', (image_id,))
+    val = c.fetchone()[0]
+    conn.close()
+    return jsonify({'success': True, 'is_favorite': val})
+
+@app.route('/api/images/<int:image_id>/flag', methods=['POST'])
+def toggle_flag(image_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('UPDATE images SET is_flagged = 1 - is_flagged WHERE id = ?', (image_id,))
+    if c.rowcount == 0:
+        conn.close()
+        return jsonify({'error': 'Image not found'}), 404
+    conn.commit()
+    c.execute('SELECT is_flagged FROM images WHERE id = ?', (image_id,))
+    val = c.fetchone()[0]
+    conn.close()
+    return jsonify({'success': True, 'is_flagged': val})
+
+@app.route('/api/images/<int:image_id>/tags', methods=['POST', 'DELETE'])
+def edit_tags(image_id):
+    data = request.get_json(force=True) or {}
+    category = (data.get('category') or '').strip()
+    value = (data.get('value') or '').strip().lower()
+    if not category or not value:
+        return jsonify({'error': 'category and value are required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT user_id FROM images WHERE id = ?', (image_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Image not found'}), 404
+
+    if request.method == 'POST':
+        c.execute('''
+            SELECT 1 FROM tags WHERE image_id = ? AND category = ? AND value = ?
+        ''', (image_id, category, value))
+        if not c.fetchone():
+            c.execute('''
+                INSERT INTO tags (image_id, user_id, category, value)
+                VALUES (?, ?, ?, ?)
+            ''', (image_id, row['user_id'], category, value))
+    else:
+        c.execute('''
+            DELETE FROM tags WHERE image_id = ? AND category = ? AND value = ?
+        ''', (image_id, category, value))
+
+    conn.commit()
+    c.execute('SELECT category, value FROM tags WHERE image_id = ? ORDER BY category, value', (image_id,))
+    tags = [{'category': t[0], 'value': t[1]} for t in c.fetchall()]
+    conn.close()
+    return jsonify({'success': True, 'tags': tags})
+
+@app.route('/api/images/<int:image_id>/download')
+def download_image(image_id):
+    import mimetypes
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT drive_file_id, filename FROM images WHERE id = ?', (image_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'Image not found'}), 404
+    try:
+        service = get_drive_service()
+        req = service.files().get_media(fileId=row['drive_file_id'])
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, req)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        fh.seek(0)
+        mime = mimetypes.guess_type(row['filename'])[0] or 'application/octet-stream'
+        return send_file(fh, mimetype=mime, as_attachment=True, download_name=row['filename'])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/images/<int:image_id>', methods=['DELETE'])
+def delete_image(image_id):
+    """Moves the Drive file into _Removed (recoverable), then removes the image
+    and all its metadata from the library."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT drive_file_id, filename FROM images WHERE id = ?', (image_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'Image not found'}), 404
+
+    try:
+        service = get_drive_service()
+        file_id = row['drive_file_id']
+        f = service.files().get(fileId=file_id, fields='parents').execute()
+        prev_parents = ','.join(f.get('parents', []))
+        removed_id = get_or_create_removed_folder(service, get_root_folder_id())
+        service.files().update(
+            fileId=file_id,
+            addParents=removed_id,
+            removeParents=prev_parents,
+            fields='id'
+        ).execute()
+    except Exception as e:
+        msg = str(e)
+        if 'insufficient' in msg.lower() or 'permission' in msg.lower() or '403' in msg:
+            return jsonify({
+                'error': ("Drive blocked the move — the service account only has Viewer "
+                          "access. In Drive: right-click the folder → Share → change the "
+                          "service account's role to Editor, then try again.")
+            }), 403
+        return jsonify({'error': f'Could not move file in Drive: {msg}'}), 500
+
+    conn = get_db()
+    c = conn.cursor()
+    for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography'):
+        c.execute(f'DELETE FROM {table} WHERE image_id = ?', (image_id,))
+    c.execute('DELETE FROM images WHERE id = ?', (image_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'moved_to': REMOVED_FOLDER_NAME, 'filename': row['filename']})
+
+# ============================================================================
+# DAY 8 (V7): DUPLICATE DETECTION
+# ============================================================================
+
+@app.route('/api/duplicates/scan', methods=['POST'])
+def duplicates_scan():
+    """Backfills fingerprints for any image missing them, then returns
+    duplicate groups. phash comes from stored thumbnails (instant); md5 comes
+    from one Drive folder listing (a few seconds)."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, thumbnail_blob FROM images WHERE phash IS NULL')
+    for r in c.fetchall():
+        ph = compute_phash(r['thumbnail_blob'])
+        if ph:
+            c.execute('UPDATE images SET phash = ? WHERE id = ?', (ph, r['id']))
+    conn.commit()
+    c.execute('SELECT COUNT(*) FROM images WHERE md5_checksum IS NULL')
+    missing_md5 = c.fetchone()[0]
+    conn.close()
+
+    if missing_md5:
+        try:
+            service = get_drive_service()
+            files = list_images_in_folder(service, get_root_folder_id())
+            md5_map = {f['id']: f.get('md5Checksum') for f in files}
+            conn = get_db()
+            c = conn.cursor()
+            c.execute('SELECT id, drive_file_id FROM images WHERE md5_checksum IS NULL')
+            for r in c.fetchall():
+                m = md5_map.get(r['drive_file_id'])
+                if m:
+                    c.execute('UPDATE images SET md5_checksum = ? WHERE id = ?', (m, r['id']))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[duplicates] md5 backfill failed: {e}")
+
+    return find_duplicates()
+
+@app.route('/api/duplicates', methods=['GET'])
+def find_duplicates():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, filename, thumbnail_blob, md5_checksum, phash, date_added, aspect_ratio
+        FROM images ORDER BY date_added ASC
+    ''')
+    rows = c.fetchall()
+    conn.close()
+
+    # Union-find: any two images linked by an exact or near match end up in
+    # the same group, even chains (A~B, B~C => one group of three).
+    n = len(rows)
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    exact_pairs = set()
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = rows[i], rows[j]
+            if a['md5_checksum'] and a['md5_checksum'] == b['md5_checksum']:
+                parent[find(i)] = find(j)
+                exact_pairs.add((i, j))
+            elif (a['phash'] and b['phash']
+                  and phash_distance(a['phash'], b['phash']) <= PHASH_NEAR_DUP_THRESHOLD):
+                parent[find(i)] = find(j)
+
+    buckets = {}
+    for i in range(n):
+        buckets.setdefault(find(i), []).append(i)
+
+    groups = []
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        all_exact = all(
+            (min(i, j), max(i, j)) in exact_pairs
+            for i in members for j in members if i < j
+        )
+        groups.append({
+            'kind': 'exact' if all_exact else 'near',
+            'images': [{
+                'id': rows[i]['id'],
+                'filename': rows[i]['filename'],
+                'thumbnail': f"data:image/jpeg;base64,{base64.b64encode(rows[i]['thumbnail_blob']).decode('utf-8')}",
+                'date_added': rows[i]['date_added'],
+                'aspect_ratio': rows[i]['aspect_ratio'],
+            } for i in members]
+        })
+
+    return jsonify({'groups': groups, 'count': len(groups)})
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

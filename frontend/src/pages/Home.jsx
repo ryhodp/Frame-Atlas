@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ImageDetail from '../components/ImageDetail';
+import DuplicateReview from '../components/DuplicateReview';
 
 const PRESET_SWATCHES = [
   '#D9A441', '#E08840', '#B33A3A', '#C75B8B',
@@ -27,6 +28,7 @@ export default function Home() {
   const [bookmarks, setBookmarks] = useState([]);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [saveName, setSaveName] = useState('');
+  const [showDuplicates, setShowDuplicates] = useState(false);
 
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
@@ -207,6 +209,18 @@ export default function Home() {
     } catch {}
   };
 
+  // ── Detail-panel callbacks: keep grid in sync with edits ────────────────────
+  const handleImageUpdated = (id, patch) => {
+    setImages(prev => prev.map(img => img.id === id ? { ...img, ...patch } : img));
+    setSelectedImage(prev => (prev && prev.id === id) ? { ...prev, ...patch } : prev);
+  };
+
+  const handleImageDeleted = (id) => {
+    setImages(prev => prev.filter(img => img.id !== id));
+    setTotal(t => Math.max(0, t - 1));
+    setSelectedImage(prev => (prev && prev.id === id) ? null : prev);
+  };
+
   // ── True masonry: distribute images into columns, shortest-first ────────────
   // Every image keeps its full aspect ratio — nothing is cropped.
   // Placement is greedy in order, so appending a page never reshuffles
@@ -289,6 +303,23 @@ export default function Home() {
               </span>
             )}
           </div>
+
+          {/* Duplicate review */}
+          <button
+            onClick={() => setShowDuplicates(true)}
+            title="Find duplicate images"
+            style={{
+              height: '46px', width: '46px',
+              background: '#18181b',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '10px',
+              cursor: 'pointer',
+              color: '#9c988d',
+              fontSize: '15px'
+            }}
+          >
+            ⧉
+          </button>
 
           {/* Bookmark button + dropdown */}
           <div data-bookmark-area style={{ position: 'relative' }}>
@@ -795,6 +826,16 @@ export default function Home() {
         <ImageDetail
           image={selectedImage}
           onClose={() => setSelectedImage(null)}
+          onUpdated={handleImageUpdated}
+          onDeleted={handleImageDeleted}
+        />
+      )}
+
+      {/* Duplicate review modal */}
+      {showDuplicates && (
+        <DuplicateReview
+          onClose={() => setShowDuplicates(false)}
+          onImageDeleted={handleImageDeleted}
         />
       )}
 
