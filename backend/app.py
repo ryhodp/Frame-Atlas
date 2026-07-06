@@ -7,18 +7,23 @@ import time
 import threading
 import queue as queue_module
 from datetime import datetime
-from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context
+from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context, redirect, session
 from flask_cors import CORS
 from PIL import Image
 import google.auth.transport.requests
 from google.oauth2.service_account import Credentials
+from google.oauth2.credentials import Credentials as UserCredentials
+from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from google import genai as genai_client
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)
+# Only needed to hold the OAuth CSRF state between /login and /callback — a
+# fresh secret each boot is fine since that round-trip finishes in seconds.
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(24)
 
 DB_PATH = '/app/data/library.db'
 
@@ -299,6 +304,22 @@ def init_db():
         except Exception:
             pass
 
+    # V7 part 2: holds the signed-in user's Google OAuth token (for uploads),
+    # separate from the read-only service account used for sync/download.
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN google_oauth_token TEXT")
+        conn.commit()
+        print("[migration] Added google_oauth_token column")
+    except Exception:
+        pass
+
+    c.execute("""
+        INSERT INTO users (id, username, password_hash)
+        SELECT 1, 'ryan', ''
+        WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = 1)
+    """)
+    conn.commit()
+
     c.execute("""
         UPDATE images SET tagging_status = 'done'
         WHERE id IN (SELECT DISTINCT image_id FROM tags)
@@ -476,6 +497,44 @@ def get_drive_service():
     return build('drive', 'v3', credentials=credentials)
 
 REMOVED_FOLDER_NAME = '_Removed'
+
+# Upload uses a separate OAuth sign-in (acting as Ryan) rather than the
+# read-only service account, since the account needs write access to create
+# files. drive.file is the narrowest scope that allows creating new files —
+# it only ever sees files this app itself created, not the whole Drive.
+UPLOAD_SCOPES = ['https://www.googleapis.com/auth/drive.file']
+
+def get_oauth_flow(redirect_uri):
+    client_config = {
+        "web": {
+            "client_id": os.environ.get('GOOGLE_OAUTH_CLIENT_ID'),
+            "client_secret": os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET'),
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+    return Flow.from_client_config(client_config, scopes=UPLOAD_SCOPES, redirect_uri=redirect_uri)
+
+def get_user_drive_service():
+    """Drive client acting as the signed-in user (for uploads). Returns None
+    if nobody has signed in yet."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT google_oauth_token FROM users WHERE id = 1')
+    row = c.fetchone()
+    conn.close()
+    if not row or not row['google_oauth_token']:
+        return None
+
+    creds = UserCredentials.from_authorized_user_info(json.loads(row['google_oauth_token']), UPLOAD_SCOPES)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE users SET google_oauth_token = ? WHERE id = 1', (creds.to_json(),))
+        conn.commit()
+        conn.close()
+    return build('drive', 'v3', credentials=creds)
 
 def list_images_in_folder(service, folder_id, page_token=None):
     images = []
@@ -1362,6 +1421,120 @@ def extract_colors():
             count += 1
 
     return jsonify({'success': True, 'extracted': count, 'skipped': len(images) - count})
+
+# ============================================================================
+# DAY 8 (V7): GOOGLE SIGN-IN + UPLOAD
+# ============================================================================
+
+@app.route('/api/auth/status')
+def auth_status():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT google_oauth_token FROM users WHERE id = 1')
+    row = c.fetchone()
+    conn.close()
+    return jsonify({'signed_in': bool(row and row['google_oauth_token'])})
+
+@app.route('/api/auth/google/login')
+def google_login():
+    redirect_uri = request.url_root.rstrip('/') + '/api/auth/google/callback'
+    flow = get_oauth_flow(redirect_uri)
+    auth_url, state = flow.authorization_url(
+        access_type='offline', prompt='consent', include_granted_scopes='true')
+    session['oauth_state'] = state
+    return redirect(auth_url)
+
+@app.route('/api/auth/google/callback')
+def google_callback():
+    redirect_uri = request.url_root.rstrip('/') + '/api/auth/google/callback'
+    flow = get_oauth_flow(redirect_uri)
+    try:
+        flow.fetch_token(authorization_response=request.url)
+    except Exception as e:
+        return redirect(f'/?auth_error={e}')
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('UPDATE users SET google_oauth_token = ? WHERE id = 1', (flow.credentials.to_json(),))
+    conn.commit()
+    conn.close()
+    return redirect('/?signed_in=1')
+
+@app.route('/api/upload', methods=['POST'])
+def upload_images():
+    service = get_user_drive_service()
+    if not service:
+        return jsonify({'error': 'not_signed_in', 'message': 'Sign in with Google first.'}), 401
+
+    force = request.args.get('force', '').lower() == 'true'
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify({'error': 'No files provided'}), 400
+
+    folder_id = get_root_folder_id()
+    results = []
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, filename, thumbnail_blob, phash FROM images WHERE phash IS NOT NULL')
+    existing = c.fetchall()
+    conn.close()
+
+    for f in files:
+        image_data = f.read()
+        filename = f.filename
+        img_phash = compute_phash(image_data)
+
+        if not force and img_phash:
+            dup = next((r for r in existing
+                        if phash_distance(img_phash, r['phash']) <= PHASH_NEAR_DUP_THRESHOLD), None)
+            if dup:
+                results.append({
+                    'filename': filename,
+                    'status': 'duplicate',
+                    'existing': {
+                        'id': dup['id'],
+                        'filename': dup['filename'],
+                        'thumbnail': f"data:image/jpeg;base64,{base64.b64encode(dup['thumbnail_blob']).decode('utf-8')}"
+                    }
+                })
+                continue
+
+        try:
+            media = MediaIoBaseUpload(io.BytesIO(image_data), mimetype=f.mimetype or 'image/jpeg')
+            drive_file = service.files().create(
+                body={'name': filename, 'parents': [folder_id]},
+                media_body=media, fields='id, md5Checksum'
+            ).execute()
+        except Exception as e:
+            results.append({'filename': filename, 'status': 'error', 'message': str(e)})
+            continue
+
+        thumbnail = generate_thumbnail(image_data)
+        aspect_ratio = get_image_aspect_ratio(image_data)
+
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio, tagging_status, md5_checksum, phash)
+            VALUES (1, ?, ?, ?, ?, 'pending', ?, ?)
+        ''', (drive_file['id'], filename, thumbnail, aspect_ratio, drive_file.get('md5Checksum'), img_phash))
+        new_id = c.lastrowid
+        conn.commit()
+        conn.close()
+
+        if thumbnail:
+            hexes = extract_palette(thumbnail)
+            if hexes:
+                save_palette(new_id, 1, hexes)
+            existing.append({'id': new_id, 'filename': filename, 'thumbnail_blob': thumbnail, 'phash': img_phash})
+
+        results.append({'filename': filename, 'status': 'uploaded', 'image_id': new_id})
+
+    if any(r['status'] == 'uploaded' for r in results):
+        trigger_tagging()
+
+    return jsonify({'results': results})
 
 # ============================================================================
 # DAY 8 (V7): IMAGE ACTIONS — favorite, flag, tags, download, delete

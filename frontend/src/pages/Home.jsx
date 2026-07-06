@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ImageDetail from '../components/ImageDetail';
 import DuplicateReview from '../components/DuplicateReview';
+import UploadButton from '../components/UploadButton';
 
 const PRESET_SWATCHES = [
   '#D9A441', '#E08840', '#B33A3A', '#C75B8B',
@@ -303,6 +304,9 @@ export default function Home() {
               </span>
             )}
           </div>
+
+          {/* Upload photos */}
+          <UploadButton onUploaded={() => fetchPage(0, false)} />
 
           {/* Duplicate review */}
           <button
