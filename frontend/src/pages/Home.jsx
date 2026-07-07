@@ -15,6 +15,7 @@ export default function Home() {
   const [chips, setChips] = useState([]);
   const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
   const [color, setColor] = useState(null);           // active hex or null
+  const [film, setFilm] = useState(null);             // film/director/DP text filter
   const [searchText, setSearchText] = useState('');
   const [autocomplete, setAutocomplete] = useState([]);
   const [showAuto, setShowAuto] = useState(false);
@@ -37,7 +38,7 @@ export default function Home() {
   const fetchingRef = useRef(false);
   const sentinelRef = useRef(null);
 
-  const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color;
+  const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color || !!film;
 
   // ── Fetch one page of results; append=true keeps existing images ───────────
   const fetchPage = useCallback(async (pageNum, append) => {
@@ -49,6 +50,7 @@ export default function Home() {
       if (chips.length) params.set('chips', chips.join(','));
       if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
       if (color) params.set('color', color);
+      if (film) params.set('film', film);
       params.set('page', pageNum);
       params.set('per', PER_PAGE);
       const res = await fetch(`/api/search?${params}`);
@@ -62,7 +64,7 @@ export default function Home() {
     }
     setLoading(false);
     fetchingRef.current = false;
-  }, [chips, nlChips, color]);
+  }, [chips, nlChips, color, film]);
 
   // Filters changed → reset to page 0
   useEffect(() => { fetchPage(0, false); }, [fetchPage]);
@@ -142,6 +144,7 @@ export default function Home() {
     setChips([]);
     setNlChips([]);
     setColor(null);
+    setFilm(null);
   };
 
   // ── NL fallback: interpret free text via Gemini ─────────────────────────────
@@ -186,7 +189,7 @@ export default function Home() {
       await fetch('/api/bookmarks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, state: { chips, nlChips, color } })
+        body: JSON.stringify({ name, state: { chips, nlChips, color, film } })
       });
       setSaveName('');
       loadBookmarks();
@@ -199,6 +202,7 @@ export default function Home() {
     setChips(bm.state.chips || []);
     setNlChips(bm.state.nlChips || []);
     setColor(bm.state.color || null);
+    setFilm(bm.state.film || null);
     setShowBookmarks(false);
   };
 
@@ -421,6 +425,7 @@ export default function Home() {
                           {[
                             ...(bm.state.chips || []),
                             ...(bm.state.nlChips || []).map(n => `“${n.phrase}”`),
+                            ...(bm.state.film ? [`🎬 ${bm.state.film}`] : []),
                             ...(bm.state.color ? [bm.state.color] : [])
                           ].join(' · ') || 'empty'}
                         </div>
@@ -566,9 +571,31 @@ export default function Home() {
           )}
         </div>
 
-        {/* Active chips (tags + NL phrases) */}
-        {(chips.length > 0 || nlChips.length > 0) && (
+        {/* Active chips (tags + NL phrases + film) */}
+        {(chips.length > 0 || nlChips.length > 0 || film) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginTop: '12px' }}>
+            {/* Film chip — from clicking a title/director/DP in the detail panel */}
+            {film && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                background: 'rgba(111,163,184,0.12)',
+                border: '1px solid rgba(111,163,184,0.45)',
+                borderRadius: '6px',
+                padding: '4px 8px 4px 9px',
+                fontSize: '12.5px', color: '#8fc3d8', fontWeight: 500
+              }}>
+                🎬 {film}
+                <button
+                  onClick={() => setFilm(null)}
+                  style={{
+                    background: 'none', border: 'none', color: '#8fc3d8',
+                    cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
+                >×</button>
+              </span>
+            )}
             {chips.map(chip => (
               <span key={chip} style={{
                 display: 'inline-flex', alignItems: 'center', gap: '6px',
@@ -652,7 +679,7 @@ export default function Home() {
           )}
           {hasFilters && (
             <span style={{ color: '#65625a' }}>
-              {' '}· {chips.length + nlChips.length + (color ? 1 : 0)} filter{(chips.length + nlChips.length + (color ? 1 : 0)) > 1 ? 's' : ''} active
+              {' '}· {chips.length + nlChips.length + (color ? 1 : 0) + (film ? 1 : 0)} filter{(chips.length + nlChips.length + (color ? 1 : 0) + (film ? 1 : 0)) > 1 ? 's' : ''} active
             </span>
           )}
         </span>
@@ -832,6 +859,10 @@ export default function Home() {
           onClose={() => setSelectedImage(null)}
           onUpdated={handleImageUpdated}
           onDeleted={handleImageDeleted}
+          onSearchFilm={(query) => {
+            setFilm(query);
+            setSelectedImage(null); // close panel so the filtered grid is visible
+          }}
         />
       )}
 

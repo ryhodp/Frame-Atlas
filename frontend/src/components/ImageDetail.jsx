@@ -18,7 +18,7 @@ const CAT_ORDER = [
   'genre_aesthetic', 'era_decade', 'camera_format'
 ];
 
-export default function ImageDetail({ image, onClose, onUpdated, onDeleted }) {
+export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSearchFilm }) {
   const [fullImage, setFullImage] = useState(null);
   const [fullError, setFullError] = useState(false);
 
@@ -29,6 +29,10 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted }) {
   const [editingTags, setEditingTags] = useState(false);
   const [newTagCat, setNewTagCat] = useState('mood');
   const [newTagValue, setNewTagValue] = useState('');
+
+  const [film, setFilm] = useState(image?.filmography || null);
+  const [editingFilm, setEditingFilm] = useState(false);
+  const [filmDraft, setFilmDraft] = useState({ title: '', director: '', dp: '', year: '' });
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -43,6 +47,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted }) {
     setIsFavorite(!!image.is_favorite);
     setIsFlagged(!!image.is_flagged);
     setEditingTags(false);
+    setFilm(image.filmography || null);
+    setEditingFilm(false);
     setConfirmDelete(false);
     setDeleteError(null);
 
@@ -136,6 +142,32 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted }) {
       }
     } catch {}
   };
+
+  const startEditFilm = () => {
+    setFilmDraft({
+      title: film?.title || '', director: film?.director || '',
+      dp: film?.dp || '', year: film?.year || ''
+    });
+    setEditingFilm(true);
+  };
+
+  const saveFilm = async (draft) => {
+    try {
+      const res = await fetch(`/api/images/${image.id}/filmography`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFilm(data.filmography);
+        onUpdated?.(image.id, { filmography: data.filmography });
+        setEditingFilm(false);
+      }
+    } catch {}
+  };
+
+  const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '' });
 
   const doDelete = async () => {
     setDeleting(true);
@@ -241,6 +273,196 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted }) {
 
           {/* Metadata */}
           <div style={{ padding: '20px' }}>
+            {/* Filmography title card — film info Gemini recognized, editable */}
+            {(film || editingFilm) && (
+              <div style={{
+                marginBottom: '20px', padding: '14px 16px',
+                background: 'rgba(201,162,83,0.05)',
+                border: '1px solid rgba(201,162,83,0.18)',
+                borderRadius: '10px'
+              }}>
+                {!editingFilm ? (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {film.title && (
+                        <div style={{ marginBottom: '4px' }}>
+                          <button
+                            onClick={() => onSearchFilm?.(film.title)}
+                            title={`Search all frames from “${film.title}”`}
+                            style={{
+                              background: 'none', border: 'none', padding: 0,
+                              color: '#efeadd', fontSize: '16px', fontWeight: 700,
+                              letterSpacing: '0.02em', cursor: 'pointer',
+                              fontFamily: 'inherit', textAlign: 'left'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.color = '#dcbd76'}
+                            onMouseLeave={e => e.currentTarget.style.color = '#efeadd'}
+                          >
+                            {film.title}
+                          </button>
+                          {film.year && (
+                            <span style={{ fontSize: '13px', color: '#9c988d', marginLeft: '7px' }}>
+                              ({film.year})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div style={{ fontSize: '12px', color: '#9c988d', display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
+                        {film.director && (
+                          <span>
+                            dir.{' '}
+                            <button
+                              onClick={() => onSearchFilm?.(film.director)}
+                              title={`Search all frames directed by ${film.director}`}
+                              style={{
+                                background: 'none', border: 'none', padding: 0,
+                                color: '#dcbd76', fontSize: '12px', cursor: 'pointer',
+                                fontFamily: 'inherit', textDecoration: 'underline',
+                                textDecorationColor: 'rgba(201,162,83,0.35)', textUnderlineOffset: '2px'
+                              }}
+                            >
+                              {film.director}
+                            </button>
+                          </span>
+                        )}
+                        {film.dp && (
+                          <span>
+                            DP{' '}
+                            <button
+                              onClick={() => onSearchFilm?.(film.dp)}
+                              title={`Search all frames shot by ${film.dp}`}
+                              style={{
+                                background: 'none', border: 'none', padding: 0,
+                                color: '#dcbd76', fontSize: '12px', cursor: 'pointer',
+                                fontFamily: 'inherit', textDecoration: 'underline',
+                                textDecorationColor: 'rgba(201,162,83,0.35)', textUnderlineOffset: '2px'
+                              }}
+                            >
+                              {film.dp}
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={startEditFilm}
+                      title="Edit film info (AI guesses can be wrong)"
+                      style={{
+                        background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                        color: '#9c988d', borderRadius: '5px', padding: '3px 9px',
+                        cursor: 'pointer', fontSize: '10.5px', fontFamily: 'inherit', flexShrink: 0
+                      }}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: '1fr 76px',
+                      gap: '6px', marginBottom: '6px'
+                    }}>
+                      <input
+                        value={filmDraft.title}
+                        onChange={e => setFilmDraft(d => ({ ...d, title: e.target.value }))}
+                        placeholder="Film title"
+                        style={{
+                          background: '#18181b', color: '#efeadd',
+                          border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                          padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+                        }}
+                      />
+                      <input
+                        value={filmDraft.year}
+                        onChange={e => setFilmDraft(d => ({ ...d, year: e.target.value }))}
+                        placeholder="Year"
+                        style={{
+                          background: '#18181b', color: '#efeadd',
+                          border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                          padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
+                      <input
+                        value={filmDraft.director}
+                        onChange={e => setFilmDraft(d => ({ ...d, director: e.target.value }))}
+                        placeholder="Director"
+                        style={{
+                          background: '#18181b', color: '#efeadd',
+                          border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                          padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+                        }}
+                      />
+                      <input
+                        value={filmDraft.dp}
+                        onChange={e => setFilmDraft(d => ({ ...d, dp: e.target.value }))}
+                        placeholder="Cinematographer (DP)"
+                        style={{
+                          background: '#18181b', color: '#efeadd',
+                          border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                          padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <button
+                        onClick={() => saveFilm(filmDraft)}
+                        style={{
+                          background: 'rgba(201,162,83,0.12)',
+                          border: '1px solid rgba(201,162,83,0.35)',
+                          color: '#dcbd76', borderRadius: '6px', padding: '5px 13px',
+                          fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setEditingFilm(false)}
+                        style={{
+                          background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                          color: '#9c988d', borderRadius: '6px', padding: '5px 13px',
+                          fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <div style={{ flex: 1 }} />
+                      {film && (
+                        <button
+                          onClick={clearFilm}
+                          title="Remove film info entirely (wrong guess)"
+                          style={{
+                            background: 'none', border: '1px solid rgba(207,113,82,0.3)',
+                            color: '#cf7152', borderRadius: '6px', padding: '5px 13px',
+                            fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
+                          }}
+                        >
+                          Not a film / wrong
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Add film info manually when Gemini didn't recognize one */}
+            {!film && !editingFilm && (
+              <button
+                onClick={startEditFilm}
+                style={{
+                  background: 'none', border: 'none', padding: 0,
+                  color: '#65625a', fontSize: '11px', cursor: 'pointer',
+                  fontFamily: 'inherit', marginBottom: '16px', display: 'block'
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = '#dcbd76'}
+                onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+              >
+                + Add film info
+              </button>
+            )}
+
             {/* Caption */}
             {image.caption && (
               <p style={{

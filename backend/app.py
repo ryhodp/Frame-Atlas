@@ -1155,6 +1155,7 @@ def search():
     chips_raw = request.args.get('chips', '').strip()
     nl_raw = request.args.get('nl', '').strip()
     color_raw = request.args.get('color', '').strip()
+    film_raw = request.args.get('film', '').strip()
     page = int(request.args.get('page', 0))
     per = int(request.args.get('per', 50))
     active_chips = [t.strip() for t in chips_raw.split(',') if t.strip()] if chips_raw else []
@@ -1208,6 +1209,16 @@ def search():
         else:
             conditions.append('1 = 0')
 
+    if film_raw:
+        # Match against any filmography field (clicking a director name in the
+        # detail panel searches here). SQLite LIKE is case-insensitive.
+        like = f'%{film_raw}%'
+        conditions.append('''id IN (
+            SELECT image_id FROM filmography
+            WHERE title LIKE ? OR director LIKE ? OR dp LIKE ?
+        )''')
+        params.extend([like, like, like])
+
     where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
 
     rows = c.execute(f'''
@@ -1220,6 +1231,7 @@ def search():
     img_ids = [r['id'] for r in rows]
     tags_map = {}
     colors_map = {}
+    film_map = {}
 
     if img_ids:
         ph = ','.join('?' * len(img_ids))
@@ -1227,6 +1239,11 @@ def search():
             tags_map.setdefault(tr['image_id'], []).append({'category': tr['category'], 'value': tr['value']})
         for cr in c.execute(f'SELECT image_id, hex FROM colors WHERE image_id IN ({ph}) ORDER BY rank ASC', img_ids).fetchall():
             colors_map.setdefault(cr['image_id'], []).append(cr['hex'])
+        for fr in c.execute(f'SELECT image_id, title, director, dp, year FROM filmography WHERE image_id IN ({ph})', img_ids).fetchall():
+            film_map[fr['image_id']] = {
+                'title': fr['title'], 'director': fr['director'],
+                'dp': fr['dp'], 'year': fr['year']
+            }
 
     conn.close()
 
@@ -1251,7 +1268,8 @@ def search():
             'is_favorite': bool(r['is_favorite']),
             'is_flagged': bool(r['is_flagged']),
             'tags': tags_map.get(r['id'], []),
-            'palette': colors_map.get(r['id'], [])
+            'palette': colors_map.get(r['id'], []),
+            'filmography': film_map.get(r['id'])
         })
 
     return jsonify({'images': images_out, 'total': total, 'page': page, 'per': per, 'has_more': (page + 1) * per < total})
@@ -1608,6 +1626,36 @@ def edit_tags(image_id):
     tags = [{'category': t[0], 'value': t[1]} for t in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'tags': tags})
+
+@app.route('/api/images/<int:image_id>/filmography', methods=['POST'])
+def update_filmography(image_id):
+    """Set or clear the film info Gemini guessed for this image. Sending all
+    empty fields clears it entirely."""
+    data = request.get_json(force=True) or {}
+    title = (data.get('title') or '').strip()
+    director = (data.get('director') or '').strip()
+    dp = (data.get('dp') or '').strip()
+    year = str(data.get('year') or '').strip()
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT 1 FROM images WHERE id = ?', (image_id,))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'error': 'Image not found'}), 404
+
+    c.execute('DELETE FROM filmography WHERE image_id = ?', (image_id,))
+    filmography = None
+    if any([title, director, dp, year]):
+        c.execute(
+            'INSERT INTO filmography (image_id, title, director, dp, year) VALUES (?,?,?,?,?)',
+            (image_id, title or None, director or None, dp or None, year or None)
+        )
+        filmography = {'title': title or None, 'director': director or None,
+                       'dp': dp or None, 'year': year or None}
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'filmography': filmography})
 
 @app.route('/api/images/<int:image_id>/download')
 def download_image(image_id):
