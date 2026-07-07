@@ -328,3 +328,70 @@ All feedback captured in `/memory/day7-feedback.md` for Day 8 or polish phase.
 8. Test all workflows end-to-end.
 
 Frame Atlas V6 is now stable. Upload/delete/download + detail panel wiring are the Day 8 blockers.
+
+---
+
+## Day 8 (Parts 2 + 3) — Google OAuth Upload + Filmography (Frame Atlas V7 complete)
+*Completed: July 6, 2026*
+*Status: DAY 8 COMPLETE (deck placeholder intentionally skipped until Day 10)*
+
+### What We Built
+
+**Part 2 — Google Sign-In + Upload (code was pre-written, shipped + tested this session):**
+- ✅ Google OAuth sign-in: `/api/auth/google/login`, `/api/auth/google/callback`, `/api/auth/status`. Uses `drive.file` scope (app only sees files it creates). Token stored in `users` table, auto-refreshes.
+- ✅ `/api/upload` — multipart upload, perceptual-hash duplicate check BEFORE writing to Drive (warn + "Upload anyway" via `force=true`), then thumbnail + palette + auto-tagging trigger.
+- ✅ `UploadButton.jsx` — ⬆ button by search bar; signed-out click routes to Google sign-in, signed-in click opens file picker; results modal shows uploaded/duplicate/error per file.
+- ✅ **Critical fix — ProxyFix:** Railway terminates HTTPS at its proxy, so Flask saw `http://` and built an http redirect URI that Google rejected (`redirect_uri_mismatch`). Fixed with werkzeug `ProxyFix(x_proto=1, x_host=1)`. Applies to ANY future absolute-URL generation on Railway.
+- ✅ Race fix: upload button ignores clicks until the auth-status check resolves (was opening file picker for signed-out users in the first second after page load).
+
+**Part 3 — Filmography (built this session):**
+- ✅ The tagging pipeline had been writing title/director/DP/year to the `filmography` table since Day 4 — but nothing ever read it. Now `/api/search` returns a `filmography` object per image.
+- ✅ Title card in detail panel (above caption, gold-tinted): "Her (2013) · dir. Spike Jonze · DP Hoyte van Hoytema".
+- ✅ Title, director, and DP are clickable → closes panel, adds a teal 🎬 filter chip, grid shows only matching frames.
+- ✅ `film=` param on `/api/search` — exact match (case-insensitive) wins; substring fallback only when nothing matches exactly (fix: "her" was also returning every "Christop**her** Nolan" film).
+- ✅ `POST /api/images/<id>/filmography` — set or clear film info. Detail panel has Edit (fix wrong AI guesses), "Not a film / wrong" (clear), and "+ Add film info" (images with no data).
+- ✅ Film filter works with bookmarks (saved/applied/shown in dropdown preview) and the filter counter.
+
+### End-to-End Tests (all passed live)
+- Sign-in round trip → token stored, `signed_in: true`
+- Duplicate upload (renamed copy of library image) → caught by phash, refused with reference to original
+- New upload → landed in Drive, thumbnail + palette + 28 tags generated
+- Download → full 5.2MB original served back from Drive
+- Delete → moved to `_Removed`, gone from library (also proves Editor grant works)
+- Filmography: 49/246 images have film data (Her ×5, Spectre ×4, Tenet ×3, Tokyo Story ×3…)
+- Clicking "Spike Jonze" → exactly his 5 frames
+- Set/clear/restore filmography via API → all worked
+
+### Bonus
+- The 5 images that permanently failed tagging in Day 7 succeeded during this session's tagging run — library is now fully tagged.
+
+### Decisions Made (Confirmed with Ryan)
+- ✅ Filmography placement: title card at top of detail panel (above caption)
+- ✅ Wrong AI guesses: editable + clearable (not read-only)
+- ✅ Names clickable → film search filter
+- ✅ Add-to-deck placeholder: skipped entirely — real button arrives with the deck system on Day 10
+
+### Technical Debt / Notes
+- `.gitignore` added this session (repo previously had none — node_modules/dist/pycache were untracked noise)
+- `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` env vars confirmed set and working on Railway
+- Debug endpoints (`/api/debug*`, `/api/models`) still flagged for Day 13 removal
+- Local Mac Python (3.14) can't build Pillow — backend can only be fully run on Railway; `python3 -m py_compile` used for syntax checks locally
+- Git committer identity is the default auto-generated one (Ryan may want `git config --global user.name/email` at some point)
+
+### Files Changed
+- `backend/app.py` — OAuth routes, upload, ProxyFix, filmography in search + film= param + edit endpoint
+- `frontend/src/components/UploadButton.jsx` — new component
+- `frontend/src/components/ImageDetail.jsx` — filmography title card + edit mode
+- `frontend/src/pages/Home.jsx` — UploadButton wiring, film filter chip/state/bookmarks
+- `.gitignore` — new
+
+### Commits
+`512a84f` (OAuth+upload) → `b4b5898` (ProxyFix) → `4f64498` (button race) → `540ed5f` (filmography) → `1ee245a` (exact-match film search)
+
+### Starting Point for Day 9
+Day 9 = CLIP + Similar Images:
+1. Write one-time local Python script to generate CLIP embeddings for all images (NOTE: local Python 3.14 can't build Pillow — may need pyenv/homebrew Python 3.12, or run embedding generation on Railway instead)
+2. Store vectors in SQLite `embeddings` table (table already exists)
+3. Add CLIP embedding step to sync pipeline for new images
+4. `/api/images/<id>/similar` — cosine similarity + tag overlap combined score
+5. "Find Similar" button on detail panel → ranked results grid
