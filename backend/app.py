@@ -1210,14 +1210,29 @@ def search():
             conditions.append('1 = 0')
 
     if film_raw:
-        # Match against any filmography field (clicking a director name in the
-        # detail panel searches here). SQLite LIKE is case-insensitive.
-        like = f'%{film_raw}%'
-        conditions.append('''id IN (
-            SELECT image_id FROM filmography
-            WHERE title LIKE ? OR director LIKE ? OR dp LIKE ?
-        )''')
-        params.extend([like, like, like])
+        # Clicking a name in the detail panel sends the exact string, so try an
+        # exact (case-insensitive) match first. Only fall back to substring
+        # matching when nothing matches exactly — otherwise a short title like
+        # "Her" would also return every "Christopher Nolan" film.
+        exact_hit = c.execute('''
+            SELECT 1 FROM filmography
+            WHERE title = ? COLLATE NOCASE OR director = ? COLLATE NOCASE
+               OR dp = ? COLLATE NOCASE LIMIT 1
+        ''', (film_raw, film_raw, film_raw)).fetchone()
+        if exact_hit:
+            conditions.append('''id IN (
+                SELECT image_id FROM filmography
+                WHERE title = ? COLLATE NOCASE OR director = ? COLLATE NOCASE
+                   OR dp = ? COLLATE NOCASE
+            )''')
+            params.extend([film_raw, film_raw, film_raw])
+        else:
+            like = f'%{film_raw}%'
+            conditions.append('''id IN (
+                SELECT image_id FROM filmography
+                WHERE title LIKE ? OR director LIKE ? OR dp LIKE ?
+            )''')
+            params.extend([like, like, like])
 
     where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
 
