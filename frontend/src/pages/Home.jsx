@@ -32,6 +32,10 @@ export default function Home() {
   const [saveName, setSaveName] = useState('');
   const [showDuplicates, setShowDuplicates] = useState(false);
 
+  // ── Find Similar mode ────────────────────────────────────────────────────
+  const [similarTo, setSimilarTo] = useState(null); // {id, filename} or null
+  const [similarNotice, setSimilarNotice] = useState(null); // dismissible banner text
+
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
   const pageRef = useRef(0);
@@ -66,8 +70,59 @@ export default function Home() {
     fetchingRef.current = false;
   }, [chips, nlChips, color, film]);
 
-  // Filters changed → reset to page 0
-  useEffect(() => { fetchPage(0, false); }, [fetchPage]);
+  // Filters changed → reset to page 0 (skip while in Find Similar mode)
+  useEffect(() => {
+    if (similarTo) return;
+    fetchPage(0, false);
+  }, [fetchPage, similarTo]);
+
+  // ── Find Similar: fetch similar images for a given image, replacing the grid ─
+  const fetchSimilar = useCallback(async (image) => {
+    setSimilarNotice(null);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/images/${image.id}/similar?limit=60`);
+      if (res.status === 404) {
+        const data = await res.json().catch(() => ({}));
+        if (data.error === 'no_embedding') {
+          setSimilarNotice("This image hasn't been fingerprinted yet — new uploads get fingerprints the next time the fingerprint script runs.");
+        } else {
+          setSimilarNotice("Couldn't find similar images for this one.");
+        }
+        setSimilarTo(null);
+        setLoading(false);
+        return;
+      }
+      const data = await res.json();
+      setImages(data.images || []);
+      setTotal((data.images || []).length);
+      setHasMore(false);
+      setSimilarTo(data.source || { id: image.id, filename: image.filename });
+    } catch (e) {
+      console.error('Find similar failed', e);
+      setSimilarNotice("Couldn't load similar images — check your connection and try again.");
+      setSimilarTo(null);
+    }
+    setLoading(false);
+  }, []);
+
+  // ── Entry point: called from the detail panel's "Find Similar" button ──────
+  const handleFindSimilar = (image) => {
+    // Clear all other filters — similar mode is exclusive
+    setChips([]);
+    setNlChips([]);
+    setColor(null);
+    setFilm(null);
+    setSearchText('');
+    setSelectedImage(null);
+    fetchSimilar(image);
+  };
+
+  const clearSimilar = () => {
+    setSimilarTo(null);
+    setSimilarNotice(null);
+    // fetchPage will re-run via the filters effect once similarTo clears
+  };
 
   // ── Infinite scroll: load next page when the sentinel nears the viewport ───
   useEffect(() => {
@@ -130,6 +185,7 @@ export default function Home() {
   }, []);
 
   const addChip = (tag) => {
+    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
     if (!chips.includes(tag)) setChips(prev => [...prev, tag]);
     setSearchText('');
     setShowAuto(false);
@@ -140,15 +196,24 @@ export default function Home() {
   const removeChip = (tag) => setChips(prev => prev.filter(t => t !== tag));
   const removeNlChip = (phrase) => setNlChips(prev => prev.filter(n => n.phrase !== phrase));
 
+  // Picking a color while in Find Similar mode exits similar mode first
+  const pickColor = (hex) => {
+    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
+    setColor(hex);
+  };
+
   const clearAll = () => {
     setChips([]);
     setNlChips([]);
     setColor(null);
     setFilm(null);
+    setSimilarTo(null);
+    setSimilarNotice(null);
   };
 
   // ── NL fallback: interpret free text via Gemini ─────────────────────────────
   const interpretPhrase = async (phrase) => {
+    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
     setInterpreting(true);
     setShowAuto(false);
     try {
@@ -518,7 +583,7 @@ export default function Home() {
             <button
               key={hex}
               title={hex}
-              onClick={() => setColor(c => c === hex ? null : hex)}
+              onClick={() => pickColor(color === hex ? null : hex)}
               style={{
                 width: '20px', height: '20px', borderRadius: '50%',
                 background: hex,
@@ -548,7 +613,7 @@ export default function Home() {
             <input
               type="color"
               value={color || '#D9A441'}
-              onChange={e => setColor(e.target.value)}
+              onChange={e => pickColor(e.target.value)}
               style={{
                 position: 'absolute', inset: 0, opacity: 0,
                 width: '100%', height: '100%', cursor: 'pointer'
@@ -571,9 +636,31 @@ export default function Home() {
           )}
         </div>
 
-        {/* Active chips (tags + NL phrases + film) */}
-        {(chips.length > 0 || nlChips.length > 0 || film) && (
+        {/* Active chips (tags + NL phrases + film + similar) */}
+        {(chips.length > 0 || nlChips.length > 0 || film || similarTo) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginTop: '12px' }}>
+            {/* Similar chip — from "Find Similar" in the detail panel. Soft violet, distinct from NL/film chips */}
+            {similarTo && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                background: 'rgba(178,130,240,0.14)',
+                border: '1px solid rgba(178,130,240,0.5)',
+                borderRadius: '6px',
+                padding: '4px 8px 4px 9px',
+                fontSize: '12.5px', color: '#c9a8f2', fontWeight: 500
+              }}>
+                ≈ Similar to {similarTo.filename}
+                <button
+                  onClick={clearSimilar}
+                  style={{
+                    background: 'none', border: 'none', color: '#c9a8f2',
+                    cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
+                >×</button>
+              </span>
+            )}
             {/* Film chip — from clicking a title/director/DP in the detail panel */}
             {film && (
               <span style={{
@@ -661,6 +748,29 @@ export default function Home() {
             </button>
           </div>
         )}
+
+        {/* Find Similar notice — e.g. image has no fingerprint yet */}
+        {similarNotice && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            marginTop: '12px', padding: '9px 13px',
+            background: 'rgba(178,130,240,0.08)',
+            border: '1px solid rgba(178,130,240,0.28)',
+            borderRadius: '8px',
+            fontSize: '12px', color: '#c9a8f2'
+          }}>
+            <span style={{ flex: 1 }}>{similarNotice}</span>
+            <button
+              onClick={() => setSimilarNotice(null)}
+              style={{
+                background: 'none', border: 'none', color: '#c9a8f2',
+                cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
+            >×</button>
+          </div>
+        )}
       </div>
 
       {/* ── Result count bar ────────────────────────────────────────────────── */}
@@ -677,7 +787,10 @@ export default function Home() {
           {images.length > 0 && images.length < total && (
             <span style={{ color: '#65625a' }}> · {images.length} loaded</span>
           )}
-          {hasFilters && (
+          {similarTo && (
+            <span style={{ color: '#65625a' }}> · showing similar matches</span>
+          )}
+          {!similarTo && hasFilters && (
             <span style={{ color: '#65625a' }}>
               {' '}· {chips.length + nlChips.length + (color ? 1 : 0) + (film ? 1 : 0)} filter{(chips.length + nlChips.length + (color ? 1 : 0) + (film ? 1 : 0)) > 1 ? 's' : ''} active
             </span>
@@ -710,9 +823,23 @@ export default function Home() {
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
             </svg>
             <p style={{ fontSize: '14px', color: '#9c988d' }}>
-              {hasFilters ? 'No images match this filter' : 'No images yet — run a sync first'}
+              {similarTo
+                ? 'No similar images found'
+                : hasFilters ? 'No images match this filter' : 'No images yet — run a sync first'}
             </p>
-            {hasFilters && (
+            {similarTo ? (
+              <button
+                onClick={clearSimilar}
+                style={{
+                  fontSize: '12px', color: '#dcbd76', background: 'none',
+                  border: '1px solid rgba(201,162,83,0.3)',
+                  borderRadius: '7px', padding: '7px 14px',
+                  cursor: 'pointer', fontFamily: 'inherit'
+                }}
+              >
+                Back to browsing
+              </button>
+            ) : hasFilters && (
               <button
                 onClick={clearAll}
                 style={{
@@ -802,6 +929,20 @@ export default function Home() {
                     }}>⚑</span>
                   )}
 
+                  {/* Similarity badge — only shown while browsing "Find Similar" results */}
+                  {similarTo && typeof img.similarity === 'number' && (
+                    <span style={{
+                      position: 'absolute', bottom: '7px', right: '7px',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '9px', color: '#c9a8f2',
+                      background: 'rgba(30,20,45,0.55)',
+                      border: '1px solid rgba(178,130,240,0.35)',
+                      padding: '2px 6px', borderRadius: '4px'
+                    }}>
+                      {Math.round(img.similarity * 100)}%
+                    </span>
+                  )}
+
                   {/* Caption + color palette */}
                   <div style={{
                     position: 'absolute', left: '9px', right: '9px', bottom: '9px',
@@ -860,9 +1001,11 @@ export default function Home() {
           onUpdated={handleImageUpdated}
           onDeleted={handleImageDeleted}
           onSearchFilm={(query) => {
+            if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
             setFilm(query);
             setSelectedImage(null); // close panel so the filtered grid is visible
           }}
+          onFindSimilar={handleFindSimilar}
         />
       )}
 

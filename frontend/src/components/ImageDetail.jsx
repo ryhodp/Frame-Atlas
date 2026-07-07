@@ -18,7 +18,7 @@ const CAT_ORDER = [
   'genre_aesthetic', 'era_decade', 'camera_format'
 ];
 
-export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSearchFilm }) {
+export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSearchFilm, onFindSimilar }) {
   const [fullImage, setFullImage] = useState(null);
   const [fullError, setFullError] = useState(false);
 
@@ -671,6 +671,13 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             }}
           >
             ⚑ {isFlagged ? 'Flagged' : 'Flag'}
+          </button>
+          <button
+            onClick={() => onFindSimilar?.(image)}
+            title="Find visually similar images"
+            style={footBtn('#a99bf7')}
+          >
+            ≈ Find Similar
           </button>
 
           <div style={{ flex: 1 }} />
