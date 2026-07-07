@@ -58,6 +58,7 @@ export default function UploadButton({ onUploaded }) {
   };
 
   const handleClick = () => {
+    if (signedIn === null) return; // auth check still in flight — ignore the click
     if (signedIn === false) {
       window.location.href = '/api/auth/google/login';
       return;
