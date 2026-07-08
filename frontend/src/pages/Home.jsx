@@ -115,6 +115,11 @@ export default function Home() {
     setFilm(null);
     setSearchText('');
     setSelectedImage(null);
+    // Set similarTo synchronously (same render as the filter clears above) so the
+    // filters effect's `if (similarTo) return;` guard sees it immediately — otherwise
+    // the effect fires an unwanted /api/search before fetchSimilar's async result lands,
+    // and that stray request can overwrite the similar results with the default grid.
+    setSimilarTo({ id: image.id, filename: image.filename });
     fetchSimilar(image);
   };
 
