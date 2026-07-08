@@ -1114,10 +1114,10 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Tag Mode selection checkmark — bottom-left, clear of other badges */}
+                  {/* Tag Mode selection checkmark — top-right, offset clear of star/flag */}
                   {isSelected && (
                     <span style={{
-                      position: 'absolute', bottom: '7px', left: '7px',
+                      position: 'absolute', top: '6px', right: '28px',
                       width: '18px', height: '18px', borderRadius: '50%',
                       background: '#b8cea1',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
