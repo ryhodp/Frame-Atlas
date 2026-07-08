@@ -37,6 +37,30 @@ DB_PATH = '/app/data/library.db'
 # Gemini model — overridable via Railway env var if Google retires this one
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
 
+# Fixed tag category taxonomy — display color/label for each of the 15
+# categories Gemini tags images with. Used by /api/autocomplete,
+# /api/tag-categories, and the bulk tag endpoints below.
+CAT_COLORS = {
+    'mood': '#8b7cf6', 'lighting_quality': '#f59e0b',
+    'lighting_color_temperature': '#f97316', 'color_palette': '#ec4899',
+    'shot_type': '#06b6d4', 'framing_composition': '#10b981',
+    'location_type': '#84cc16', 'time_of_day_weather': '#c9a253',
+    'source_type': '#6366f1', 'subject_count': '#94a3b8',
+    'subject_camera_relationship': '#a78bfa', 'genre_aesthetic': '#f43f5e',
+    'era_decade': '#fb923c', 'camera_format': '#22d3ee',
+    'performance_emotion': '#e879f9',
+}
+CAT_LABELS = {
+    'mood': 'Mood', 'lighting_quality': 'Lighting',
+    'lighting_color_temperature': 'Color Temp', 'color_palette': 'Palette',
+    'shot_type': 'Shot', 'framing_composition': 'Framing',
+    'location_type': 'Location', 'time_of_day_weather': 'Time / Weather',
+    'source_type': 'Source', 'subject_count': 'Subjects',
+    'subject_camera_relationship': 'Camera Rel.', 'genre_aesthetic': 'Genre',
+    'era_decade': 'Era', 'camera_format': 'Format',
+    'performance_emotion': 'Emotion',
+}
+
 sync_state = {
     'in_progress': False,
     'processed': 0,
@@ -1211,27 +1235,6 @@ def autocomplete():
 
     conn.close()
 
-    CAT_COLORS = {
-        'mood': '#8b7cf6', 'lighting_quality': '#f59e0b',
-        'lighting_color_temperature': '#f97316', 'color_palette': '#ec4899',
-        'shot_type': '#06b6d4', 'framing_composition': '#10b981',
-        'location_type': '#84cc16', 'time_of_day_weather': '#c9a253',
-        'source_type': '#6366f1', 'subject_count': '#94a3b8',
-        'subject_camera_relationship': '#a78bfa', 'genre_aesthetic': '#f43f5e',
-        'era_decade': '#fb923c', 'camera_format': '#22d3ee',
-        'performance_emotion': '#e879f9',
-    }
-    CAT_LABELS = {
-        'mood': 'Mood', 'lighting_quality': 'Lighting',
-        'lighting_color_temperature': 'Color Temp', 'color_palette': 'Palette',
-        'shot_type': 'Shot', 'framing_composition': 'Framing',
-        'location_type': 'Location', 'time_of_day_weather': 'Time / Weather',
-        'source_type': 'Source', 'subject_count': 'Subjects',
-        'subject_camera_relationship': 'Camera Rel.', 'genre_aesthetic': 'Genre',
-        'era_decade': 'Era', 'camera_format': 'Format',
-        'performance_emotion': 'Emotion',
-    }
-
     return jsonify([{
         'value': row['value'],
         'category': row['category'],
@@ -1239,6 +1242,16 @@ def autocomplete():
         'color': CAT_COLORS.get(row['category'], '#9c988d'),
         'count': row['cnt']
     } for row in rows])
+
+@app.route('/api/tag-categories')
+def tag_categories():
+    """Full fixed list of tag categories (not just ones currently in use),
+    so the frontend can always show a complete category picker."""
+    return jsonify([{
+        'key': key,
+        'label': CAT_LABELS[key],
+        'color': CAT_COLORS.get(key, '#9c988d')
+    } for key in CAT_LABELS])
 
 @app.route('/api/search')
 def search():
@@ -1838,6 +1851,171 @@ def edit_tags(image_id):
     tags = [{'category': t[0], 'value': t[1]} for t in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'tags': tags})
+
+def _parse_bulk_tag_request(data):
+    """Shared validation for the bulk-apply/bulk-remove endpoints. Returns
+    (image_ids, category, value, error_response). error_response is None
+    if validation passed."""
+    image_ids = data.get('image_ids')
+    category = (data.get('category') or '').strip()
+    value = (data.get('value') or '').strip().lower()
+
+    if not isinstance(image_ids, list) or not image_ids or \
+            not all(isinstance(i, int) for i in image_ids):
+        return None, None, None, (jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400)
+    if category not in CAT_LABELS:
+        return None, None, None, (jsonify({'error': 'invalid category'}), 400)
+    if not value:
+        return None, None, None, (jsonify({'error': 'value is required'}), 400)
+
+    return image_ids, category, value, None
+
+@app.route('/api/tags/bulk-apply', methods=['POST'])
+def bulk_apply_tags():
+    data = request.get_json(force=True) or {}
+    image_ids, category, value, error = _parse_bulk_tag_request(data)
+    if error:
+        return error
+
+    conn = get_db()
+    c = conn.cursor()
+
+    applied = 0
+    already_had = 0
+    invalid_ids = []
+
+    for image_id in image_ids:
+        c.execute('SELECT user_id FROM images WHERE id = ?', (image_id,))
+        row = c.fetchone()
+        if not row:
+            invalid_ids.append(image_id)
+            continue
+
+        c.execute('''
+            SELECT 1 FROM tags WHERE image_id = ? AND category = ? AND value = ?
+        ''', (image_id, category, value))
+        if c.fetchone():
+            already_had += 1
+        else:
+            c.execute('''
+                INSERT INTO tags (image_id, user_id, category, value)
+                VALUES (?, ?, ?, ?)
+            ''', (image_id, row['user_id'], category, value))
+            applied += 1
+
+    conn.commit()
+    conn.close()
+    return jsonify({'applied': applied, 'already_had': already_had, 'invalid_ids': invalid_ids})
+
+@app.route('/api/tags/bulk-remove', methods=['POST'])
+def bulk_remove_tags():
+    data = request.get_json(force=True) or {}
+    image_ids, category, value, error = _parse_bulk_tag_request(data)
+    if error:
+        return error
+
+    conn = get_db()
+    c = conn.cursor()
+    placeholders = ','.join('?' * len(image_ids))
+    c.execute(f'''
+        DELETE FROM tags WHERE image_id IN ({placeholders}) AND category = ? AND value = ?
+    ''', image_ids + [category, value])
+    removed = c.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({'removed': removed})
+
+@app.route('/api/tags/selection-summary', methods=['POST'])
+def tags_selection_summary():
+    data = request.get_json(force=True) or {}
+    image_ids = data.get('image_ids')
+    if not isinstance(image_ids, list) or not image_ids or \
+            not all(isinstance(i, int) for i in image_ids):
+        return jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    placeholders = ','.join('?' * len(image_ids))
+    rows = c.execute(f'''
+        SELECT category, value, COUNT(DISTINCT image_id) as cnt
+        FROM tags
+        WHERE image_id IN ({placeholders})
+        GROUP BY category, value
+        ORDER BY cnt DESC
+    ''', image_ids).fetchall()
+    conn.close()
+
+    return jsonify({
+        'total': len(image_ids),
+        'tags': [{
+            'category': row['category'],
+            'value': row['value'],
+            'catLabel': CAT_LABELS.get(row['category'], row['category']),
+            'color': CAT_COLORS.get(row['category'], '#9c988d'),
+            'count': row['cnt']
+        } for row in rows]
+    })
+
+@app.route('/api/tags/suggestions', methods=['POST'])
+def tags_suggestions():
+    data = request.get_json(force=True) or {}
+    image_ids = data.get('image_ids')
+    if not isinstance(image_ids, list) or not image_ids or \
+            not all(isinstance(i, int) for i in image_ids):
+        return jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    placeholders = ','.join('?' * len(image_ids))
+    rows = c.execute(f'''
+        SELECT category, value, COUNT(DISTINCT image_id) as cnt
+        FROM tags
+        WHERE image_id IN ({placeholders})
+        GROUP BY category, value
+        ORDER BY cnt DESC
+    ''', image_ids).fetchall()
+
+    total = len(image_ids)
+    selection_tags = {(row['category'], row['value']): row['cnt'] for row in rows}
+
+    if not selection_tags:
+        conn.close()
+        return jsonify({'suggestions': []})
+
+    # Top 5 seed tags by how many selected images carry them.
+    seed_pairs = sorted(selection_tags.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    seed_values = [pair[0][1] for pair in seed_pairs]
+
+    seed_placeholders = ','.join('?' * len(seed_values))
+    candidate_rows = c.execute(f'''
+        SELECT t2.category, t2.value, COUNT(DISTINCT t2.image_id) as cnt
+        FROM tags t2
+        WHERE t2.image_id IN (
+            SELECT DISTINCT image_id FROM tags WHERE value IN ({seed_placeholders})
+        )
+        AND t2.value NOT IN ({seed_placeholders})
+        GROUP BY t2.category, t2.value
+        ORDER BY cnt DESC
+        LIMIT 30
+    ''', seed_values + seed_values).fetchall()
+    conn.close()
+
+    suggestions = []
+    for row in candidate_rows:
+        key = (row['category'], row['value'])
+        if selection_tags.get(key, 0) >= total:
+            continue
+        suggestions.append({
+            'category': row['category'],
+            'value': row['value'],
+            'catLabel': CAT_LABELS.get(row['category'], row['category']),
+            'color': CAT_COLORS.get(row['category'], '#9c988d'),
+            'count': row['cnt']
+        })
+        if len(suggestions) >= 12:
+            break
+
+    return jsonify({'suggestions': suggestions})
 
 @app.route('/api/images/<int:image_id>/filmography', methods=['POST'])
 def update_filmography(image_id):

@@ -395,3 +395,76 @@ Day 9 = CLIP + Similar Images:
 3. Add CLIP embedding step to sync pipeline for new images
 4. `/api/images/<id>/similar` — cosine similarity + tag overlap combined score
 5. "Find Similar" button on detail panel → ranked results grid
+
+---
+
+## Day 9 — CLIP Fingerprints + Find Similar (Frame Atlas V8 complete)
+*Completed: July 6–7, 2026*
+*Status: DAY 9 COMPLETE — verified live on two separate images in browser*
+
+### What We Built
+
+**Local Python unblock:**
+- Installed Homebrew `python@3.12` (local default is 3.14, which can't build Pillow). Created a project-local virtual environment at `scripts/.venv` (gitignored) with torch, open_clip, Pillow, requests, and the full backend `requirements.txt` — this also unlocked *local backend testing* for the first time (previously backend could only be syntax-checked, never actually run, on this Mac).
+
+**CLIP fingerprinting (`scripts/generate_embeddings.py`):**
+- Model: `ViT-L-14-quickgelu` / `openai` (the plain `ViT-L-14` tag mismatches the original OpenAI weights and was corrected mid-session — seed file is keyed by model name so a mismatch regenerates cleanly).
+- Downloads all 246 thumbnails from the live site, fingerprints them (768-dim vectors, L2-normalized), writes `backend/embeddings_seed.json.gz` (~450KB).
+- Incremental: skips images already fingerprinted; exits in seconds if nothing new.
+- Downloads the 1.7GB model only when there's new work, deletes it when done (`--keep-model` flag to skip deletion) — zero standing disk cost, zero manual cleanup.
+
+**Backend (`backend/app.py`):**
+- `load_embeddings_seed()` — runs on every boot, loads the seed file into the `embeddings` table, idempotent (skips rewrite if already in sync).
+- `GET /api/images/<id>/similar?limit=40` (frontend calls with `limit=60`) — combined score = 70% cosine similarity on CLIP vectors + 30% tag overlap, pure Python (no numpy added to requirements). Returns full image objects (same shape as `/api/search`, via a new shared `build_image_dict()` helper) plus a `similarity` field. 404 `no_embedding` for images not yet fingerprinted.
+
+**Frontend:**
+- "≈ Find Similar" button in `ImageDetail.jsx`, violet-tinted to match the new similarity theme.
+- `Home.jsx`: `similarTo` mode replaces the grid with ranked results, shows a removable violet "≈ Similar to *filename*" chip, similarity % badge per tile, dismissible banner if an image has no fingerprint yet. Entering similar mode clears all other filters; setting any other filter exits similar mode. Bookmarks intentionally never reference `similarTo`.
+
+**Automation (fully hands-off per Ryan's request):**
+- `scripts/update_fingerprints.sh` + macOS `launchd` job (`~/Library/LaunchAgents/com.frameatlas.fingerprints.plist`) — runs every Monday 10am: fingerprints any new images, auto-commits + pushes `embeddings_seed.json.gz` if changed (which redeploys Railway). Log at `scripts/fingerprints.log`.
+- `launchd`'s `StartCalendarInterval` catches up missed runs automatically next time the Mac wakes/boots — confirmed with Ryan this is sufficient, no "run on wake" trigger needed.
+
+**Permissions:** Added an allowlist to `.claude/settings.json` (curl, preview/Chrome browser tools, project file edits, the venv's python/pip) so Ryan isn't prompted for routine actions — explicitly requested this session to reduce friction.
+
+### Bug Found + Fixed This Session
+Initial ship had a state-batching race: `handleFindSimilar` cleared other filters (new array/state references) which changed `fetchPage`'s identity and re-fired the filters `useEffect` — but `similarTo` wasn't set until *after* the async `/similar` fetch resolved, so the effect's guard saw `similarTo === null`, didn't block, and fired a stray `/api/search` that silently overwrote the similar results with the default grid a moment later. Fixed by setting `similarTo` **synchronously** in `handleFindSimilar`, in the same render as the other filter clears. Verified live in Chrome on two different source images — network requests show clean `full → similar` only, no stray `search` call, and each click produces genuinely different, sensibly-ranked results (e.g. clicking a night-interior "Her" frame surfaced other lone-figure/night-window/city-skyline shots at 76–84% match).
+
+### Decisions Made (Confirmed with Ryan)
+- ✅ CLIP model: ViT-L/14 (large) over ViT-B/32 — better at subtle mood/lighting cues.
+- ✅ Score blend: 70% visual / 30% tag overlap.
+- ✅ Results UI: main grid + removable filter chip (same pattern as the film filter), not a panel strip or modal.
+- ✅ New-image fingerprinting: local catch-up script, fully automated via `launchd` (not a slim server-side model, not manual/deferred) — Ryan explicitly wanted zero ongoing management.
+- ✅ Model lifecycle: download-on-demand, auto-delete after each run — Ryan does not want to "keep it on the laptop forever."
+- ✅ Missed Monday runs: `launchd`'s built-in catch-up-on-wake is sufficient; no extra "on wake" trigger wanted.
+
+### Technical Debt / Notes
+- **Flagged to Ryan, unresolved:** the git remote URL (`git remote -v`) has a GitHub personal access token embedded in plaintext. Should be rotated and switched to a credential helper / `gh auth` at some point. The `launchd` auto-push depends on this working non-interactively — if the token is rotated, re-test `scripts/update_fingerprints.sh` manually once.
+- Debug endpoints (`/api/debug*`, `/api/models`) still flagged for Day 13 removal.
+- Git committer identity is still the machine-default auto-generated one (`Ryan Hoang <ryanhoang@Ryans-MacBook-Air.local>`) — same note as Day 8, still unaddressed.
+- `scripts/.venv/`, `scripts/.model_cache/`, and `scripts/fingerprints.log` added to `.gitignore`.
+- GitHub repo was renamed/moved to `github.com/ryhodp/Frame-Atlas` — pushes still succeed (git follows the redirect) but worth updating the remote URL eventually to avoid relying on the redirect.
+
+### Files Changed
+- `backend/app.py` — seed loader, `build_image_dict()` helper, `/api/images/<id>/similar`
+- `backend/embeddings_seed.json.gz` — new, 246 fingerprints
+- `frontend/src/components/ImageDetail.jsx` — Find Similar button
+- `frontend/src/pages/Home.jsx` — similar mode state/effects/chip/badges + race fix
+- `scripts/generate_embeddings.py` — new, local fingerprint generator
+- `scripts/update_fingerprints.sh` — new, weekly autopilot runner
+- `scripts/test_similar_locally.py` — new, local end-to-end test harness (patches DB_PATH, runs Flask test client against real live data)
+- `.gitignore` — added `scripts/.venv/`, `scripts/.model_cache/`, `scripts/fingerprints.log`
+- `.claude/settings.json` — permissions allowlist (not committed — project-local Claude Code config)
+- `~/Library/LaunchAgents/com.frameatlas.fingerprints.plist` — new, outside the repo (macOS scheduler config)
+
+### Commits
+`0a7b701` (Day 9: CLIP fingerprints + Find Similar) → `c917cd8` (race condition fix)
+
+### Starting Point for Day 10
+Day 10 = Tag Mode + Smart Co-occurrence Suggestions:
+1. Toggle Tag Mode from main UI
+2. Multi-select: individual clicks, box-select, select all in current results
+3. Bulk apply: type or pick tag → applied to all selected instantly
+4. Bulk remove: shared tags across selection shown → click X to remove from all
+5. Custom tag creation on the fly
+6. Smart co-occurrence suggestions panel (pure SQL math, free)

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import ImageDetail from '../components/ImageDetail';
 import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
+import TagModeBar from '../components/TagModeBar';
 
 const PRESET_SWATCHES = [
   '#D9A441', '#E08840', '#B33A3A', '#C75B8B',
@@ -35,6 +36,14 @@ export default function Home() {
   // ── Find Similar mode ────────────────────────────────────────────────────
   const [similarTo, setSimilarTo] = useState(null); // {id, filename} or null
   const [similarNotice, setSimilarNotice] = useState(null); // dismissible banner text
+
+  // ── Tag Mode: bulk-select images and bulk-edit their tags ───────────────────
+  const [tagMode, setTagMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [dragRect, setDragRect] = useState(null); // {left, top, width, height} in viewport coords, or null
+  const tileRefs = useRef(new Map()); // image id -> tile DOM node
+  const dragStateRef = useRef(null); // { startX, startY, dragging, baseSelected }
+  const justDraggedRef = useRef(false); // true for the brief window between mouseup-after-drag and the resulting click
 
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
@@ -189,6 +198,14 @@ export default function Home() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // ── Safety net: if the mouse is released outside the grid mid-drag, still end it ─
+  useEffect(() => {
+    if (!tagMode) return;
+    const onUp = () => endDrag();
+    window.addEventListener('mouseup', onUp);
+    return () => window.removeEventListener('mouseup', onUp);
+  }, [tagMode]);
+
   const addChip = (tag) => {
     if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
     if (!chips.includes(tag)) setChips(prev => [...prev, tag]);
@@ -296,6 +313,87 @@ export default function Home() {
     setSelectedImage(prev => (prev && prev.id === id) ? null : prev);
   };
 
+  // ── Tag Mode: toggling in/out, tile clicks, box-select drag ─────────────────
+  const toggleTagMode = () => {
+    setTagMode(v => {
+      const next = !v;
+      if (!next) setSelectedIds(new Set()); // turning OFF clears selection
+      return next;
+    });
+  };
+
+  const toggleTileSelection = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  // Apply a bulk patch to any currently-loaded images that were part of the bulk op
+  const handleBulkTagsChanged = (ids, patchFn) => {
+    const idSet = new Set(ids);
+    setImages(prev => prev.map(img => idSet.has(img.id) ? patchFn(img) : img));
+    setSelectedImage(prev => (prev && idSet.has(prev.id)) ? patchFn(prev) : prev);
+  };
+
+  const DRAG_THRESHOLD = 4;
+
+  const onGridMouseDown = (e) => {
+    if (!tagMode) return;
+    // Only left-click drags start a box-select
+    if (e.button !== 0) return;
+    dragStateRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      dragging: false,
+      baseSelected: new Set(selectedIds)
+    };
+  };
+
+  const onGridMouseMove = (e) => {
+    if (!tagMode || !dragStateRef.current) return;
+    const st = dragStateRef.current;
+    const dx = e.clientX - st.startX;
+    const dy = e.clientY - st.startY;
+    if (!st.dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    st.dragging = true;
+
+    const left = Math.min(st.startX, e.clientX);
+    const top = Math.min(st.startY, e.clientY);
+    const width = Math.abs(dx);
+    const height = Math.abs(dy);
+    setDragRect({ left, top, width, height });
+
+    // Hit-test every tile against the drag rectangle (both in viewport coords)
+    const rectRight = left + width;
+    const rectBottom = top + height;
+    const next = new Set(st.baseSelected);
+    tileRefs.current.forEach((node, id) => {
+      if (!node) return;
+      const r = node.getBoundingClientRect();
+      const intersects = r.left < rectRight && r.right > left && r.top < rectBottom && r.bottom > top;
+      if (intersects) next.add(id);
+    });
+    setSelectedIds(next);
+  };
+
+  const endDrag = () => {
+    // If a real drag happened, suppress the click that the browser fires right
+    // after mouseup on the tile under the cursor (clear the flag on a timeout
+    // so it doesn't linger and swallow the next legitimate click).
+    if (dragStateRef.current?.dragging) {
+      justDraggedRef.current = true;
+      setTimeout(() => { justDraggedRef.current = false; }, 0);
+    }
+    dragStateRef.current = null;
+    setDragRect(null);
+  };
+
+  const onGridMouseUp = () => {
+    if (!tagMode) return;
+    endDrag();
+  };
+
   // ── True masonry: distribute images into columns, shortest-first ────────────
   // Every image keeps its full aspect ratio — nothing is cropped.
   // Placement is greedy in order, so appending a page never reshuffles
@@ -381,6 +479,23 @@ export default function Home() {
 
           {/* Upload photos */}
           <UploadButton onUploaded={() => fetchPage(0, false)} />
+
+          {/* Tag Mode toggle */}
+          <button
+            onClick={toggleTagMode}
+            title="Tag Mode — bulk-select images and bulk-edit their tags"
+            style={{
+              height: '46px', width: '46px',
+              background: tagMode ? 'rgba(184,206,161,0.14)' : '#18181b',
+              border: `1px solid ${tagMode ? 'rgba(184,206,161,0.6)' : 'rgba(255,255,255,0.12)'}`,
+              borderRadius: '10px',
+              cursor: 'pointer',
+              color: tagMode ? '#b8cea1' : '#9c988d',
+              fontSize: '16px'
+            }}
+          >
+            ✓
+          </button>
 
           {/* Duplicate review */}
           <button
@@ -861,16 +976,38 @@ export default function Home() {
         )}
 
         {/* Masonry columns — full aspect ratio, no cropping */}
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+        <div
+          onMouseDown={onGridMouseDown}
+          onMouseMove={onGridMouseMove}
+          onMouseUp={onGridMouseUp}
+          style={{
+            display: 'flex', gap: '10px', alignItems: 'flex-start',
+            userSelect: tagMode ? 'none' : 'auto'
+          }}
+        >
           {columns.map((col, ci) => (
             <div key={ci} style={{
               flex: 1, minWidth: 0,
               display: 'flex', flexDirection: 'column', gap: '10px'
             }}>
-              {col.map(img => (
+              {col.map(img => {
+                const isSelected = tagMode && selectedIds.has(img.id);
+                return (
                 <div
                   key={img.id}
-                  onClick={() => setSelectedImage(img)}
+                  ref={node => {
+                    if (node) tileRefs.current.set(img.id, node);
+                    else tileRefs.current.delete(img.id);
+                  }}
+                  onClick={() => {
+                    if (tagMode) {
+                      // Don't toggle if this click was the tail end of a drag
+                      if (justDraggedRef.current) return;
+                      toggleTileSelection(img.id);
+                    } else {
+                      setSelectedImage(img);
+                    }
+                  }}
                   style={{
                     position: 'relative',
                     width: '100%',
@@ -881,7 +1018,7 @@ export default function Home() {
                     borderRadius: '6px',
                     overflow: 'hidden',
                     cursor: 'pointer',
-                    border: '1px solid rgba(255,255,255,0.04)',
+                    border: isSelected ? '2px solid #b8cea1' : '1px solid rgba(255,255,255,0.04)',
                     transition: 'transform 0.15s ease'
                   }}
                   onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.01)'}
@@ -976,11 +1113,41 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Tag Mode selection checkmark — bottom-left, clear of other badges */}
+                  {isSelected && (
+                    <span style={{
+                      position: 'absolute', bottom: '7px', left: '7px',
+                      width: '18px', height: '18px', borderRadius: '50%',
+                      background: '#b8cea1',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.5)'
+                    }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                        stroke="#243516" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </span>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           ))}
         </div>
+
+        {/* Drag-select rectangle overlay — viewport-fixed, matches drag coords */}
+        {dragRect && (
+          <div style={{
+            position: 'fixed',
+            left: dragRect.left, top: dragRect.top,
+            width: dragRect.width, height: dragRect.height,
+            background: 'rgba(184,206,161,0.14)',
+            border: '1px solid #b8cea1',
+            pointerEvents: 'none',
+            zIndex: 500
+          }} />
+        )}
 
         {/* Infinite-scroll sentinel — when this nears the viewport, load more */}
         <div ref={sentinelRef} style={{ height: '1px' }} />
@@ -1019,6 +1186,17 @@ export default function Home() {
         <DuplicateReview
           onClose={() => setShowDuplicates(false)}
           onImageDeleted={handleImageDeleted}
+        />
+      )}
+
+      {/* Tag Mode bulk-selection toolbar */}
+      {tagMode && (
+        <TagModeBar
+          images={images}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          onExit={toggleTagMode}
+          onBulkChanged={handleBulkTagsChanged}
         />
       )}
 
