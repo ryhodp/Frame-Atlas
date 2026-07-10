@@ -1,20 +1,69 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
+
+const NAV_LINKS = [
+  { to: '/', label: 'Home' },
+  { to: '/decks', label: 'Decks' },
+  { to: '/sync', label: 'Sync' },
+]
 
 function Header() {
+  const location = useLocation()
+
   return (
-    <header className="bg-white shadow-sm border-b border-gray-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">Frame Atlas</h1>
-            <span className="text-sm text-gray-500">v1 — Skeleton</span>
-          </div>
-          <nav className="flex gap-6">
-            <Link to="/" className="text-gray-700 hover:text-gray-900">
-              Home
-            </Link>
-          </nav>
+    <header
+      style={{
+        background: '#1a1c20',
+        borderBottom: '1px solid #44474f',
+      }}
+    >
+      <div
+        style={{
+          maxWidth: '1400px',
+          margin: '0 auto',
+          padding: '16px 24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h1
+            style={{
+              fontSize: '22px',
+              fontWeight: 600,
+              color: '#e2e2e6',
+              margin: 0,
+              fontFamily: 'inherit',
+            }}
+          >
+            Frame Atlas
+          </h1>
+          <span style={{ fontSize: '12px', color: '#8e9099' }}>v10</span>
         </div>
+
+        <nav style={{ display: 'flex', gap: '28px' }}>
+          {NAV_LINKS.map(link => {
+            const isActive = location.pathname === link.to
+              || (link.to === '/decks' && location.pathname.startsWith('/decks'))
+            return (
+              <Link
+                key={link.to}
+                to={link.to}
+                style={{
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: isActive ? '#d9a441' : '#e2e2e6',
+                  textDecoration: 'none',
+                  transition: 'color 150ms ease',
+                }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = '#d9a441' }}
+                onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = '#e2e2e6' }}
+              >
+                {link.label}
+              </Link>
+            )
+          })}
+        </nav>
       </div>
     </header>
   )

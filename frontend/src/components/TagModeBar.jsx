@@ -80,6 +80,15 @@ export default function TagModeBar({
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // Add-to-Deck panel state
+  const [decks, setDecks] = useState([]);
+  const [decksLoaded, setDecksLoaded] = useState(false);
+  const [showDeckPicker, setShowDeckPicker] = useState(false);
+  const [newDeckName, setNewDeckName] = useState('');
+  const [addingToDeck, setAddingToDeck] = useState(false);
+  const [addDeckMsg, setAddDeckMsg] = useState('');
+  const addDeckMsgTimer = useRef(null);
+
   const count = selectedIds.size;
 
   // ── Load fixed category list once ──────────────────────────────────────────
@@ -160,6 +169,71 @@ export default function TagModeBar({
 
   const catLabelFor = (key) => categories.find(c => c.key === key)?.label || key;
   const catColorFor = (key) => categories.find(c => c.key === key)?.color || '#8b7cf6';
+
+  // ── Add to Deck ─────────────────────────────────────────────────────────────
+  const loadDecks = () => {
+    fetch('/api/decks')
+      .then(res => res.json())
+      .then(data => { setDecks(Array.isArray(data) ? data : []); setDecksLoaded(true); })
+      .catch(() => { setDecks([]); setDecksLoaded(true); });
+  };
+
+  const toggleDeckPicker = () => {
+    setShowDeckPicker(v => {
+      const next = !v;
+      if (next && !decksLoaded) loadDecks();
+      return next;
+    });
+  };
+
+  const flashAddMsg = (msg) => {
+    setAddDeckMsg(msg);
+    clearTimeout(addDeckMsgTimer.current);
+    addDeckMsgTimer.current = setTimeout(() => setAddDeckMsg(''), 4000);
+  };
+
+  const addSelectionToDeck = async (deckId, deckName) => {
+    if (addingToDeck) return;
+    setAddingToDeck(true);
+    const ids = Array.from(selectedIds);
+    try {
+      await fetch(`/api/decks/${deckId}/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_ids: ids })
+      });
+      flashAddMsg(`Added ${ids.length} photo${ids.length === 1 ? '' : 's'} to "${deckName}"`);
+    } catch (e) {
+      console.error('Add to deck failed', e);
+    }
+    setAddingToDeck(false);
+  };
+
+  const createDeckAndAdd = async () => {
+    const name = newDeckName.trim();
+    if (!name || addingToDeck) return;
+    setAddingToDeck(true);
+    const ids = Array.from(selectedIds);
+    try {
+      const res = await fetch('/api/decks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      const deck = await res.json();
+      await fetch(`/api/decks/${deck.id}/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_ids: ids })
+      });
+      setDecks(prev => [{ ...deck, image_count: ids.length }, ...prev]);
+      setNewDeckName('');
+      flashAddMsg(`Added ${ids.length} photo${ids.length === 1 ? '' : 's'} to "${name}"`);
+    } catch (e) {
+      console.error('Create deck and add failed', e);
+    }
+    setAddingToDeck(false);
+  };
 
   // ── Apply / remove flow ────────────────────────────────────────────────────
   const openApplyConfirm = () => {
@@ -404,6 +478,98 @@ export default function TagModeBar({
                 </div>
               </div>
             )}
+
+            {/* Add to Deck panel */}
+            <div style={{ minWidth: '220px', flex: '0 1 220px', position: 'relative' }} data-tagmode-area>
+              <div style={sectionLabel()}>ADD TO DECK</div>
+              <button
+                onClick={toggleDeckPicker}
+                style={{
+                  background: showDeckPicker ? 'rgba(217,164,65,0.14)' : 'none',
+                  border: `1px solid ${showDeckPicker ? 'rgba(217,164,65,0.5)' : '#44474f'}`,
+                  color: showDeckPicker ? '#d9a441' : '#e2e2e6',
+                  borderRadius: '8px', padding: '8px 14px',
+                  fontSize: '12.5px', fontWeight: 500,
+                  cursor: 'pointer', fontFamily: 'inherit', width: '100%'
+                }}
+              >
+                + Add {count} image{count === 1 ? '' : 's'} to deck…
+              </button>
+
+              {addDeckMsg && (
+                <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#b8cea1' }}>
+                  {addDeckMsg}
+                </div>
+              )}
+
+              {showDeckPicker && (
+                <div style={{
+                  position: 'absolute', bottom: '38px', left: 0, right: 0,
+                  background: '#2a2c31',
+                  border: '1px solid #44474f',
+                  borderRadius: '10px',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                  maxHeight: '260px', overflowY: 'auto',
+                  zIndex: 60
+                }}>
+                  {decksLoaded && decks.length === 0 && (
+                    <div style={{ padding: '10px 12px', fontSize: '11.5px', color: '#8e9099' }}>
+                      No decks yet — create one below.
+                    </div>
+                  )}
+                  {decks.map(deck => (
+                    <button
+                      key={deck.id}
+                      onClick={() => addSelectionToDeck(deck.id, deck.name)}
+                      disabled={addingToDeck}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center',
+                        justifyContent: 'space-between', gap: '10px',
+                        padding: '8px 12px',
+                        background: 'transparent', border: 'none',
+                        cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#37393e'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <span style={{ fontSize: '13px', color: '#e2e2e6' }}>{deck.name}</span>
+                      <span style={{ fontSize: '10px', color: '#8e9099' }}>{deck.image_count}</span>
+                    </button>
+                  ))}
+                  <div style={{
+                    display: 'flex', gap: '6px', padding: '8px 10px',
+                    borderTop: decks.length > 0 ? '1px solid #44474f' : 'none'
+                  }}>
+                    <input
+                      value={newDeckName}
+                      onChange={e => setNewDeckName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') createDeckAndAdd(); }}
+                      placeholder="+ New deck…"
+                      style={{
+                        flex: 1, background: '#111317', color: '#e2e2e6',
+                        border: '1px solid #44474f', borderRadius: '6px',
+                        padding: '6px 8px', fontSize: '12px',
+                        fontFamily: 'inherit', outline: 'none'
+                      }}
+                    />
+                    <button
+                      onClick={createDeckAndAdd}
+                      disabled={!newDeckName.trim() || addingToDeck}
+                      style={{
+                        background: newDeckName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
+                        color: newDeckName.trim() ? '#3d2f00' : '#8e9099',
+                        border: 'none', borderRadius: '6px',
+                        padding: '0 10px', fontSize: '12px', fontWeight: 500,
+                        cursor: newDeckName.trim() ? 'pointer' : 'default',
+                        fontFamily: 'inherit'
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

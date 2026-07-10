@@ -2212,6 +2212,353 @@ def find_duplicates():
 
     return jsonify({'groups': groups, 'count': len(groups)})
 
+# ============================================================================
+# DECKS + SCENES
+# ============================================================================
+
+def _fetch_image_dict(c, image_id):
+    """Loads one images row plus its tags/palette/filmography and runs it
+    through build_image_dict(). Used by the decks endpoints, which need the
+    same image JSON shape as /api/search and /api/images/<id>/similar but
+    are fetching images one at a time (via deck_images), not in bulk."""
+    row = c.execute('''
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
+        FROM images WHERE id = ?
+    ''', (image_id,)).fetchone()
+    if not row:
+        return None
+
+    tags = [
+        {'category': tr['category'], 'value': tr['value']}
+        for tr in c.execute('SELECT category, value FROM tags WHERE image_id = ?', (image_id,)).fetchall()
+    ]
+    palette = [
+        cr['hex'] for cr in
+        c.execute('SELECT hex FROM colors WHERE image_id = ? ORDER BY rank ASC', (image_id,)).fetchall()
+    ]
+    fr = c.execute(
+        'SELECT title, director, dp, year FROM filmography WHERE image_id = ?', (image_id,)
+    ).fetchone()
+    filmography = {'title': fr['title'], 'director': fr['director'], 'dp': fr['dp'], 'year': fr['year']} if fr else None
+
+    return build_image_dict(row, tags, palette, filmography)
+
+@app.route('/api/decks', methods=['GET'])
+def list_decks():
+    conn = get_db()
+    c = conn.cursor()
+    deck_rows = c.execute('SELECT id, name, created_at FROM decks WHERE user_id = 1 ORDER BY created_at DESC').fetchall()
+
+    decks_out = []
+    for d in deck_rows:
+        image_count = c.execute(
+            'SELECT COUNT(DISTINCT image_id) FROM deck_images WHERE deck_id = ?', (d['id'],)
+        ).fetchone()[0]
+
+        # Most-recently-added distinct images: walk deck_images newest-first
+        # and keep the first (most recent) row we see per image_id.
+        preview_thumbnails = []
+        seen_image_ids = set()
+        for di in c.execute(
+            'SELECT image_id FROM deck_images WHERE deck_id = ? ORDER BY id DESC', (d['id'],)
+        ).fetchall():
+            if di['image_id'] in seen_image_ids:
+                continue
+            seen_image_ids.add(di['image_id'])
+            img_row = c.execute('SELECT thumbnail_blob FROM images WHERE id = ?', (di['image_id'],)).fetchone()
+            if img_row:
+                thumb_b64 = base64.b64encode(img_row['thumbnail_blob']).decode('utf-8')
+                preview_thumbnails.append(f'data:image/jpeg;base64,{thumb_b64}')
+            if len(preview_thumbnails) >= 4:
+                break
+
+        decks_out.append({
+            'id': d['id'],
+            'name': d['name'],
+            'created_at': d['created_at'],
+            'image_count': image_count,
+            'preview_thumbnails': preview_thumbnails
+        })
+
+    conn.close()
+    return jsonify(decks_out)
+
+@app.route('/api/decks', methods=['POST'])
+def create_deck():
+    data = request.get_json(force=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO decks (user_id, name) VALUES (1, ?)', (name,))
+    deck_id = c.lastrowid
+    created_at = c.execute('SELECT created_at FROM decks WHERE id = ?', (deck_id,)).fetchone()['created_at']
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'id': deck_id,
+        'name': name,
+        'created_at': created_at,
+        'image_count': 0,
+        'preview_thumbnails': []
+    })
+
+@app.route('/api/decks/<int:deck_id>', methods=['PATCH'])
+def update_deck(deck_id):
+    data = request.get_json(force=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    c.execute('UPDATE decks SET name = ? WHERE id = ?', (name, deck_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/decks/<int:deck_id>', methods=['DELETE'])
+def delete_deck(deck_id):
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    c.execute('DELETE FROM deck_images WHERE deck_id = ?', (deck_id,))
+    c.execute('DELETE FROM scenes WHERE deck_id = ?', (deck_id,))
+    c.execute('DELETE FROM decks WHERE id = ?', (deck_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/decks/<int:deck_id>', methods=['GET'])
+def get_deck(deck_id):
+    conn = get_db()
+    c = conn.cursor()
+    deck_row = c.execute('SELECT id, name, created_at FROM decks WHERE id = ?', (deck_id,)).fetchone()
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    scenes = [
+        {'id': s['id'], 'name': s['name'], 'sort_order': s['sort_order']}
+        for s in c.execute(
+            'SELECT id, name, sort_order FROM scenes WHERE deck_id = ? ORDER BY sort_order ASC', (deck_id,)
+        ).fetchall()
+    ]
+
+    di_rows = c.execute('''
+        SELECT id, scene_id, image_id, storyboard_order, storyboard_note
+        FROM deck_images WHERE deck_id = ?
+    ''', (deck_id,)).fetchall()
+
+    images_out = []
+    for di in di_rows:
+        img_dict = _fetch_image_dict(c, di['image_id'])
+        if img_dict is None:
+            continue
+        img_dict['deck_image_id'] = di['id']
+        img_dict['scene_id'] = di['scene_id']
+        img_dict['storyboard_order'] = di['storyboard_order']
+        images_out.append(img_dict)
+
+    conn.close()
+
+    return jsonify({
+        'id': deck_row['id'],
+        'name': deck_row['name'],
+        'created_at': deck_row['created_at'],
+        'scenes': scenes,
+        'images': images_out
+    })
+
+@app.route('/api/scenes', methods=['POST'])
+def create_scene():
+    data = request.get_json(force=True) or {}
+    deck_id = data.get('deck_id')
+    name = (data.get('name') or '').strip()
+
+    conn = get_db()
+    c = conn.cursor()
+    if not isinstance(deck_id, int) or not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+    if not name:
+        conn.close()
+        return jsonify({'error': 'name is required'}), 400
+
+    next_order = c.execute(
+        'SELECT COALESCE(MAX(sort_order), -1) + 1 FROM scenes WHERE deck_id = ?', (deck_id,)
+    ).fetchone()[0]
+    c.execute('INSERT INTO scenes (deck_id, name, sort_order) VALUES (?, ?, ?)', (deck_id, name, next_order))
+    scene_id = c.lastrowid
+    conn.commit()
+    conn.close()
+
+    return jsonify({'id': scene_id, 'name': name, 'sort_order': next_order, 'deck_id': deck_id})
+
+@app.route('/api/scenes/<int:scene_id>', methods=['PATCH'])
+def update_scene(scene_id):
+    data = request.get_json(force=True) or {}
+    name = (data.get('name') or '').strip()
+
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM scenes WHERE id = ?', (scene_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Scene not found'}), 404
+    if not name:
+        conn.close()
+        return jsonify({'error': 'name is required'}), 400
+
+    c.execute('UPDATE scenes SET name = ? WHERE id = ?', (name, scene_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/scenes/<int:scene_id>', methods=['DELETE'])
+def delete_scene(scene_id):
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM scenes WHERE id = ?', (scene_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Scene not found'}), 404
+
+    c.execute('DELETE FROM deck_images WHERE scene_id = ?', (scene_id,))
+    c.execute('DELETE FROM scenes WHERE id = ?', (scene_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/decks/<int:deck_id>/images', methods=['POST'])
+def add_images_to_deck(deck_id):
+    data = request.get_json(force=True) or {}
+    image_ids = data.get('image_ids')
+
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+    if not isinstance(image_ids, list) or not image_ids or not all(isinstance(i, int) for i in image_ids):
+        conn.close()
+        return jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400
+
+    next_order = c.execute(
+        'SELECT COALESCE(MAX(storyboard_order), -1) + 1 FROM deck_images WHERE deck_id = ? AND scene_id IS NULL',
+        (deck_id,)
+    ).fetchone()[0]
+
+    added = 0
+    already_in_deck = 0
+    invalid_ids = []
+
+    for image_id in image_ids:
+        if not c.execute('SELECT 1 FROM images WHERE id = ?', (image_id,)).fetchone():
+            invalid_ids.append(image_id)
+            continue
+
+        exists = c.execute(
+            'SELECT 1 FROM deck_images WHERE deck_id = ? AND image_id = ? AND scene_id IS NULL',
+            (deck_id, image_id)
+        ).fetchone()
+        if exists:
+            already_in_deck += 1
+            continue
+
+        c.execute('''
+            INSERT INTO deck_images (deck_id, scene_id, image_id, storyboard_order, storyboard_note)
+            VALUES (?, NULL, ?, ?, NULL)
+        ''', (deck_id, image_id, next_order))
+        next_order += 1
+        added += 1
+
+    conn.commit()
+    conn.close()
+    return jsonify({'added': added, 'already_in_deck': already_in_deck, 'invalid_ids': invalid_ids})
+
+@app.route('/api/deck-images/<int:deck_image_id>/move', methods=['POST'])
+def move_deck_image(deck_image_id):
+    data = request.get_json(force=True) or {}
+    target_scene_id = data.get('target_scene_id')
+
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute(
+        'SELECT id, deck_id, scene_id, image_id, storyboard_note FROM deck_images WHERE id = ?',
+        (deck_image_id,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'deck image not found'}), 404
+
+    if target_scene_id is not None:
+        valid_target = c.execute(
+            'SELECT 1 FROM scenes WHERE id = ? AND deck_id = ?', (target_scene_id, row['deck_id'])
+        ).fetchone()
+        if not valid_target:
+            conn.close()
+            return jsonify({'error': 'scene not found in this deck'}), 400
+
+    current_scene_id = row['scene_id']
+
+    if target_scene_id == current_scene_id:
+        # Dropped back where it started (e.g. an accidental tiny drag) —
+        # do nothing, and especially don't fall through to the copy branch,
+        # which would duplicate the photo inside its own scene.
+        conn.close()
+        return jsonify({'action': 'moved'})
+
+    if target_scene_id is None:
+        # Dropping into Unsorted: simple move.
+        c.execute('UPDATE deck_images SET scene_id = NULL WHERE id = ?', (deck_image_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'action': 'moved'})
+
+    if current_scene_id is None:
+        # Moving out of Unsorted into a named scene: simple move.
+        c.execute('UPDATE deck_images SET scene_id = ? WHERE id = ?', (target_scene_id, deck_image_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'action': 'moved'})
+
+    # Scene-to-scene: copy. Leave the original row untouched, insert a new
+    # row in the target scene (the image now sits in both scenes).
+    next_order = c.execute(
+        'SELECT COALESCE(MAX(storyboard_order), -1) + 1 FROM deck_images WHERE deck_id = ? AND scene_id = ?',
+        (row['deck_id'], target_scene_id)
+    ).fetchone()[0]
+    c.execute('''
+        INSERT INTO deck_images (deck_id, scene_id, image_id, storyboard_order, storyboard_note)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (row['deck_id'], target_scene_id, row['image_id'], next_order, row['storyboard_note']))
+    new_deck_image_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({'action': 'copied', 'new_deck_image_id': new_deck_image_id})
+
+@app.route('/api/deck-images/<int:deck_image_id>', methods=['DELETE'])
+def delete_deck_image(deck_image_id):
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM deck_images WHERE id = ?', (deck_image_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'deck image not found'}), 404
+
+    c.execute('DELETE FROM deck_images WHERE id = ?', (deck_image_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
