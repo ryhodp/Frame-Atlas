@@ -26,18 +26,20 @@ function App() {
 
   return (
     <Router>
-      <div className="min-h-screen bg-gray-50">
+      <div style={{ minHeight: '100vh', background: '#0a0a0b', color: '#efeadd' }}>
         <Header />
         {backendHealthy ? (
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/sync" element={<SyncManager />} />  {/* ← ADD THIS LINE */}
+            <Route path="/sync" element={<SyncManager />} />
             <Route path="/decks" element={<DecksPage />} />
             <Route path="/decks/:id" element={<DeckDetail />} />
           </Routes>
         ) : (
-          <div className="flex items-center justify-center h-96">
-            <p className="text-center text-gray-600">Connecting to backend...</p>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', height: '24rem'
+          }}>
+            <p style={{ textAlign: 'center', color: '#8e9099' }}>Connecting to backend...</p>
           </div>
         )}
       </div>
