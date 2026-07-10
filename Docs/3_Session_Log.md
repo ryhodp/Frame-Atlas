@@ -468,3 +468,121 @@ Day 10 = Tag Mode + Smart Co-occurrence Suggestions:
 4. Bulk remove: shared tags across selection shown → click X to remove from all
 5. Custom tag creation on the fly
 6. Smart co-occurrence suggestions panel (pure SQL math, free)
+
+---
+
+## Day 10 — Tag Mode + Smart Co-occurrence Suggestions (Frame Atlas V9 complete)
+*Completed: July 7, 2026*
+*Status: DAY 10 COMPLETE — verified live: click-select, real drag-select, apply/remove with confirm, suggestions*
+
+### What We Built
+
+**Backend (`backend/app.py`):**
+- Refactored `CAT_COLORS`/`CAT_LABELS` (category → color/display-name for the 15 tag categories) from being defined inline inside `autocomplete()` to module-level constants, shared by all the new endpoints.
+- `GET /api/tag-categories` — fixed list of all 15 categories for the category picker dropdown.
+- `POST /api/tags/bulk-apply` — validates category/value/image_ids, check-before-insert per image (dedup), returns `{applied, already_had, invalid_ids}`.
+- `POST /api/tags/bulk-remove` — single parameterized DELETE across the selection, returns `{removed}`.
+- `POST /api/tags/selection-summary` — aggregates tag usage across a set of image_ids (`count/total` per tag), sorted by count desc.
+- `POST /api/tags/suggestions` — pure-SQL co-occurrence (no AI cost): takes the top 5 tags already common in the selection as "seeds," finds what else co-occurs with those seeds library-wide, excludes tags already on every selected image, returns top 12.
+
+**Frontend:**
+- Tag Mode toggle button (header, next to upload/bookmark icons) — tertiary-green highlight when active.
+- Click-to-select and **drag-to-select** on the masonry grid: mousedown/mousemove/mouseup on the grid container, 4px threshold to distinguish a click from a real drag, hit-tests each tile's `getBoundingClientRect()` against the drag rectangle, unions into the existing selection. A `justDraggedRef` flag (cleared on a 0ms timeout) stops the trailing click-after-drag from double-toggling the tile under the cursor.
+- New `frontend/src/components/TagModeBar.jsx` — fixed bottom toolbar: selection count, Select-all-loaded, Clear selection, Exit; Apply Tag panel (name autocomplete + required category dropdown, per Ryan's explicit choice to always show category rather than infer it silently); Shared Tags panel (chips with `N/total`, click × to remove); Suggestions panel (dashed chips, click to stage into Apply Tag, does not apply immediately).
+- Every bulk apply/remove goes through a confirm-step modal first ("Add/Remove X to/from N images?") per Ryan's choice — no full undo history, just a pre-action guard.
+
+### Bug Found + Fixed This Session
+The selection checkmark badge (bottom-left on selected tiles) was overlapping the last line of the image caption and the first color-palette swatch. Moved to top-right, offset clear of the existing star/flag icons. Confirmed fixed with a zoomed screenshot after redeploy.
+
+### Testing Notes
+- Built `scripts/test_tagmode_locally.py` (same local-server-against-real-data pattern as Day 9's similar-image test) — 10/10 checks passed before deploying: category list, selection-summary sorting, suggestions excluding fully-applied tags, bulk-apply idempotency, bad-category/empty-ids validation (400s), invalid image id handling, bulk-remove + confirmation.
+- Live browser verification found that the `left_click_drag` browser-automation tool doesn't fire intermediate `mousemove` events, so it couldn't trigger the app's drag-select on its own — confirmed via a manual JS-dispatched mousedown→mousemove(×10)→mouseup sequence that the real app logic works correctly for an actual physical drag. Not an app bug, just a testing-tool limitation worth remembering for future UI verification.
+
+### Decisions Made (Confirmed with Ryan)
+- ✅ Category picker: always shown/required when applying a tag, never silently inferred (even for autocomplete matches — pre-fills as a convenience default, but stays editable).
+- ✅ "Select all" scope: only the currently loaded/visible images, not the full filtered set.
+- ✅ Shared tags display: show any tag used by the group with a count (`N/total`), not just the strict intersection.
+- ✅ Safety net: confirm-before-applying modal, no full undo history.
+
+### Technical Debt / Notes
+- Same unresolved items as Day 9: git remote token in plaintext, git committer identity still machine-default, debug endpoints still flagged for Day 13.
+- `decks`, `scenes`, `deck_images` tables already exist in the schema (created early in the project) but have zero endpoints yet — Day 11 is pure backend+frontend build-out, no migration needed.
+
+### Files Changed
+- `backend/app.py` — CAT_COLORS/CAT_LABELS refactor, 5 new tag-mode endpoints
+- `frontend/src/components/TagModeBar.jsx` — new, selection toolbar
+- `frontend/src/pages/Home.jsx` — Tag Mode state, click/drag selection, badge fix
+- `scripts/test_tagmode_locally.py` — new, local test harness
+
+### Commits
+`9f8122d` (Day 10: Tag Mode) → `446372a` (badge position fix)
+
+### Starting Point for Day 11
+Day 11 = Decks + Scenes:
+1. Deck CRUD: create, rename, delete
+2. Add images to deck from any search or browse view
+3. Scene creation within a deck
+4. Drag images between scenes
+5. Deck view: collapsible scene sections, dense grid per scene
+
+---
+
+## Day 11 — Decks + Scenes (Frame Atlas V10 complete)
+*Completed: July 10, 2026*
+*Status: DAY 11 COMPLETE — full lookbook workflow verified live end-to-end, library left clean*
+
+### What We Built
+
+**Backend (`backend/app.py`) — 11 new endpoints under `# DECKS + SCENES`:**
+- Deck CRUD: `GET/POST /api/decks`, `PATCH/DELETE /api/decks/<id>` (delete cascades: deck_images → scenes → deck).
+- `GET /api/decks/<id>` — full detail: deck info, ordered scenes list, and a FLAT list of every deck-membership row (each with its own `deck_image_id`, `scene_id` null = Unsorted, full image data via a new `_fetch_image_dict()` wrapper around the shared `build_image_dict()`). Frontend groups into sections itself.
+- Scene CRUD: `POST /api/scenes` (auto sort_order), `PATCH/DELETE /api/scenes/<id>` (delete removes the scene's deck_images rows too — Ryan's choice).
+- `POST /api/decks/<id>/images` — bulk add to Unsorted, deduped within Unsorted, returns `{added, already_in_deck, invalid_ids}`.
+- `POST /api/deck-images/<id>/move` — THE move-vs-copy endpoint. Branching: same-scene drop → no-op (guard added in review: without it an accidental 2px drag would duplicate a photo inside its own scene); target Unsorted → move; out of Unsorted → move; scene-to-scene → **copy** (new row, original untouched — Ryan's choice so one shot can sit in two scenes). Returns `{action: "moved"}` or `{action: "copied", new_deck_image_id}`.
+- `DELETE /api/deck-images/<id>` — removes one membership row without touching other copies.
+
+**Frontend:**
+- `Header.jsx` REBUILT — was untouched Day 1 skeleton (white Tailwind bar clashing with the dark app since forever). Now dark-theme inline styles, "Frame Atlas v10", Home/Decks/Sync nav with gold active state. Version label now on-screen per the V-naming convention.
+- `App.jsx` — routes for `/decks` and `/decks/:id`; app-level wrapper switched from leftover `bg-gray-50` Tailwind to the dark design-system background (this was the one live bug found in browser testing: the new pages rendered on white because only Home painted its own background).
+- New `pages/DecksPage.jsx` — deck card grid (2×2 preview collage, photo count), inline "+ New Deck" (creates then navigates straight in), per-card delete with confirm modal ("photos themselves stay in your library" reassurance).
+- New `pages/DeckDetail.jsx` — always-visible Unsorted section + collapsible per-scene sections, dense contact-sheet grids (`repeat(auto-fill, minmax(110px,1fr))`, square tiles), click-to-rename deck and scenes, "+ New Scene" inline, per-tile × remove, HTML5 drag-and-drop between sections with drop-target highlight. After any drop it just refetches the deck (sidesteps branching on moved-vs-copied client-side).
+- `TagModeBar.jsx` — new "Add to Deck" panel beside Apply Tag: lazy-loads deck list, click a deck to add the selection (no confirm — purely additive), or type a name in "+ New deck…" to create-and-add in one step. Success message auto-clears.
+
+### Live End-to-End Verification (all API calls 200, zero failures)
+Tag Mode select 2 → create "Test Lookbook" via Add to Deck → deck card correct on /decks → photos in Unsorted → created scene "Opening" → dragged photo in (moved, not copied — Unsorted count went 2→1) → renamed scene to "Act One" via click-to-rename → deleted scene via confirm (its photo left the deck, Unsorted copy untouched) → deleted deck via confirm → `GET /api/decks` returns `[]`, library clean.
+
+### Testing Notes
+- `scripts/test_decks_locally.py` — 17 checks, all passed pre-deploy (CRUD, dedupe, all four move/copy branches incl. the same-scene no-op, scene-delete cascade sparing other copies, deck-delete cascade, validation 400s/404s).
+- Reconfirmed: browser-automation `left_click_drag` can't trigger HTML5 drag-and-drop (no dragstart/drop events) — verified the real handlers with a JS-dispatched DragEvent + DataTransfer sequence instead. Same class of tool limitation noted on Day 10.
+- One test-harness bug during the session was in the TEST not the app (asserted sorted-order shape wrong); the debug pass proved the backend correct.
+
+### Decisions Made (Confirmed with Ryan)
+- ✅ Adding photos to decks: reuse Tag Mode's selection toolbar (no separate flow).
+- ✅ New photos land in an "Unsorted" holding area, sorted into scenes later.
+- ✅ Scene-to-scene drag COPIES (photo can live in two scenes); Unsorted↔scene drags MOVE.
+- ✅ Deleting a scene removes its photos from the deck (not preserved to Unsorted).
+
+### Technical Debt / Notes
+- Same standing items: git remote token in plaintext (flagged Day 9, unresolved), committer identity machine-default, debug endpoints slated for Day 13 removal.
+- `share_token` column on decks and `storyboard_order`/`storyboard_note` on deck_images exist but are unused — they're Day 12's storyboard/share-link scope, already in place schema-wise.
+- `SyncManager.jsx` still uses old Tailwind-style classes internally — now reachable via the new Sync nav link; cosmetic mismatch, low priority.
+
+### Files Changed
+- `backend/app.py` — 11 deck/scene endpoints + `_fetch_image_dict()` helper + same-scene no-op guard
+- `frontend/src/components/Header.jsx` — rebuilt, dark theme + nav
+- `frontend/src/App.jsx` — new routes, dark app-level wrapper (bug fix)
+- `frontend/src/pages/DecksPage.jsx` — new
+- `frontend/src/pages/DeckDetail.jsx` — new
+- `frontend/src/components/TagModeBar.jsx` — Add to Deck panel
+- `scripts/test_decks_locally.py` — new, 17-check local harness
+
+### Commits
+`a916251` (Day 11: Decks + Scenes) → `cb49c3d` (dark background fix)
+
+### Starting Point for Day 12
+Day 12 = Storyboard Mode + Obsidian Export:
+1. Storyboard mode within a scene: drag images into specific order (uses the existing `storyboard_order` column)
+2. Add text note to each image in the sequence (uses the existing `storyboard_note` column)
+3. Obsidian markdown export: deck → `.md` file with images as URL embeds pointing to the app's thumbnail server
+4. Read-only share link per deck (token-based, no login — `share_token` column already exists)
+Done when: can sequence 10 images with notes, export `.md`, drop into Obsidian, see images render inline.
