@@ -586,3 +586,67 @@ Day 12 = Storyboard Mode + Obsidian Export:
 3. Obsidian markdown export: deck → `.md` file with images as URL embeds pointing to the app's thumbnail server
 4. Read-only share link per deck (token-based, no login — `share_token` column already exists)
 Done when: can sequence 10 images with notes, export `.md`, drop into Obsidian, see images render inline.
+
+---
+
+## Day 12 — Storyboard Mode + Share Links (Frame Atlas V11 complete)
+*Completed: July 11, 2026*
+*Status: DAY 12 COMPLETE — storyboard, notes, and share links all verified live; Obsidian export CANCELLED by Ryan*
+
+### Scope Change
+Ryan cancelled the Obsidian markdown export at session start. Day 12 became:
+storyboard mode + per-frame notes + read-only share links.
+
+### What We Built
+
+**Backend (`backend/app.py`) — under new `# STORYBOARD + SHARE LINKS` section:**
+- `POST /api/deck-images/<id>/note` — set/clear a frame's storyboard note (trims whitespace; empty string clears to NULL).
+- `POST /api/decks/<id>/reorder` — persists a new order for one section (scene, or Unsorted when `scene_id` is null). Requires the COMPLETE ordered list of that section's deck_image_ids — partial lists, ids from the wrong section, and junk are all rejected with 400s. Position in list becomes `storyboard_order`.
+- `POST /api/decks/<id>/share` — mints a share token (`secrets.token_urlsafe(16)`) or returns the existing one (idempotent). `DELETE` revokes it; a later re-share mints a NEW token (revoked links can never be revived).
+- `GET /api/share/<token>` — public read-only deck payload, no login. Thumbnails only (they're data URIs in the payload); no full-res/edit/delete exposure.
+- Refactor: `get_deck()` internals extracted into `_deck_payload()` shared by owner view and share view so the two JSON shapes can't drift. Deck GET now returns images **in storyboard order** (unordered rows last) plus `share_token` and `storyboard_note` per image.
+
+**Frontend:**
+- New `components/StoryboardView.jsx` — full-screen overlay per scene: numbered frame cards, drag-onto-a-card to reorder (inserts at that position), always-visible auto-saving note textarea under each frame, Saving…/Saved ✓/Save failed indicator, ESC or Done to close (parent refetches deck only if something changed). Textarea blocks the parent card's drag so text selection still works.
+- New `pages/SharePage.jsx` — public lookbook at `/share/<token>`: "FRAME ATLAS · SHARED LOOKBOOK" branding, deck title, scenes in order with numbered frames + notes, Unsorted shown last as "More Frames" (only if non-empty). Clean error state for invalid/revoked links.
+- `pages/DeckDetail.jsx` — "⊞ Storyboard" button on every non-empty section; Share button by deck title (turns gold "🔗 Shared" when a link is active); ShareModal with create/copy/revoke (revoke has an inline confirm step).
+- `App.jsx` — restructured with inner `Shell` component (for `useLocation`); `/share/:token` route renders WITHOUT the app header.
+- `Header.jsx` — version label bumped to v11.
+
+### Testing
+- `scripts/test_storyboard_locally.py` — 8 checks, all passed pre-deploy: payload fields, scene + Unsorted reorder round-trips, reorder validation (partial/wrong-section/junk/missing-deck), note set/trim/clear/validation, scene-to-scene copy carrying the note, share create/idempotency/public-fetch, revoke + fresh-token-on-reshare.
+- Live browser verification: typed a real note (saved, 200), reordered frames via JS-dispatched DragEvents (order persisted to DB and reflected in deck grid + share page), created share link, viewed public page (no header, correct order, note visible), revoked, confirmed dead link shows "This link isn't active". Test deck deleted afterward — library left clean.
+- **New tooling lesson:** JS-dispatched DragEvent sequences must have ~100ms delays between events — fired synchronously, React state from `dragstart` hasn't flushed when `drop` reads it, so the drop silently no-ops. Real drags are unaffected (events arrive in separate tasks).
+
+### Decisions Made (Confirmed with Ryan)
+- ✅ Obsidian export: cancelled entirely.
+- ✅ Storyboard UI: full-screen view per scene (not an in-page toggle, not whole-deck).
+- ✅ Notes: always visible under each frame in storyboard view (not click-to-open, not shown in normal deck grid).
+- ✅ Share view: full presentation INCLUDING notes.
+- ✅ Share quality: thumbnails only — viewers get no full-res access.
+
+### Technical Debt / Notes
+- Share links are protected by the unguessable token, but the whole app is loginless until Day 14 — the share feature's privacy model only fully lands once auth exists.
+- Same standing items: git remote token in plaintext (Day 9), committer identity machine-default, debug endpoints (`/api/debug*`, `/api/models`) slated for Day 13 removal.
+- `storyboard_order` is only compacted per-section on reorder; rows moved between scenes keep their old number until their new section is reordered (harmless — deck GET breaks ties by row id).
+
+### Files Changed
+- `backend/app.py` — 4 new endpoints, `_deck_payload()` refactor, ordered deck GET
+- `frontend/src/components/StoryboardView.jsx` — new
+- `frontend/src/pages/SharePage.jsx` — new
+- `frontend/src/pages/DeckDetail.jsx` — Storyboard buttons, Share button + modal
+- `frontend/src/App.jsx` — Shell restructure, /share route (headerless)
+- `frontend/src/components/Header.jsx` — v11
+- `scripts/test_storyboard_locally.py` — new, 8-check local harness
+
+### Commits
+`3347018` (Day 12: Storyboard Mode + Share Links)
+
+### Starting Point for Day 13
+Day 13 = Analytics + Utility Views:
+1. Analytics dashboard: tag frequency heatmap, source type breakdown, mood distribution, location spread, time-of-day distribution, library growth over time
+2. Recently Added strip (images from last sync, on home view)
+3. Favorites view (all starred images)
+4. Flagged queue (all flagged images, clearable)
+5. Cleanup flagged since Day 3: remove debug endpoints (`/api/debug*`, `/api/models`)
+Done when: dashboard loads with real data; Recently Added shows last sync's images.
