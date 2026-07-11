@@ -38,7 +38,7 @@ function Header() {
           >
             Frame Atlas
           </h1>
-          <span style={{ fontSize: '12px', color: '#8e9099' }}>v10</span>
+          <span style={{ fontSize: '12px', color: '#8e9099' }}>v11</span>
         </div>
 
         <nav style={{ display: 'flex', gap: '28px' }}>

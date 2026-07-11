@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import secrets
 import io
 import gzip
 import sqlite3
@@ -2343,11 +2344,22 @@ def delete_deck(deck_id):
 def get_deck(deck_id):
     conn = get_db()
     c = conn.cursor()
-    deck_row = c.execute('SELECT id, name, created_at FROM decks WHERE id = ?', (deck_id,)).fetchone()
+    deck_row = c.execute('SELECT id, name, created_at, share_token FROM decks WHERE id = ?', (deck_id,)).fetchone()
     if not deck_row:
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
 
+    payload = _deck_payload(c, deck_row)
+    conn.close()
+    return jsonify(payload)
+
+def _deck_payload(c, deck_row):
+    """Full deck JSON: deck info + ordered scenes + flat image list. Shared by
+    the owner view (GET /api/decks/<id>) and the public share view
+    (GET /api/share/<token>) so the two can never drift apart. Images come back
+    in storyboard order (unordered rows last, then by row id) — the frontend
+    preserves this order when it groups images into scene sections."""
+    deck_id = deck_row['id']
     scenes = [
         {'id': s['id'], 'name': s['name'], 'sort_order': s['sort_order']}
         for s in c.execute(
@@ -2358,6 +2370,8 @@ def get_deck(deck_id):
     di_rows = c.execute('''
         SELECT id, scene_id, image_id, storyboard_order, storyboard_note
         FROM deck_images WHERE deck_id = ?
+        ORDER BY CASE WHEN storyboard_order IS NULL THEN 1 ELSE 0 END,
+                 storyboard_order ASC, id ASC
     ''', (deck_id,)).fetchall()
 
     images_out = []
@@ -2368,17 +2382,17 @@ def get_deck(deck_id):
         img_dict['deck_image_id'] = di['id']
         img_dict['scene_id'] = di['scene_id']
         img_dict['storyboard_order'] = di['storyboard_order']
+        img_dict['storyboard_note'] = di['storyboard_note']
         images_out.append(img_dict)
 
-    conn.close()
-
-    return jsonify({
+    return {
         'id': deck_row['id'],
         'name': deck_row['name'],
         'created_at': deck_row['created_at'],
+        'share_token': deck_row['share_token'],
         'scenes': scenes,
         'images': images_out
-    })
+    }
 
 @app.route('/api/scenes', methods=['POST'])
 def create_scene():
@@ -2558,6 +2572,113 @@ def delete_deck_image(deck_image_id):
     conn.commit()
     conn.close()
     return jsonify({'success': True})
+
+# ============================================================================
+# STORYBOARD + SHARE LINKS
+# ============================================================================
+
+@app.route('/api/deck-images/<int:deck_image_id>/note', methods=['POST'])
+def set_deck_image_note(deck_image_id):
+    data = request.get_json(force=True) or {}
+    note = data.get('note')
+    if note is not None and not isinstance(note, str):
+        return jsonify({'error': 'note must be a string or null'}), 400
+    if isinstance(note, str):
+        note = note.strip() or None  # empty string clears the note
+
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM deck_images WHERE id = ?', (deck_image_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'deck image not found'}), 404
+
+    c.execute('UPDATE deck_images SET storyboard_note = ? WHERE id = ?', (note, deck_image_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'note': note})
+
+@app.route('/api/decks/<int:deck_id>/reorder', methods=['POST'])
+def reorder_deck_images(deck_id):
+    """Persists a new storyboard order for one section (a scene, or Unsorted
+    when scene_id is null). Expects the COMPLETE ordered list of that section's
+    deck_image_ids — position in the list becomes storyboard_order."""
+    data = request.get_json(force=True) or {}
+    scene_id = data.get('scene_id')  # null = Unsorted
+    ordered_ids = data.get('deck_image_ids')
+
+    if not isinstance(ordered_ids, list) or not ordered_ids or not all(isinstance(i, int) for i in ordered_ids):
+        return jsonify({'error': 'deck_image_ids must be a non-empty list of ints'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    if scene_id is None:
+        rows = c.execute(
+            'SELECT id FROM deck_images WHERE deck_id = ? AND scene_id IS NULL', (deck_id,)
+        ).fetchall()
+    else:
+        rows = c.execute(
+            'SELECT id FROM deck_images WHERE deck_id = ? AND scene_id = ?', (deck_id, scene_id)
+        ).fetchall()
+    current_ids = {r['id'] for r in rows}
+
+    if set(ordered_ids) != current_ids or len(ordered_ids) != len(current_ids):
+        conn.close()
+        return jsonify({'error': 'deck_image_ids must be exactly the ids in this section'}), 400
+
+    for position, di_id in enumerate(ordered_ids):
+        c.execute('UPDATE deck_images SET storyboard_order = ? WHERE id = ?', (position, di_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'updated': len(ordered_ids)})
+
+@app.route('/api/decks/<int:deck_id>/share', methods=['POST', 'DELETE'])
+def deck_share_token(deck_id):
+    """POST creates (or returns the existing) share token for a deck.
+    DELETE revokes it — the old link stops working immediately, and a later
+    POST mints a brand new token rather than reviving the old one."""
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute('SELECT share_token FROM decks WHERE id = ?', (deck_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    if request.method == 'DELETE':
+        c.execute('UPDATE decks SET share_token = NULL WHERE id = ?', (deck_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'share_token': None})
+
+    token = row['share_token']
+    if not token:
+        token = secrets.token_urlsafe(16)
+        c.execute('UPDATE decks SET share_token = ? WHERE id = ?', (token, deck_id))
+        conn.commit()
+    conn.close()
+    return jsonify({'share_token': token, 'share_path': f'/share/{token}'})
+
+@app.route('/api/share/<token>')
+def get_shared_deck(token):
+    """Public read-only deck view — no login, the token IS the access grant.
+    Viewers get thumbnails only (they're embedded in the payload as data URIs);
+    none of the full-res, edit, or delete endpoints check tokens, so a shared
+    link exposes nothing beyond what this one endpoint returns."""
+    conn = get_db()
+    c = conn.cursor()
+    deck_row = c.execute(
+        'SELECT id, name, created_at, share_token FROM decks WHERE share_token = ?', (token,)
+    ).fetchone()
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Share link not found or revoked'}), 404
+
+    payload = _deck_payload(c, deck_row)
+    conn.close()
+    return jsonify(payload)
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

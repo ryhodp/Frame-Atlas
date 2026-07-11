@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import StoryboardView from '../components/StoryboardView';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -75,6 +76,9 @@ export default function DeckDetail() {
 
   const [sceneToDelete, setSceneToDelete] = useState(null); // scene object or null
   const [busy, setBusy] = useState(false);
+
+  const [storyboard, setStoryboard] = useState(null); // { sceneId, title } or null
+  const [shareOpen, setShareOpen] = useState(false);
 
   const loadDeck = useCallback(() => {
     setLoading(true);
@@ -227,8 +231,8 @@ export default function DeckDetail() {
         ← All Decks
       </button>
 
-      {/* Deck name — click to rename */}
-      <div style={{ marginBottom: '24px' }}>
+      {/* Deck name — click to rename — plus Share */}
+      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
         {renamingDeck ? (
           <input
             autoFocus
@@ -257,6 +261,21 @@ export default function DeckDetail() {
             {deck.name}
           </h1>
         )}
+
+        <button
+          onClick={() => setShareOpen(true)}
+          style={{
+            background: deck.share_token ? 'rgba(217,164,65,0.14)' : 'none',
+            border: `1px solid ${deck.share_token ? 'rgba(217,164,65,0.55)' : '#44474f'}`,
+            color: deck.share_token ? '#d9a441' : '#e2e2e6',
+            borderRadius: '8px', padding: '8px 16px',
+            cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
+            whiteSpace: 'nowrap'
+          }}
+          title={deck.share_token ? 'Share link is active' : 'Create a read-only share link'}
+        >
+          {deck.share_token ? '🔗 Shared' : 'Share'}
+        </button>
       </div>
 
       {/* + New Scene */}
@@ -302,6 +321,7 @@ export default function DeckDetail() {
         onDragLeave={() => setDragOverKey(prev => (prev === 'unsorted' ? null : prev))}
         onDrop={e => { setDragOverKey(null); handleDrop(null, e); }}
         onRemoveImage={removeDeckImage}
+        onStoryboard={() => setStoryboard({ sceneId: null, title: 'Unsorted' })}
       />
 
       {/* One section per scene, in sort_order */}
@@ -320,6 +340,7 @@ export default function DeckDetail() {
             onDragLeave={() => setDragOverKey(prev => (prev === key ? null : prev))}
             onDrop={e => { setDragOverKey(null); handleDrop(scene.id, e); }}
             onRemoveImage={removeDeckImage}
+            onStoryboard={() => setStoryboard({ sceneId: scene.id, title: scene.name })}
             editable
             onRename={(name) => renameScene(scene.id, name)}
             onDelete={() => setSceneToDelete(scene)}
@@ -337,6 +358,188 @@ export default function DeckDetail() {
           onCancel={() => !busy && setSceneToDelete(null)}
         />
       )}
+
+      {storyboard && (
+        <StoryboardView
+          deckId={Number(id)}
+          sceneId={storyboard.sceneId}
+          title={storyboard.title}
+          images={bucketFor(storyboard.sceneId)}
+          onClose={(changed) => { setStoryboard(null); if (changed) loadDeck(); }}
+        />
+      )}
+
+      {shareOpen && (
+        <ShareModal
+          deckId={Number(id)}
+          shareToken={deck.share_token}
+          onTokenChange={(token) => setDeck(prev => ({ ...prev, share_token: token }))}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Share link modal — create, copy, revoke ──────────────────────────────────
+function ShareModal({ deckId, shareToken, onTokenChange, onClose }) {
+  const [working, setWorking] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
+
+  const shareUrl = shareToken ? `${window.location.origin}/share/${shareToken}` : null;
+
+  const createLink = async () => {
+    setWorking(true);
+    try {
+      const res = await fetch(`/api/decks/${deckId}/share`, { method: 'POST' });
+      const data = await res.json();
+      if (data.share_token) onTokenChange(data.share_token);
+    } catch (e) {
+      console.error('Create share link failed', e);
+    }
+    setWorking(false);
+  };
+
+  const revokeLink = async () => {
+    setWorking(true);
+    try {
+      await fetch(`/api/decks/${deckId}/share`, { method: 'DELETE' });
+      onTokenChange(null);
+      setConfirmRevoke(false);
+    } catch (e) {
+      console.error('Revoke share link failed', e);
+    }
+    setWorking(false);
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard API can be unavailable — select-and-copy fallback is the
+      // visible URL text itself, so just skip the confirmation flash.
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#2a2c31',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: '12px',
+          padding: '20px 22px',
+          width: '440px', maxWidth: 'calc(100vw - 48px)',
+          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+        }}
+      >
+        <div style={{ fontSize: '15px', fontWeight: 600, color: '#e2e2e6', marginBottom: '6px' }}>
+          Share this deck
+        </div>
+        <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5, marginBottom: '16px' }}>
+          Anyone with the link can view this lookbook — scenes, frame order, and notes —
+          without signing in. They can't edit anything or download originals.
+        </div>
+
+        {!shareToken ? (
+          <button
+            onClick={createLink}
+            disabled={working}
+            style={{
+              background: '#d9a441', color: '#3d2f00', border: 'none',
+              borderRadius: '8px', padding: '10px 18px',
+              fontSize: '13.5px', fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'inherit', opacity: working ? 0.6 : 1
+            }}
+          >
+            {working ? 'Creating…' : 'Create Share Link'}
+          </button>
+        ) : (
+          <>
+            <div style={{
+              display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '14px'
+            }}>
+              <input
+                readOnly
+                value={shareUrl}
+                onFocus={e => e.target.select()}
+                style={{
+                  flex: 1, background: '#111317', color: '#e2e2e6',
+                  border: '1px solid #44474f', borderRadius: '8px',
+                  padding: '9px 10px', fontSize: '12px', fontFamily: 'inherit',
+                  outline: 'none'
+                }}
+              />
+              <button
+                onClick={copyLink}
+                style={{
+                  background: copied ? 'rgba(184,206,161,0.18)' : '#d9a441',
+                  color: copied ? '#b8cea1' : '#3d2f00',
+                  border: copied ? '1px solid rgba(184,206,161,0.6)' : 'none',
+                  borderRadius: '8px', padding: '9px 14px',
+                  fontSize: '12.5px', fontWeight: 600, cursor: 'pointer',
+                  fontFamily: 'inherit', whiteSpace: 'nowrap'
+                }}
+              >
+                {copied ? 'Copied ✓' : 'Copy'}
+              </button>
+            </div>
+
+            {confirmRevoke ? (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ fontSize: '12.5px', color: '#ffb4ab' }}>
+                  The link will stop working for everyone.
+                </span>
+                <div style={{ flex: 1 }} />
+                <button
+                  onClick={() => setConfirmRevoke(false)}
+                  disabled={working}
+                  style={{
+                    background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#9c988d', borderRadius: '6px', padding: '6px 12px',
+                    cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
+                  }}
+                >
+                  Keep
+                </button>
+                <button
+                  onClick={revokeLink}
+                  disabled={working}
+                  style={{
+                    background: 'rgba(255,180,171,0.18)',
+                    border: '1px solid rgba(255,180,171,0.6)',
+                    color: '#ffb4ab', borderRadius: '6px', padding: '6px 12px',
+                    cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
+                  }}
+                >
+                  {working ? 'Revoking…' : 'Revoke Link'}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmRevoke(true)}
+                style={{
+                  background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+                  color: '#ffb4ab', borderRadius: '6px', padding: '6px 12px',
+                  cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
+                }}
+              >
+                Revoke Link…
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -344,7 +547,7 @@ export default function DeckDetail() {
 function SceneSection({
   sceneKey, title, images, collapsedState, toggleCollapsed,
   isDragOver, onDragEnter, onDragLeave, onDrop,
-  onRemoveImage, editable, onRename, onDelete
+  onRemoveImage, onStoryboard, editable, onRename, onDelete
 }) {
   const isCollapsed = !!collapsedState[sceneKey];
   const [renaming, setRenaming] = useState(false);
@@ -421,6 +624,22 @@ function SceneSection({
         </span>
 
         <div style={{ flex: 1 }} />
+
+        {images.length > 0 && (
+          <button
+            onClick={onStoryboard}
+            title="Open storyboard — sequence frames and add notes"
+            style={{
+              background: 'rgba(217,164,65,0.12)',
+              border: '1px solid rgba(217,164,65,0.45)',
+              color: '#d9a441', borderRadius: '6px', padding: '5px 10px',
+              cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit',
+              marginRight: editable ? '8px' : 0
+            }}
+          >
+            ⊞ Storyboard
+          </button>
+        )}
 
         {editable && (
           <button
