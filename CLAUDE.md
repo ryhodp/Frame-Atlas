@@ -134,7 +134,10 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - `/api/sync/status` — current sync state
 - `/api/tag-progress` — tagging progress
 - `/api/tag-progress/stream` — SSE stream for live progress UI
-- `/api/debug` — remove before production (Day 13)
+- `/api/analytics` — dashboard rollups: totals, tag counts by category, growth by month
+- `/api/views/<favorites|flagged|recent>` — filtered image lists (recent takes `?days=` and `?limit=`)
+- `/api/flags/clear-all` — POST, unflags everything (never deletes)
+- `/api/models` — Gemini diagnostic, KEPT on purpose (Day 13 decision): first-stop check when auto-tagging mass-fails (`/api/debug*` removed Day 13 as planned)
 
 ---
 

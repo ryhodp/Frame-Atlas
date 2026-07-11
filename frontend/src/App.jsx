@@ -6,6 +6,8 @@ import SyncManager from './components/SyncManager'
 import DecksPage from './pages/DecksPage'
 import DeckDetail from './pages/DeckDetail'
 import SharePage from './pages/SharePage'
+import AnalyticsPage from './pages/AnalyticsPage'
+import CollectionPage from './pages/CollectionPage'
 import './App.css'
 
 // Inner shell so we can read the current route (useLocation only works inside
@@ -38,6 +40,9 @@ function Shell() {
           <Route path="/sync" element={<SyncManager />} />
           <Route path="/decks" element={<DecksPage />} />
           <Route path="/decks/:id" element={<DeckDetail />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/favorites" element={<CollectionPage key="favorites" view="favorites" />} />
+          <Route path="/flagged" element={<CollectionPage key="flagged" view="flagged" />} />
           <Route path="/share/:token" element={<SharePage />} />
         </Routes>
       ) : (

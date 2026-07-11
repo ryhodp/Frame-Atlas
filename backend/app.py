@@ -782,6 +782,33 @@ def build_image_dict(row, tags, palette, filmography):
         'filmography': filmography
     }
 
+def hydrate_image_rows(c, rows):
+    """Given a list of `images` rows (each must include the columns
+    build_image_dict needs), bulk-fetch their tags, palettes, and filmography
+    in three queries and return finished image dicts. Shared by /api/search
+    and the Day 13 utility views so their payloads can never drift apart."""
+    img_ids = [r['id'] for r in rows]
+    tags_map = {}
+    colors_map = {}
+    film_map = {}
+
+    if img_ids:
+        ph = ','.join('?' * len(img_ids))
+        for tr in c.execute(f'SELECT image_id, category, value FROM tags WHERE image_id IN ({ph})', img_ids).fetchall():
+            tags_map.setdefault(tr['image_id'], []).append({'category': tr['category'], 'value': tr['value']})
+        for cr in c.execute(f'SELECT image_id, hex FROM colors WHERE image_id IN ({ph}) ORDER BY rank ASC', img_ids).fetchall():
+            colors_map.setdefault(cr['image_id'], []).append(cr['hex'])
+        for fr in c.execute(f'SELECT image_id, title, director, dp, year FROM filmography WHERE image_id IN ({ph})', img_ids).fetchall():
+            film_map[fr['image_id']] = {
+                'title': fr['title'], 'director': fr['director'],
+                'dp': fr['dp'], 'year': fr['year']
+            }
+
+    return [
+        build_image_dict(r, tags_map.get(r['id'], []), colors_map.get(r['id'], []), film_map.get(r['id']))
+        for r in rows
+    ]
+
 def extract_palette(image_data, num_colors=10):
     """Vibrance-weighted palette. Colors are scored by area x saturation, so a
     small patch of vivid red outranks a large gray wall. Binning happens in HSV,
@@ -983,32 +1010,6 @@ def sync_folder_worker(folder_id, user_id):
 def health():
     return jsonify({'status': 'ok'})
 
-@app.route('/api/debug', methods=['GET'])
-def debug():
-    creds = os.environ.get('GOOGLE_DRIVE_CREDENTIALS')
-    return jsonify({
-        'has_creds': creds is not None,
-        'creds_length': len(creds) if creds else 0,
-        'env_keys': list(os.environ.keys())
-    })
-
-@app.route('/api/debug/failed-images', methods=['GET'])
-def debug_failed_images():
-    """Temporary: list all images that failed tagging. Remove after investigation (Day 8)."""
-    conn = get_db()
-    c = conn.cursor()
-    rows = c.execute('''
-        SELECT id, filename, date_added FROM images
-        WHERE tagging_status = 'failed'
-        ORDER BY id ASC
-    ''').fetchall()
-    conn.close()
-    return jsonify([{
-        'id': r['id'],
-        'filename': r['filename'],
-        'date_added': r['date_added']
-    } for r in rows])
-
 @app.route('/api/tag/retry-failed', methods=['POST'])
 def retry_failed():
     """Reset only failed images to pending and trigger retag. Cheaper than force=true."""
@@ -1028,7 +1029,9 @@ def config():
 
 @app.route('/api/models', methods=['GET'])
 def list_models():
-    """Debug: list Gemini models this API key can use. Remove before production (Day 13)."""
+    """Diagnostic: list Gemini models this API key can use. Kept on purpose
+    (Day 13 decision) — this is the first-stop check when auto-tagging
+    mass-fails because Google retired the model in GEMINI_MODEL."""
     gemini_api_key = os.environ.get('GEMINI_API_KEY')
     if not gemini_api_key:
         return jsonify({'error': 'GEMINI_API_KEY not set'}), 500
@@ -1347,29 +1350,8 @@ def search():
     ''', params + [per, page * per]).fetchall()
     total = c.execute(f'SELECT COUNT(*) FROM images {where}', params).fetchone()[0]
 
-    img_ids = [r['id'] for r in rows]
-    tags_map = {}
-    colors_map = {}
-    film_map = {}
-
-    if img_ids:
-        ph = ','.join('?' * len(img_ids))
-        for tr in c.execute(f'SELECT image_id, category, value FROM tags WHERE image_id IN ({ph})', img_ids).fetchall():
-            tags_map.setdefault(tr['image_id'], []).append({'category': tr['category'], 'value': tr['value']})
-        for cr in c.execute(f'SELECT image_id, hex FROM colors WHERE image_id IN ({ph}) ORDER BY rank ASC', img_ids).fetchall():
-            colors_map.setdefault(cr['image_id'], []).append(cr['hex'])
-        for fr in c.execute(f'SELECT image_id, title, director, dp, year FROM filmography WHERE image_id IN ({ph})', img_ids).fetchall():
-            film_map[fr['image_id']] = {
-                'title': fr['title'], 'director': fr['director'],
-                'dp': fr['dp'], 'year': fr['year']
-            }
-
+    images_out = hydrate_image_rows(c, rows)
     conn.close()
-
-    images_out = [
-        build_image_dict(r, tags_map.get(r['id'], []), colors_map.get(r['id'], []), film_map.get(r['id']))
-        for r in rows
-    ]
 
     return jsonify({'images': images_out, 'total': total, 'page': page, 'per': per, 'has_more': (page + 1) * per < total})
 
@@ -2679,6 +2661,120 @@ def get_shared_deck(token):
     payload = _deck_payload(c, deck_row)
     conn.close()
     return jsonify(payload)
+
+# ============================================================================
+# DAY 13 (V12): ANALYTICS + UTILITY VIEWS
+# ============================================================================
+
+@app.route('/api/views/<view>')
+def get_utility_view(view):
+    """Filtered image lists for the Day 13 utility views.
+
+    /api/views/favorites          — all starred images
+    /api/views/flagged            — all flagged images
+    /api/views/recent?days=7      — images added in the last N days
+                                    (?limit=30 caps how many come back)
+
+    Returns the same full image dicts as /api/search, so the frontend can
+    reuse the grid + detail panel unchanged.
+    """
+    if view == 'favorites':
+        where, params = 'is_favorite = 1', []
+    elif view == 'flagged':
+        where, params = 'is_flagged = 1', []
+    elif view == 'recent':
+        try:
+            days = max(1, int(request.args.get('days', 7)))
+        except ValueError:
+            days = 7
+        where, params = "date_added >= datetime('now', ?)", [f'-{days} days']
+    else:
+        return jsonify({'error': 'Unknown view'}), 404
+
+    limit_sql = ''
+    limit_params = []
+    limit_raw = request.args.get('limit', '').strip()
+    if limit_raw:
+        try:
+            limit_sql = 'LIMIT ?'
+            limit_params = [max(1, int(limit_raw))]
+        except ValueError:
+            limit_sql = ''
+            limit_params = []
+
+    conn = get_db()
+    c = conn.cursor()
+    rows = c.execute(f'''
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
+        FROM images WHERE {where}
+        ORDER BY date_added DESC {limit_sql}
+    ''', params + limit_params).fetchall()
+    total = c.execute(f'SELECT COUNT(*) FROM images WHERE {where}', params).fetchone()[0]
+
+    images_out = hydrate_image_rows(c, rows)
+    conn.close()
+    return jsonify({'images': images_out, 'total': total})
+
+@app.route('/api/flags/clear-all', methods=['POST'])
+def clear_all_flags():
+    """Unflag every flagged image at once. Removes only the flag marker —
+    no image is ever deleted by this."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('UPDATE images SET is_flagged = 0 WHERE is_flagged = 1')
+    cleared = c.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'cleared': cleared})
+
+@app.route('/api/analytics')
+def analytics():
+    """Read-only rollups for the Analytics dashboard. One call returns
+    everything the page needs: headline totals, tag counts grouped by
+    category (the frontend picks which categories to chart), and library
+    growth by month (added + running total)."""
+    conn = get_db()
+    c = conn.cursor()
+
+    totals = {
+        'images': c.execute('SELECT COUNT(*) FROM images').fetchone()[0],
+        'favorites': c.execute('SELECT COUNT(*) FROM images WHERE is_favorite = 1').fetchone()[0],
+        'flagged': c.execute('SELECT COUNT(*) FROM images WHERE is_flagged = 1').fetchone()[0],
+        'added_last_7_days': c.execute(
+            "SELECT COUNT(*) FROM images WHERE date_added >= datetime('now', '-7 days')"
+        ).fetchone()[0],
+        'tags': c.execute('SELECT COUNT(*) FROM tags').fetchone()[0],
+        'distinct_tags': c.execute('SELECT COUNT(DISTINCT value) FROM tags').fetchone()[0],
+        'decks': c.execute('SELECT COUNT(*) FROM decks').fetchone()[0],
+    }
+
+    categories = {}
+    for row in c.execute('''
+        SELECT category, value, COUNT(*) AS cnt FROM tags
+        GROUP BY category, value
+        ORDER BY cnt DESC, value ASC
+    ''').fetchall():
+        categories.setdefault(row['category'], []).append(
+            {'value': row['value'], 'count': row['cnt']}
+        )
+
+    growth = []
+    running = 0
+    for row in c.execute('''
+        SELECT strftime('%Y-%m', date_added) AS month, COUNT(*) AS cnt
+        FROM images GROUP BY month ORDER BY month ASC
+    ''').fetchall():
+        running += row['cnt']
+        growth.append({'month': row['month'], 'added': row['cnt'], 'total': running})
+
+    conn.close()
+    return jsonify({
+        'totals': totals,
+        'categories': categories,
+        'category_labels': CAT_LABELS,
+        'category_colors': CAT_COLORS,
+        'growth': growth,
+    })
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

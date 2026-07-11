@@ -3,6 +3,9 @@ import { Link, useLocation } from 'react-router-dom'
 const NAV_LINKS = [
   { to: '/', label: 'Home' },
   { to: '/decks', label: 'Decks' },
+  { to: '/analytics', label: 'Analytics' },
+  { to: '/favorites', label: 'Favorites' },
+  { to: '/flagged', label: 'Flagged' },
   { to: '/sync', label: 'Sync' },
 ]
 
@@ -38,7 +41,7 @@ function Header() {
           >
             Frame Atlas
           </h1>
-          <span style={{ fontSize: '12px', color: '#8e9099' }}>v11</span>
+          <span style={{ fontSize: '12px', color: '#8e9099' }}>v12</span>
         </div>
 
         <nav style={{ display: 'flex', gap: '28px' }}>
