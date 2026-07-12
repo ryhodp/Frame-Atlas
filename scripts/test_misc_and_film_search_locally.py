@@ -114,6 +114,19 @@ def main():
     assert any(x["type"] == "tag" and x["value"] == "needs-review" for x in body), body
     print("8. Ordinary tag matches still come back with type='tag'.")
 
+    # 8b. Exact match ranks first even when a same-prefix tag has a much
+    # higher count — reproduces "searched Tenet, a same-prefix tag with more
+    # uses outranked it and sat at the bottom of the list."
+    admin.post("/api/tags/bulk-apply", json={"image_ids": ids, "category": "mood", "value": "tenet-like"})
+    r = admin.post(f"/api/images/{ids[0]}/filmography", json={"title": "Tenet", "director": "Christopher Nolan"})
+    assert r.status_code == 200, r.get_json()
+    r = admin.get("/api/autocomplete?q=tenet")
+    body = r.get_json()
+    assert body[0]["type"] == "film" and body[0]["value"] == "Tenet", body
+    tag_positions = [i for i, x in enumerate(body) if x["type"] == "tag" and x["value"] == "tenet-like"]
+    assert tag_positions and tag_positions[0] == 1 and tag_positions[0] > 0, body
+    print("8b. Exact film title match ('Tenet') ranks first even though a same-prefix tag has a higher count.")
+
     # 9. Autocomplete only searches this user's own filmography (scoped).
     friend_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     friend = mod.app.test_client()

@@ -1588,7 +1588,13 @@ def autocomplete():
         'count': row['cnt']
     } for row in film_rows]
 
-    return jsonify(tag_results + film_results)
+    # An exact match (typed "Tenet", there's a film called Tenet) should
+    # always sit at the very top regardless of type or how many images carry
+    # it — otherwise a popular tag that merely starts with the same letters
+    # can bury the one result you actually typed for.
+    combined = tag_results + film_results
+    combined.sort(key=lambda r: (r['value'].lower() != q, -r['count']))
+    return jsonify(combined)
 
 @app.route('/api/tag-categories')
 def tag_categories():
