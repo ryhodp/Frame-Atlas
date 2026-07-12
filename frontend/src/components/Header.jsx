@@ -1,16 +1,29 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../AuthContext'
 
-const NAV_LINKS = [
+const BASE_NAV_LINKS = [
   { to: '/', label: 'Home' },
   { to: '/decks', label: 'Decks' },
   { to: '/analytics', label: 'Analytics' },
   { to: '/favorites', label: 'Favorites' },
   { to: '/flagged', label: 'Flagged' },
+]
+
+const ADMIN_NAV_LINKS = [
   { to: '/sync', label: 'Sync' },
+  { to: '/invites', label: 'Invite' },
 ]
 
 function Header() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { user, isAdmin, logout } = useAuth()
+  const NAV_LINKS = isAdmin ? [...BASE_NAV_LINKS, ...ADMIN_NAV_LINKS] : BASE_NAV_LINKS
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/')
+  }
 
   return (
     <header
@@ -41,10 +54,10 @@ function Header() {
           >
             Frame Atlas
           </h1>
-          <span style={{ fontSize: '12px', color: '#8e9099' }}>v12</span>
+          <span style={{ fontSize: '12px', color: '#8e9099' }}>v13</span>
         </div>
 
-        <nav style={{ display: 'flex', gap: '28px' }}>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: '28px' }}>
           {NAV_LINKS.map(link => {
             const isActive = location.pathname === link.to
               || (link.to === '/decks' && location.pathname.startsWith('/decks'))
@@ -66,6 +79,21 @@ function Header() {
               </Link>
             )
           })}
+
+          {user && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingLeft: '8px', borderLeft: '1px solid #44474f' }}>
+              <span style={{ fontSize: '13px', color: '#8e9099' }}>{user.username}</span>
+              <button
+                onClick={handleLogout}
+                style={{
+                  background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: '#9c988d',
+                  borderRadius: '6px', padding: '5px 10px', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit'
+                }}
+              >
+                Log out
+              </button>
+            </div>
+          )}
         </nav>
       </div>
     </header>

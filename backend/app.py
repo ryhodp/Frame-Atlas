@@ -10,9 +10,11 @@ import threading
 import queue as queue_module
 from array import array
 from datetime import datetime
+from functools import wraps
 from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context, redirect, session
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image
 import google.auth.transport.requests
 from google.oauth2.service_account import Credentials
@@ -29,9 +31,13 @@ app = Flask(__name__, static_folder='static', static_url_path='/static')
 # the Google OAuth redirect_uri).
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 CORS(app)
-# Only needed to hold the OAuth CSRF state between /login and /callback — a
-# fresh secret each boot is fine since that round-trip finishes in seconds.
+# Signs the login session cookie. MUST be a fixed value set via the
+# FLASK_SECRET_KEY Railway env var — falling back to a random one means every
+# redeploy invalidates every logged-in session (everyone gets logged out on
+# every push). The random fallback only exists so local dev works with zero
+# setup.
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(24)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 DB_PATH = '/app/data/library.db'
 
@@ -316,6 +322,44 @@ def init_db():
         )
     ''')
 
+    # DAY 14 (V13): invite-only accounts + per-user favorites/flags.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS invite_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE NOT NULL,
+            created_by INTEGER NOT NULL,
+            used_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            used_at TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users(id),
+            FOREIGN KEY (used_by) REFERENCES users(id)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            image_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, image_id),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (image_id) REFERENCES images(id)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_flags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            image_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, image_id),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (image_id) REFERENCES images(id)
+        )
+    ''')
+
     conn.commit()
 
     try:
@@ -345,6 +389,14 @@ def init_db():
     except Exception:
         pass
 
+    # V13 (Day 14): admin's login email.
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        conn.commit()
+        print("[migration] Added email column")
+    except Exception:
+        pass
+
     c.execute("""
         INSERT INTO users (id, username, password_hash)
         SELECT 1, 'ryan', ''
@@ -356,6 +408,21 @@ def init_db():
         UPDATE images SET tagging_status = 'done'
         WHERE id IN (SELECT DISTINCT image_id FROM tags)
         AND tagging_status = 'pending'
+    """)
+    conn.commit()
+
+    # V13 (Day 14): the old is_favorite/is_flagged columns on `images` were a
+    # single shared on/off switch — replaced by per-user user_favorites/
+    # user_flags tables. One-time backfill: whatever was starred/flagged
+    # before logins existed becomes user 1's (the admin's) favorites/flags.
+    # INSERT OR IGNORE makes this safe to run on every boot.
+    c.execute("""
+        INSERT OR IGNORE INTO user_favorites (user_id, image_id)
+        SELECT 1, id FROM images WHERE is_favorite = 1
+    """)
+    c.execute("""
+        INSERT OR IGNORE INTO user_flags (user_id, image_id)
+        SELECT 1, id FROM images WHERE is_flagged = 1
     """)
     conn.commit()
     conn.close()
@@ -419,6 +486,238 @@ def load_embeddings_seed():
     conn.commit()
     conn.close()
     print(f"Embeddings seed: loaded {loaded} vectors ({skipped} skipped)")
+
+# ============================================================================
+# AUTH — LOGIN, SESSIONS, INVITE CODES (Day 14 / V13)
+# ============================================================================
+
+# Reachable without being logged in. Exact-path matches, plus anything under
+# /api/share/ (public read-only deck links). Non-API paths are never gated
+# here — the React app shell always loads; it's the frontend's own routing
+# that decides whether to show a login screen.
+PUBLIC_API_ROUTES = {
+    '/api/health',
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/me',
+    '/api/setup',
+    '/api/setup/status',
+}
+
+@app.before_request
+def require_login():
+    path = request.path
+    if not path.startswith('/api/'):
+        return None
+    if path in PUBLIC_API_ROUTES or path.startswith('/api/share/'):
+        return None
+    if session.get('user_id'):
+        return None
+    return jsonify({'error': 'login_required'}), 401
+
+def current_user_id():
+    return session.get('user_id')
+
+def current_user_row():
+    uid = session.get('user_id')
+    if not uid:
+        return None
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute('SELECT id, username, email, role FROM users WHERE id = ?', (uid,)).fetchone()
+    conn.close()
+    return row
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if session.get('role') != 'admin':
+            return jsonify({'error': 'admin_required'}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+def fav_flag_cols(user_id, alias='images'):
+    """SQL fragment computing is_favorite/is_flagged for one user against the
+    per-user user_favorites/user_flags tables — slots into any `images` SELECT
+    in place of the old boolean columns. user_id is always an int pulled from
+    the session (never request input), so inlining it directly is safe and
+    avoids threading extra positional params through call sites that already
+    build dynamic WHERE clauses."""
+    uid = int(user_id)
+    return (
+        f"EXISTS(SELECT 1 FROM user_favorites uf WHERE uf.user_id = {uid} AND uf.image_id = {alias}.id) AS is_favorite, "
+        f"EXISTS(SELECT 1 FROM user_flags fl WHERE fl.user_id = {uid} AND fl.image_id = {alias}.id) AS is_flagged"
+    )
+
+@app.route('/api/setup/status')
+def setup_status():
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute('SELECT password_hash FROM users WHERE id = 1').fetchone()
+    conn.close()
+    return jsonify({'needs_setup': not bool(row and row['password_hash'])})
+
+@app.route('/api/setup', methods=['POST'])
+def setup_admin():
+    """One-time admin bootstrap. The moment user 1 has a password set, this
+    route refuses forever — the password itself is the lock, so there's no
+    separate flag to leave open by mistake."""
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute('SELECT password_hash FROM users WHERE id = 1').fetchone()
+    if row and row['password_hash']:
+        conn.close()
+        return jsonify({'error': 'Setup already completed'}), 403
+
+    data = request.get_json(force=True) or {}
+    password = data.get('password') or ''
+    email = (data.get('email') or '').strip()
+    if len(password) < 8:
+        conn.close()
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+    if not email:
+        conn.close()
+        return jsonify({'error': 'Email is required'}), 400
+
+    c.execute(
+        'UPDATE users SET password_hash = ?, email = ?, role = ? WHERE id = 1',
+        (generate_password_hash(password), email, 'admin')
+    )
+    conn.commit()
+    conn.close()
+
+    session['user_id'] = 1
+    session['username'] = 'ryan'
+    session['role'] = 'admin'
+    return jsonify({'success': True, 'user': {'id': 1, 'username': 'ryan', 'email': email, 'role': 'admin'}})
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    data = request.get_json(force=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute(
+        'SELECT id, username, email, role, password_hash FROM users WHERE username = ? COLLATE NOCASE',
+        (username,)
+    ).fetchone()
+    conn.close()
+
+    if not row or not row['password_hash'] or not check_password_hash(row['password_hash'], password):
+        return jsonify({'error': 'Invalid username or password'}), 401
+
+    session['user_id'] = row['id']
+    session['username'] = row['username']
+    session['role'] = row['role']
+    return jsonify({'success': True, 'user': {
+        'id': row['id'], 'username': row['username'], 'email': row['email'], 'role': row['role']
+    }})
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'success': True})
+
+@app.route('/api/auth/me')
+def me():
+    if not session.get('user_id'):
+        return jsonify({'logged_in': False})
+    row = current_user_row()
+    if not row:
+        session.clear()
+        return jsonify({'logged_in': False})
+    return jsonify({'logged_in': True, 'user': {
+        'id': row['id'], 'username': row['username'], 'email': row['email'], 'role': row['role']
+    }})
+
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    data = request.get_json(force=True) or {}
+    invite_code = (data.get('invite_code') or '').strip()
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    if not invite_code or not username or len(password) < 8:
+        return jsonify({'error': 'Invite code, username, and an 8+ character password are all required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    invite = c.execute(
+        'SELECT id FROM invite_codes WHERE code = ? AND used_by IS NULL', (invite_code,)
+    ).fetchone()
+    if not invite:
+        conn.close()
+        return jsonify({'error': 'Invite code is invalid or already used'}), 400
+
+    if c.execute('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE', (username,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'That username is taken'}), 400
+
+    c.execute(
+        'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+        (username, generate_password_hash(password), 'user')
+    )
+    new_user_id = c.lastrowid
+    c.execute(
+        'UPDATE invite_codes SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?',
+        (new_user_id, invite['id'])
+    )
+    conn.commit()
+    conn.close()
+
+    session['user_id'] = new_user_id
+    session['username'] = username
+    session['role'] = 'user'
+    return jsonify({'success': True, 'user': {'id': new_user_id, 'username': username, 'email': None, 'role': 'user'}})
+
+@app.route('/api/admin/invite-codes', methods=['GET'])
+@admin_required
+def list_invite_codes():
+    conn = get_db()
+    c = conn.cursor()
+    rows = c.execute('''
+        SELECT ic.id, ic.code, ic.created_at, ic.used_at, u.username AS used_by_username
+        FROM invite_codes ic
+        LEFT JOIN users u ON u.id = ic.used_by
+        ORDER BY ic.created_at DESC
+    ''').fetchall()
+    conn.close()
+    return jsonify([{
+        'id': r['id'], 'code': r['code'], 'created_at': r['created_at'],
+        'used_at': r['used_at'], 'used_by_username': r['used_by_username']
+    } for r in rows])
+
+@app.route('/api/admin/invite-codes', methods=['POST'])
+@admin_required
+def create_invite_code():
+    code = secrets.token_urlsafe(8)
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO invite_codes (code, created_by) VALUES (?, ?)', (code, session['user_id']))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({'id': new_id, 'code': code})
+
+@app.route('/api/admin/invite-codes/<int:invite_id>', methods=['DELETE'])
+@admin_required
+def revoke_invite_code(invite_id):
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute('SELECT used_by FROM invite_codes WHERE id = ?', (invite_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Invite code not found'}), 404
+    if row['used_by'] is not None:
+        conn.close()
+        return jsonify({'error': 'Already used, cannot revoke'}), 400
+    c.execute('DELETE FROM invite_codes WHERE id = ?', (invite_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
 
 # ============================================================================
 # TAGGING PROGRESS — SSE HELPERS
@@ -1011,6 +1310,7 @@ def health():
     return jsonify({'status': 'ok'})
 
 @app.route('/api/tag/retry-failed', methods=['POST'])
+@admin_required
 def retry_failed():
     """Reset only failed images to pending and trigger retag. Cheaper than force=true."""
     conn = get_db()
@@ -1028,6 +1328,7 @@ def config():
     return jsonify({'app_name': 'Frame Atlas', 'version': 'V5', 'gemini_model': GEMINI_MODEL})
 
 @app.route('/api/models', methods=['GET'])
+@admin_required
 def list_models():
     """Diagnostic: list Gemini models this API key can use. Kept on purpose
     (Day 13 decision) — this is the first-stop check when auto-tagging
@@ -1043,14 +1344,16 @@ def list_models():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/folders', methods=['GET'])
+@admin_required
 def get_folders():
     return jsonify({'folders': [
         {'id': '1LHPVyo3QjOEcizc1Io2UVjxzX4FQ7yDG', 'name': 'Inspiration Images'}
     ]})
 
 @app.route('/api/sync/settings', methods=['GET', 'POST'])
+@admin_required
 def sync_settings():
-    user_id = request.args.get('user_id', 1)
+    user_id = session['user_id']
 
     if request.method == 'GET':
         conn = get_db()
@@ -1081,8 +1384,9 @@ def sync_settings():
         return jsonify({'success': True})
 
 @app.route('/api/sync/start', methods=['POST'])
+@admin_required
 def start_sync():
-    user_id = request.args.get('user_id', 1)
+    user_id = session['user_id']
 
     if sync_state['in_progress']:
         return jsonify({'error': 'Sync already in progress'}), 400
@@ -1104,10 +1408,12 @@ def start_sync():
     return jsonify({'success': True, 'message': 'Sync started'})
 
 @app.route('/api/sync/status', methods=['GET'])
+@admin_required
 def sync_status():
     return jsonify(sync_state)
 
 @app.route('/api/tag-progress/stream')
+@admin_required
 def tag_progress_stream():
     def generate():
         q = queue_module.Queue(maxsize=50)
@@ -1140,6 +1446,7 @@ def tag_progress_stream():
     )
 
 @app.route('/api/tag-progress')
+@admin_required
 def tag_progress_snapshot():
     with _tag_progress_lock:
         data = dict(_tag_progress)
@@ -1156,6 +1463,7 @@ def tag_progress_snapshot():
     return jsonify({**data, 'pct': pct, 'status_counts': counts, 'total_tag_rows': tag_rows})
 
 @app.route('/api/tag/start', methods=['POST'])
+@admin_required
 def tag_start():
     force = request.args.get('force') == 'true'
     with _tag_progress_lock:
@@ -1207,6 +1515,7 @@ def autocomplete():
     if not q:
         return jsonify([])
 
+    uid = session['user_id']
     conn = get_db()
     c = conn.cursor()
 
@@ -1215,7 +1524,8 @@ def autocomplete():
         rows = c.execute(f'''
             SELECT t.value, t.category, COUNT(*) as cnt
             FROM tags t
-            WHERE t.image_id IN (
+            WHERE t.user_id = ?
+            AND t.image_id IN (
                 SELECT image_id FROM tags
                 WHERE value IN ({placeholders})
                 GROUP BY image_id
@@ -1226,16 +1536,16 @@ def autocomplete():
             GROUP BY t.value, t.category
             ORDER BY cnt DESC
             LIMIT 20
-        ''', active_chips + [len(active_chips), f'{q}%'] + active_chips).fetchall()
+        ''', [uid] + active_chips + [len(active_chips), f'{q}%'] + active_chips).fetchall()
     else:
         rows = c.execute('''
             SELECT value, category, COUNT(*) as cnt
             FROM tags
-            WHERE LOWER(value) LIKE ?
+            WHERE user_id = ? AND LOWER(value) LIKE ?
             GROUP BY value, category
             ORDER BY cnt DESC
             LIMIT 20
-        ''', (f'{q}%',)).fetchall()
+        ''', (uid, f'{q}%')).fetchall()
 
     conn.close()
 
@@ -1276,11 +1586,12 @@ def search():
         except Exception:
             nl_groups = []
 
+    uid = session['user_id']
     conn = get_db()
     c = conn.cursor()
 
-    conditions = []
-    params = []
+    conditions = ['user_id = ?']
+    params = [uid]
 
     if active_chips:
         placeholders = ','.join('?' * len(active_chips))
@@ -1341,10 +1652,10 @@ def search():
             )''')
             params.extend([like, like, like])
 
-    where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
+    where = 'WHERE ' + ' AND '.join(conditions)
 
     rows = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, {fav_flag_cols(uid)}
         FROM images {where}
         ORDER BY date_added DESC LIMIT ? OFFSET ?
     ''', params + [per, page * per]).fetchall()
@@ -1357,7 +1668,7 @@ def search():
 
 @app.route('/api/bookmarks', methods=['GET', 'POST'])
 def bookmarks():
-    user_id = request.args.get('user_id', 1)
+    user_id = session['user_id']
 
     if request.method == 'GET':
         conn = get_db()
@@ -1395,18 +1706,21 @@ def bookmarks():
 def delete_bookmark(bookmark_id):
     conn = get_db()
     c = conn.cursor()
-    c.execute('DELETE FROM saved_searches WHERE id = ?', (bookmark_id,))
+    c.execute('DELETE FROM saved_searches WHERE id = ? AND user_id = ?', (bookmark_id, session['user_id']))
+    found = c.rowcount > 0
     conn.commit()
     conn.close()
+    if not found:
+        return jsonify({'error': 'Bookmark not found'}), 404
     return jsonify({'success': True})
 
 @app.route('/api/images', methods=['GET'])
 def get_images():
-    user_id = request.args.get('user_id', 1)
+    user_id = session['user_id']
     conn = get_db()
     c = conn.cursor()
-    c.execute('''
-        SELECT id, filename, thumbnail_blob, aspect_ratio, date_added, is_favorite, is_flagged
+    c.execute(f'''
+        SELECT id, filename, thumbnail_blob, aspect_ratio, date_added, {fav_flag_cols(user_id)}
         FROM images WHERE user_id = ? ORDER BY date_added DESC
     ''', (user_id,))
     images = []
@@ -1425,7 +1739,7 @@ def get_images():
 def get_full_image(image_id):
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT drive_file_id FROM images WHERE id = ?', (image_id,))
+    c.execute('SELECT drive_file_id FROM images WHERE id = ? AND user_id = ?', (image_id, session['user_id']))
     row = c.fetchone()
     conn.close()
 
@@ -1478,10 +1792,11 @@ def get_similar_images(image_id):
         limit = 40
     limit = min(limit, 100)
 
+    uid = session['user_id']
     conn = get_db()
     c = conn.cursor()
 
-    c.execute('SELECT filename FROM images WHERE id = ?', (image_id,))
+    c.execute('SELECT filename FROM images WHERE id = ? AND user_id = ?', (image_id, uid))
     source_img = c.fetchone()
     if not source_img:
         conn.close()
@@ -1496,15 +1811,15 @@ def get_similar_images(image_id):
     source_vec = array('f', source_row['clip_vector']).tolist()
 
     # All embeddings, joined to the columns build_image_dict() needs — one
-    # query, no per-candidate lookups.
-    candidates = c.execute('''
+    # query, no per-candidate lookups. Scoped to this user's own images.
+    candidates = c.execute(f'''
         SELECT e.image_id, e.clip_vector,
                i.id, i.filename, i.thumbnail_blob, i.caption, i.aspect_ratio,
-               i.is_favorite, i.is_flagged
+               {fav_flag_cols(uid, alias='i')}
         FROM embeddings e
         JOIN images i ON i.id = e.image_id
-        WHERE e.image_id != ? AND e.clip_vector IS NOT NULL
-    ''', (image_id,)).fetchall()
+        WHERE e.image_id != ? AND e.clip_vector IS NOT NULL AND i.user_id = ?
+    ''', (image_id, uid)).fetchall()
 
     # Tags for the source image plus every candidate, in one query — grouped
     # by image_id in Python instead of one query per candidate. Keep both the
@@ -1574,6 +1889,7 @@ def get_similar_images(image_id):
     })
 
 @app.route('/api/regenerate-thumbnails', methods=['POST'])
+@admin_required
 def regenerate_thumbnails():
     def _regenerate_job():
         try:
@@ -1628,6 +1944,7 @@ def regenerate_thumbnails():
     return jsonify({'success': True, 'message': 'Thumbnail regeneration started'})
 
 @app.route('/api/extract-colors', methods=['POST'])
+@admin_required
 def extract_colors():
     """Backfill palettes from stored thumbnails — no Drive downloads needed.
     Pass ?force=true to re-extract every image (e.g. after a palette-size change)."""
@@ -1658,6 +1975,7 @@ def extract_colors():
 # ============================================================================
 
 @app.route('/api/auth/status')
+@admin_required
 def auth_status():
     conn = get_db()
     c = conn.cursor()
@@ -1667,6 +1985,7 @@ def auth_status():
     return jsonify({'signed_in': bool(row and row['google_oauth_token'])})
 
 @app.route('/api/auth/google/login')
+@admin_required
 def google_login():
     redirect_uri = request.url_root.rstrip('/') + '/api/auth/google/callback'
     flow = get_oauth_flow(redirect_uri)
@@ -1676,6 +1995,7 @@ def google_login():
     return redirect(auth_url)
 
 @app.route('/api/auth/google/callback')
+@admin_required
 def google_callback():
     redirect_uri = request.url_root.rstrip('/') + '/api/auth/google/callback'
     flow = get_oauth_flow(redirect_uri)
@@ -1692,6 +2012,7 @@ def google_callback():
     return redirect('/?signed_in=1')
 
 @app.route('/api/upload', methods=['POST'])
+@admin_required
 def upload_images():
     service = get_user_drive_service()
     if not service:
@@ -1771,35 +2092,43 @@ def upload_images():
 # DAY 8 (V7): IMAGE ACTIONS — favorite, flag, tags, download, delete
 # ============================================================================
 
-@app.route('/api/images/<int:image_id>/favorite', methods=['POST'])
-def toggle_favorite(image_id):
+def _toggle_membership(table, user_id, image_id):
+    """Shared on/off toggle for user_favorites/user_flags: insert if absent,
+    delete if present. Returns the new state (True = now in the table)."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('UPDATE images SET is_favorite = 1 - is_favorite WHERE id = ?', (image_id,))
-    if c.rowcount == 0:
+    if not c.execute('SELECT 1 FROM images WHERE id = ? AND user_id = ?', (image_id, user_id)).fetchone():
         conn.close()
-        return jsonify({'error': 'Image not found'}), 404
+        return None
+    existing = c.execute(
+        f'SELECT 1 FROM {table} WHERE user_id = ? AND image_id = ?', (user_id, image_id)
+    ).fetchone()
+    if existing:
+        c.execute(f'DELETE FROM {table} WHERE user_id = ? AND image_id = ?', (user_id, image_id))
+        new_state = False
+    else:
+        c.execute(f'INSERT INTO {table} (user_id, image_id) VALUES (?, ?)', (user_id, image_id))
+        new_state = True
     conn.commit()
-    c.execute('SELECT is_favorite FROM images WHERE id = ?', (image_id,))
-    val = c.fetchone()[0]
     conn.close()
-    return jsonify({'success': True, 'is_favorite': val})
+    return new_state
+
+@app.route('/api/images/<int:image_id>/favorite', methods=['POST'])
+def toggle_favorite(image_id):
+    result = _toggle_membership('user_favorites', session['user_id'], image_id)
+    if result is None:
+        return jsonify({'error': 'Image not found'}), 404
+    return jsonify({'success': True, 'is_favorite': result})
 
 @app.route('/api/images/<int:image_id>/flag', methods=['POST'])
 def toggle_flag(image_id):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('UPDATE images SET is_flagged = 1 - is_flagged WHERE id = ?', (image_id,))
-    if c.rowcount == 0:
-        conn.close()
+    result = _toggle_membership('user_flags', session['user_id'], image_id)
+    if result is None:
         return jsonify({'error': 'Image not found'}), 404
-    conn.commit()
-    c.execute('SELECT is_flagged FROM images WHERE id = ?', (image_id,))
-    val = c.fetchone()[0]
-    conn.close()
-    return jsonify({'success': True, 'is_flagged': val})
+    return jsonify({'success': True, 'is_flagged': result})
 
 @app.route('/api/images/<int:image_id>/tags', methods=['POST', 'DELETE'])
+@admin_required
 def edit_tags(image_id):
     data = request.get_json(force=True) or {}
     category = (data.get('category') or '').strip()
@@ -1854,6 +2183,7 @@ def _parse_bulk_tag_request(data):
     return image_ids, category, value, None
 
 @app.route('/api/tags/bulk-apply', methods=['POST'])
+@admin_required
 def bulk_apply_tags():
     data = request.get_json(force=True) or {}
     image_ids, category, value, error = _parse_bulk_tag_request(data)
@@ -1891,6 +2221,7 @@ def bulk_apply_tags():
     return jsonify({'applied': applied, 'already_had': already_had, 'invalid_ids': invalid_ids})
 
 @app.route('/api/tags/bulk-remove', methods=['POST'])
+@admin_required
 def bulk_remove_tags():
     data = request.get_json(force=True) or {}
     image_ids, category, value, error = _parse_bulk_tag_request(data)
@@ -1909,6 +2240,7 @@ def bulk_remove_tags():
     return jsonify({'removed': removed})
 
 @app.route('/api/tags/selection-summary', methods=['POST'])
+@admin_required
 def tags_selection_summary():
     data = request.get_json(force=True) or {}
     image_ids = data.get('image_ids')
@@ -1940,6 +2272,7 @@ def tags_selection_summary():
     })
 
 @app.route('/api/tags/suggestions', methods=['POST'])
+@admin_required
 def tags_suggestions():
     data = request.get_json(force=True) or {}
     image_ids = data.get('image_ids')
@@ -2001,6 +2334,7 @@ def tags_suggestions():
     return jsonify({'suggestions': suggestions})
 
 @app.route('/api/images/<int:image_id>/filmography', methods=['POST'])
+@admin_required
 def update_filmography(image_id):
     """Set or clear the film info Gemini guessed for this image. Sending all
     empty fields clears it entirely."""
@@ -2035,7 +2369,7 @@ def download_image(image_id):
     import mimetypes
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT drive_file_id, filename FROM images WHERE id = ?', (image_id,))
+    c.execute('SELECT drive_file_id, filename FROM images WHERE id = ? AND user_id = ?', (image_id, session['user_id']))
     row = c.fetchone()
     conn.close()
     if not row:
@@ -2055,6 +2389,7 @@ def download_image(image_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/images/<int:image_id>', methods=['DELETE'])
+@admin_required
 def delete_image(image_id):
     """Moves the Drive file into _Removed (recoverable), then removes the image
     and all its metadata from the library."""
@@ -2102,6 +2437,7 @@ def delete_image(image_id):
 # ============================================================================
 
 @app.route('/api/duplicates/scan', methods=['POST'])
+@admin_required
 def duplicates_scan():
     """Backfills fingerprints for any image missing them, then returns
     duplicate groups. phash comes from stored thumbnails (instant); md5 comes
@@ -2138,6 +2474,7 @@ def duplicates_scan():
     return find_duplicates()
 
 @app.route('/api/duplicates', methods=['GET'])
+@admin_required
 def find_duplicates():
     conn = get_db()
     c = conn.cursor()
@@ -2199,13 +2536,15 @@ def find_duplicates():
 # DECKS + SCENES
 # ============================================================================
 
-def _fetch_image_dict(c, image_id):
+def _fetch_image_dict(c, image_id, owner_user_id):
     """Loads one images row plus its tags/palette/filmography and runs it
     through build_image_dict(). Used by the decks endpoints, which need the
     same image JSON shape as /api/search and /api/images/<id>/similar but
-    are fetching images one at a time (via deck_images), not in bulk."""
-    row = c.execute('''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
+    are fetching images one at a time (via deck_images), not in bulk.
+    is_favorite/is_flagged reflect the deck OWNER (not the viewer — the public
+    share view has no logged-in viewer at all)."""
+    row = c.execute(f'''
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, {fav_flag_cols(owner_user_id)}
         FROM images WHERE id = ?
     ''', (image_id,)).fetchone()
     if not row:
@@ -2230,7 +2569,10 @@ def _fetch_image_dict(c, image_id):
 def list_decks():
     conn = get_db()
     c = conn.cursor()
-    deck_rows = c.execute('SELECT id, name, created_at FROM decks WHERE user_id = 1 ORDER BY created_at DESC').fetchall()
+    deck_rows = c.execute(
+        'SELECT id, name, created_at FROM decks WHERE user_id = ? ORDER BY created_at DESC',
+        (session['user_id'],)
+    ).fetchall()
 
     decks_out = []
     for d in deck_rows:
@@ -2275,7 +2617,7 @@ def create_deck():
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('INSERT INTO decks (user_id, name) VALUES (1, ?)', (name,))
+    c.execute('INSERT INTO decks (user_id, name) VALUES (?, ?)', (session['user_id'], name))
     deck_id = c.lastrowid
     created_at = c.execute('SELECT created_at FROM decks WHERE id = ?', (deck_id,)).fetchone()['created_at']
     conn.commit()
@@ -2298,7 +2640,7 @@ def update_deck(deck_id):
 
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
 
@@ -2311,7 +2653,7 @@ def update_deck(deck_id):
 def delete_deck(deck_id):
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
 
@@ -2326,7 +2668,10 @@ def delete_deck(deck_id):
 def get_deck(deck_id):
     conn = get_db()
     c = conn.cursor()
-    deck_row = c.execute('SELECT id, name, created_at, share_token FROM decks WHERE id = ?', (deck_id,)).fetchone()
+    deck_row = c.execute(
+        'SELECT id, name, created_at, share_token, user_id FROM decks WHERE id = ? AND user_id = ?',
+        (deck_id, session['user_id'])
+    ).fetchone()
     if not deck_row:
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
@@ -2358,7 +2703,7 @@ def _deck_payload(c, deck_row):
 
     images_out = []
     for di in di_rows:
-        img_dict = _fetch_image_dict(c, di['image_id'])
+        img_dict = _fetch_image_dict(c, di['image_id'], deck_row['user_id'])
         if img_dict is None:
             continue
         img_dict['deck_image_id'] = di['id']
@@ -2384,7 +2729,9 @@ def create_scene():
 
     conn = get_db()
     c = conn.cursor()
-    if not isinstance(deck_id, int) or not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+    if not isinstance(deck_id, int) or not c.execute(
+        'SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])
+    ).fetchone():
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
     if not name:
@@ -2408,7 +2755,10 @@ def update_scene(scene_id):
 
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('SELECT 1 FROM scenes WHERE id = ?', (scene_id,)).fetchone():
+    if not c.execute(
+        'SELECT 1 FROM scenes s JOIN decks d ON d.id = s.deck_id WHERE s.id = ? AND d.user_id = ?',
+        (scene_id, session['user_id'])
+    ).fetchone():
         conn.close()
         return jsonify({'error': 'Scene not found'}), 404
     if not name:
@@ -2424,7 +2774,10 @@ def update_scene(scene_id):
 def delete_scene(scene_id):
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('SELECT 1 FROM scenes WHERE id = ?', (scene_id,)).fetchone():
+    if not c.execute(
+        'SELECT 1 FROM scenes s JOIN decks d ON d.id = s.deck_id WHERE s.id = ? AND d.user_id = ?',
+        (scene_id, session['user_id'])
+    ).fetchone():
         conn.close()
         return jsonify({'error': 'Scene not found'}), 404
 
@@ -2441,7 +2794,7 @@ def add_images_to_deck(deck_id):
 
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
     if not isinstance(image_ids, list) or not image_ids or not all(isinstance(i, int) for i in image_ids):
@@ -2458,7 +2811,9 @@ def add_images_to_deck(deck_id):
     invalid_ids = []
 
     for image_id in image_ids:
-        if not c.execute('SELECT 1 FROM images WHERE id = ?', (image_id,)).fetchone():
+        if not c.execute(
+            'SELECT 1 FROM images WHERE id = ? AND user_id = ?', (image_id, session['user_id'])
+        ).fetchone():
             invalid_ids.append(image_id)
             continue
 
@@ -2488,10 +2843,11 @@ def move_deck_image(deck_image_id):
 
     conn = get_db()
     c = conn.cursor()
-    row = c.execute(
-        'SELECT id, deck_id, scene_id, image_id, storyboard_note FROM deck_images WHERE id = ?',
-        (deck_image_id,)
-    ).fetchone()
+    row = c.execute('''
+        SELECT di.id, di.deck_id, di.scene_id, di.image_id, di.storyboard_note
+        FROM deck_images di JOIN decks d ON d.id = di.deck_id
+        WHERE di.id = ? AND d.user_id = ?
+    ''', (deck_image_id, session['user_id'])).fetchone()
     if not row:
         conn.close()
         return jsonify({'error': 'deck image not found'}), 404
@@ -2546,7 +2902,10 @@ def move_deck_image(deck_image_id):
 def delete_deck_image(deck_image_id):
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('SELECT 1 FROM deck_images WHERE id = ?', (deck_image_id,)).fetchone():
+    if not c.execute('''
+        SELECT 1 FROM deck_images di JOIN decks d ON d.id = di.deck_id
+        WHERE di.id = ? AND d.user_id = ?
+    ''', (deck_image_id, session['user_id'])).fetchone():
         conn.close()
         return jsonify({'error': 'deck image not found'}), 404
 
@@ -2570,7 +2929,10 @@ def set_deck_image_note(deck_image_id):
 
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('SELECT 1 FROM deck_images WHERE id = ?', (deck_image_id,)).fetchone():
+    if not c.execute('''
+        SELECT 1 FROM deck_images di JOIN decks d ON d.id = di.deck_id
+        WHERE di.id = ? AND d.user_id = ?
+    ''', (deck_image_id, session['user_id'])).fetchone():
         conn.close()
         return jsonify({'error': 'deck image not found'}), 404
 
@@ -2593,7 +2955,7 @@ def reorder_deck_images(deck_id):
 
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('SELECT 1 FROM decks WHERE id = ?', (deck_id,)).fetchone():
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
 
@@ -2624,7 +2986,9 @@ def deck_share_token(deck_id):
     POST mints a brand new token rather than reviving the old one."""
     conn = get_db()
     c = conn.cursor()
-    row = c.execute('SELECT share_token FROM decks WHERE id = ?', (deck_id,)).fetchone()
+    row = c.execute(
+        'SELECT share_token FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])
+    ).fetchone()
     if not row:
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
@@ -2652,7 +3016,7 @@ def get_shared_deck(token):
     conn = get_db()
     c = conn.cursor()
     deck_row = c.execute(
-        'SELECT id, name, created_at, share_token FROM decks WHERE share_token = ?', (token,)
+        'SELECT id, name, created_at, share_token, user_id FROM decks WHERE share_token = ?', (token,)
     ).fetchone()
     if not deck_row:
         conn.close()
@@ -2678,16 +3042,18 @@ def get_utility_view(view):
     Returns the same full image dicts as /api/search, so the frontend can
     reuse the grid + detail panel unchanged.
     """
+    uid = session['user_id']
+
     if view == 'favorites':
-        where, params = 'is_favorite = 1', []
+        where, params = 'user_id = ? AND id IN (SELECT image_id FROM user_favorites WHERE user_id = ?)', [uid, uid]
     elif view == 'flagged':
-        where, params = 'is_flagged = 1', []
+        where, params = 'user_id = ? AND id IN (SELECT image_id FROM user_flags WHERE user_id = ?)', [uid, uid]
     elif view == 'recent':
         try:
             days = max(1, int(request.args.get('days', 7)))
         except ValueError:
             days = 7
-        where, params = "date_added >= datetime('now', ?)", [f'-{days} days']
+        where, params = "user_id = ? AND date_added >= datetime('now', ?)", [uid, f'-{days} days']
     else:
         return jsonify({'error': 'Unknown view'}), 404
 
@@ -2705,7 +3071,7 @@ def get_utility_view(view):
     conn = get_db()
     c = conn.cursor()
     rows = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, is_favorite, is_flagged
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, {fav_flag_cols(uid)}
         FROM images WHERE {where}
         ORDER BY date_added DESC {limit_sql}
     ''', params + limit_params).fetchall()
@@ -2717,11 +3083,11 @@ def get_utility_view(view):
 
 @app.route('/api/flags/clear-all', methods=['POST'])
 def clear_all_flags():
-    """Unflag every flagged image at once. Removes only the flag marker —
-    no image is ever deleted by this."""
+    """Unflag every image this user has flagged. Only ever removes the flag
+    marker — no image is ever deleted by this."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('UPDATE images SET is_flagged = 0 WHERE is_flagged = 1')
+    c.execute('DELETE FROM user_flags WHERE user_id = ?', (session['user_id'],))
     cleared = c.rowcount
     conn.commit()
     conn.close()
@@ -2733,27 +3099,29 @@ def analytics():
     everything the page needs: headline totals, tag counts grouped by
     category (the frontend picks which categories to chart), and library
     growth by month (added + running total)."""
+    uid = session['user_id']
     conn = get_db()
     c = conn.cursor()
 
     totals = {
-        'images': c.execute('SELECT COUNT(*) FROM images').fetchone()[0],
-        'favorites': c.execute('SELECT COUNT(*) FROM images WHERE is_favorite = 1').fetchone()[0],
-        'flagged': c.execute('SELECT COUNT(*) FROM images WHERE is_flagged = 1').fetchone()[0],
+        'images': c.execute('SELECT COUNT(*) FROM images WHERE user_id = ?', (uid,)).fetchone()[0],
+        'favorites': c.execute('SELECT COUNT(*) FROM user_favorites WHERE user_id = ?', (uid,)).fetchone()[0],
+        'flagged': c.execute('SELECT COUNT(*) FROM user_flags WHERE user_id = ?', (uid,)).fetchone()[0],
         'added_last_7_days': c.execute(
-            "SELECT COUNT(*) FROM images WHERE date_added >= datetime('now', '-7 days')"
+            "SELECT COUNT(*) FROM images WHERE user_id = ? AND date_added >= datetime('now', '-7 days')", (uid,)
         ).fetchone()[0],
-        'tags': c.execute('SELECT COUNT(*) FROM tags').fetchone()[0],
-        'distinct_tags': c.execute('SELECT COUNT(DISTINCT value) FROM tags').fetchone()[0],
-        'decks': c.execute('SELECT COUNT(*) FROM decks').fetchone()[0],
+        'tags': c.execute('SELECT COUNT(*) FROM tags WHERE user_id = ?', (uid,)).fetchone()[0],
+        'distinct_tags': c.execute('SELECT COUNT(DISTINCT value) FROM tags WHERE user_id = ?', (uid,)).fetchone()[0],
+        'decks': c.execute('SELECT COUNT(*) FROM decks WHERE user_id = ?', (uid,)).fetchone()[0],
     }
 
     categories = {}
     for row in c.execute('''
         SELECT category, value, COUNT(*) AS cnt FROM tags
+        WHERE user_id = ?
         GROUP BY category, value
         ORDER BY cnt DESC, value ASC
-    ''').fetchall():
+    ''', (uid,)).fetchall():
         categories.setdefault(row['category'], []).append(
             {'value': row['value'], 'count': row['cnt']}
         )
@@ -2762,8 +3130,8 @@ def analytics():
     running = 0
     for row in c.execute('''
         SELECT strftime('%Y-%m', date_added) AS month, COUNT(*) AS cnt
-        FROM images GROUP BY month ORDER BY month ASC
-    ''').fetchall():
+        FROM images WHERE user_id = ? GROUP BY month ORDER BY month ASC
+    ''', (uid,)).fetchall():
         running += row['cnt']
         growth.append({'month': row['month'], 'added': row['cnt'], 'total': running})
 

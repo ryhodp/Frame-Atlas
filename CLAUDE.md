@@ -122,6 +122,15 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - To confirm a variable is actually set, use the Railway Console tab and run: `echo $VARIABLE_NAME`
 - JSON credentials must be single-line when pasting. Generate with: `cat key.json | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)))"`
 - Never paste variables with surrounding quotes — they break silently
+- `FLASK_SECRET_KEY` MUST be set (Day 14) — it signs login session cookies. Without it, Flask falls back to a random value generated fresh on every boot, which logs everyone out on every single deploy.
+
+**Auth (Day 14 / V13)**
+- Whole app is login-gated (`before_request` in app.py) except `/api/health`, `/api/auth/login`, `/api/auth/register`, `/api/auth/me`, `/api/setup`, `/api/setup/status`, and public `/api/share/<token>` links
+- First deploy after Day 14: visiting the site shows a one-time Setup screen (sets the admin password + email) — self-disables permanently once used
+- Invite-only signup: admin generates single-use invite codes (Invite nav link), friends register with one at `/register?code=...`
+- Roles: `admin` (Ryan) vs `user` (friends). Admin-only routes use the `@admin_required` decorator — sync, upload, tagging, bulk tag edit, filmography edit, delete, thumbnail/color regen, duplicate scan
+- Per-user data: decks, scenes, bookmarks, favorites (`user_favorites` table), flags (`user_flags` table) are scoped to whoever's logged in. Old `is_favorite`/`is_flagged` columns on `images` are legacy/unused, kept only for the one-time migration backfill
+- Stage 1 (this day) keeps one shared image library owned by the admin — friends see zero images until Day 17 (personal libraries: own Drive folder + own Gemini key) ships
 
 **Thumbnails**
 - Stored as base64 blobs in SQLite, served as data URIs (no separate thumbnail folder or `/thumbnails/` route)
@@ -138,6 +147,9 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - `/api/views/<favorites|flagged|recent>` — filtered image lists (recent takes `?days=` and `?limit=`)
 - `/api/flags/clear-all` — POST, unflags everything (never deletes)
 - `/api/models` — Gemini diagnostic, KEPT on purpose (Day 13 decision): first-stop check when auto-tagging mass-fails (`/api/debug*` removed Day 13 as planned)
+- `/api/setup`, `/api/setup/status` — one-time admin bootstrap (Day 14), self-disables after first use
+- `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`, `/api/auth/register` — session login + invite-code signup (Day 14)
+- `/api/admin/invite-codes` — GET/POST/DELETE, admin-only invite code management (Day 14)
 
 ---
 

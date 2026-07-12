@@ -61,8 +61,11 @@ def main():
     #   ids[1] — favorite + flagged, tagged
     #   ids[2] — flagged
     #   ids[3], ids[4] — plain recent images
-    c.execute("UPDATE images SET is_favorite = 1 WHERE id IN (?, ?)", (ids[0], ids[1]))
-    c.execute("UPDATE images SET is_flagged = 1 WHERE id IN (?, ?)", (ids[1], ids[2]))
+    # Day 14: favorites/flags are per-user tables now, not columns on images.
+    for image_id in (ids[0], ids[1]):
+        c.execute("INSERT INTO user_favorites (user_id, image_id) VALUES (1, ?)", (image_id,))
+    for image_id in (ids[1], ids[2]):
+        c.execute("INSERT INTO user_flags (user_id, image_id) VALUES (1, ?)", (image_id,))
     c.execute("UPDATE images SET date_added = datetime('now', '-10 days') WHERE id = ?", (ids[0],))
     for image_id, cat, val in [
         (ids[0], "mood", "lonely"),
@@ -79,6 +82,8 @@ def main():
     print(f"Inserted {len(ids)} real images with curated favorites/flags/tags: {ids}")
 
     client = mod.app.test_client()
+    setup_r = client.post('/api/setup', json={'email': 'test@test.com', 'password': 'testpass123'})
+    assert setup_r.status_code == 200, setup_r.get_json()  # Day 14: log in as admin before hitting protected routes
 
     # 1. Favorites view: exactly the two starred images, full search-shaped dicts
     r = client.get("/api/views/favorites")

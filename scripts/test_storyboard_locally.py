@@ -58,6 +58,8 @@ def main():
     print(f"Inserted {len(ids)} real images: {ids}")
 
     client = mod.app.test_client()
+    setup_r = client.post('/api/setup', json={'email': 'test@test.com', 'password': 'testpass123'})
+    assert setup_r.status_code == 200, setup_r.get_json()  # Day 14: log in as admin before hitting protected routes
 
     # ── Setup: deck with a scene, 3 images in the scene, 2 in Unsorted ────────
     deck_id = client.post("/api/decks", json={"name": "Storyboard Test"}).get_json()["id"]

@@ -80,6 +80,8 @@ def main():
 
     # 5. Hit the new endpoint.
     client = mod.app.test_client()
+    setup_r = client.post('/api/setup', json={'email': 'test@test.com', 'password': 'testpass123'})
+    assert setup_r.status_code == 200, setup_r.get_json()  # Day 14: log in as admin before hitting protected routes
     source_id = live[0]["id"]
 
     r = client.get(f"/api/images/{source_id}/similar?limit=5")

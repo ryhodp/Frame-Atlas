@@ -3,6 +3,7 @@ import ImageDetail from '../components/ImageDetail';
 import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
 import TagModeBar from '../components/TagModeBar';
+import { useAuth } from '../AuthContext';
 
 const PRESET_SWATCHES = [
   '#D9A441', '#E08840', '#B33A3A', '#C75B8B',
@@ -13,6 +14,7 @@ const PRESET_SWATCHES = [
 const PER_PAGE = 60;
 
 export default function Home() {
+  const { isAdmin } = useAuth();
   const [chips, setChips] = useState([]);
   const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
   const [color, setColor] = useState(null);           // active hex or null
@@ -492,42 +494,45 @@ export default function Home() {
             )}
           </div>
 
-          {/* Upload photos */}
-          <UploadButton onUploaded={() => { fetchPage(0, false); loadRecent(); }} />
+          {/* Upload, Tag Mode, and Duplicate review all edit the shared library
+              directly — admin-only until per-user libraries exist (Day 17). */}
+          {isAdmin && (
+            <>
+              <UploadButton onUploaded={() => { fetchPage(0, false); loadRecent(); }} />
 
-          {/* Tag Mode toggle */}
-          <button
-            onClick={toggleTagMode}
-            title="Tag Mode — bulk-select images and bulk-edit their tags"
-            style={{
-              height: '46px', width: '46px',
-              background: tagMode ? 'rgba(184,206,161,0.14)' : '#18181b',
-              border: `1px solid ${tagMode ? 'rgba(184,206,161,0.6)' : 'rgba(255,255,255,0.12)'}`,
-              borderRadius: '10px',
-              cursor: 'pointer',
-              color: tagMode ? '#b8cea1' : '#9c988d',
-              fontSize: '16px'
-            }}
-          >
-            ✓
-          </button>
+              <button
+                onClick={toggleTagMode}
+                title="Tag Mode — bulk-select images and bulk-edit their tags"
+                style={{
+                  height: '46px', width: '46px',
+                  background: tagMode ? 'rgba(184,206,161,0.14)' : '#18181b',
+                  border: `1px solid ${tagMode ? 'rgba(184,206,161,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  color: tagMode ? '#b8cea1' : '#9c988d',
+                  fontSize: '16px'
+                }}
+              >
+                ✓
+              </button>
 
-          {/* Duplicate review */}
-          <button
-            onClick={() => setShowDuplicates(true)}
-            title="Find duplicate images"
-            style={{
-              height: '46px', width: '46px',
-              background: '#18181b',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '10px',
-              cursor: 'pointer',
-              color: '#9c988d',
-              fontSize: '15px'
-            }}
-          >
-            ⧉
-          </button>
+              <button
+                onClick={() => setShowDuplicates(true)}
+                title="Find duplicate images"
+                style={{
+                  height: '46px', width: '46px',
+                  background: '#18181b',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  color: '#9c988d',
+                  fontSize: '15px'
+                }}
+              >
+                ⧉
+              </button>
+            </>
+          )}
 
           {/* Bookmark button + dropdown */}
           <div data-bookmark-area style={{ position: 'relative' }}>
