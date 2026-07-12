@@ -119,7 +119,18 @@ export default function TagModeBar({
       body: JSON.stringify({ image_ids: ids })
     })
       .then(res => res.json())
-      .then(data => setSummary({ total: data.total || 0, tags: data.tags || [] }))
+      .then(data => {
+        setSummary({ total: data.total || 0, tags: data.tags || [] });
+        // Autofill: a field only comes back non-null when EVERY selected
+        // image already agrees on it — lets you glance at "Spike Jonze"
+        // already sitting in Director and know the whole batch matches,
+        // without having to retype it just to touch the DP field.
+        const cf = data.common_filmography || {};
+        setFilmTitle(cf.title || '');
+        setFilmDirector(cf.director || '');
+        setFilmDp(cf.dp || '');
+        setFilmYear(cf.year || '');
+      })
       .catch(() => {});
 
     fetch('/api/tags/suggestions', {
@@ -257,11 +268,12 @@ export default function TagModeBar({
 
   const openFilmSetConfirm = () => {
     if (!canSetFilm) return;
-    setConfirm({
-      kind: 'filmography-set',
-      title: filmTitle.trim(), director: filmDirector.trim(),
-      dp: filmDp.trim(), year: filmYear.trim(),
-    });
+    // Only the fields that actually have something in them get applied —
+    // blank fields (whether never touched or left un-autofilled) mean
+    // "leave this field as each image already has it," not "clear it."
+    const fields = { title: filmTitle.trim(), director: filmDirector.trim(), dp: filmDp.trim(), year: filmYear.trim() };
+    const touched = Object.fromEntries(Object.entries(fields).filter(([, v]) => v));
+    setConfirm({ kind: 'filmography-set', touched });
   };
 
   const openFilmClearConfirm = () => setConfirm({ kind: 'filmography-clear' });
@@ -272,18 +284,19 @@ export default function TagModeBar({
     const ids = Array.from(selectedIds);
     try {
       if (confirm.kind === 'filmography-set') {
-        const filmography = { title: confirm.title, director: confirm.director, dp: confirm.dp, year: confirm.year };
         await fetch('/api/filmography/bulk-set', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_ids: ids, ...filmography })
+          body: JSON.stringify({ image_ids: ids, ...confirm.touched })
         });
-        const cleanFilm = {
-          title: filmography.title || null, director: filmography.director || null,
-          dp: filmography.dp || null, year: filmography.year || null,
-        };
-        onBulkChanged?.(ids, (img) => ids.includes(img.id) ? { ...img, filmography: cleanFilm } : img);
-        setFilmTitle(''); setFilmDirector(''); setFilmDp(''); setFilmYear('');
+        // Only overlay the touched fields onto each image's own existing
+        // filmography — mirrors the backend's per-field merge exactly.
+        onBulkChanged?.(ids, (img) => {
+          if (!ids.includes(img.id)) return img;
+          const merged = { ...(img.filmography || {}), ...confirm.touched };
+          const hasAny = merged.title || merged.director || merged.dp || merged.year;
+          return { ...img, filmography: hasAny ? merged : null };
+        });
       } else if (confirm.kind === 'filmography-clear') {
         await fetch('/api/filmography/bulk-clear', {
           method: 'POST',
@@ -683,9 +696,8 @@ export default function TagModeBar({
               : confirm.kind === 'remove'
               ? <>Remove "<strong>{confirm.value}</strong>" from <strong>{count}</strong> image{count === 1 ? '' : 's'}?</>
               : confirm.kind === 'filmography-set'
-              ? <>Set filmography on <strong>{count}</strong> image{count === 1 ? '' : 's'} to
-                  "<strong>{confirm.title || '(no title)'}</strong>"{confirm.director ? <> · dir. {confirm.director}</> : null}?
-                  This overwrites whatever each image had before.</>
+              ? <>Set {filmFieldSummary(confirm.touched)} on <strong>{count}</strong> image{count === 1 ? '' : 's'}?
+                  Any other filmography field on those images stays as it already is.</>
               : <>Clear filmography from <strong>{count}</strong> image{count === 1 ? '' : 's'}?</>
           }
           confirmLabel={
@@ -702,6 +714,15 @@ export default function TagModeBar({
       )}
     </>
   );
+}
+
+const FILM_FIELD_LABELS = { title: 'title', director: 'director', dp: 'DP', year: 'year' };
+
+function filmFieldSummary(touched) {
+  const parts = Object.entries(touched).map(([field, value]) => `${FILM_FIELD_LABELS[field]} "${value}"`);
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return parts.join(' and ');
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
 }
 
 function ghostBtn(color = '#c4c6d0', borderColor = '#44474f') {

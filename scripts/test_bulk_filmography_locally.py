@@ -78,7 +78,8 @@ def main():
     assert admin.post("/api/filmography/bulk-set", json={"image_ids": ids}).status_code == 400  # no fields at all
     print("1. Bulk-set validation rejects empty image_ids and all-blank fields.")
 
-    # 2. Bulk-set overwrites ALL selected, including the one with different existing data.
+    # 2. Bulk-set fills in ALL 4 fields on every selected image, including the
+    # one with different prior data, when all 4 fields are provided.
     r = admin.post("/api/filmography/bulk-set", json={
         "image_ids": ids + [999999],  # 999999 = invalid, should be reported not crash
         "title": "Interstellar", "director": "Christopher Nolan",
@@ -86,15 +87,41 @@ def main():
     })
     body = r.get_json()
     assert r.status_code == 200 and body["updated"] == len(ids) and body["invalid_ids"] == [999999], body
-    for image_id in ids:
-        film = admin.get("/api/search").get_json()
     search_body = admin.get("/api/search").get_json()
     by_id = {img["id"]: img for img in search_body["images"]}
     for image_id in ids:
         f = by_id[image_id]["filmography"]
         assert f == {"title": "Interstellar", "director": "Christopher Nolan",
                       "dp": "Hoyte van Hoytema", "year": "2014"}, (image_id, f)
-    print("2. Bulk-set overwrote all 4 images (including the one with different prior data) and flagged the bad id.")
+    print("2. Bulk-set with all 4 fields overwrote all 4 images (incl. the one with different prior data) and flagged the bad id.")
+
+    # 2b. Bulk-set with ONLY dp provided leaves title/director/year exactly as
+    # they were (per-field merge — a blank field means "don't touch it").
+    r = admin.post("/api/filmography/bulk-set", json={"image_ids": ids, "dp": "Someone New"})
+    body = r.get_json()
+    assert r.status_code == 200 and body["updated"] == len(ids) and body["fields_applied"] == {"dp": "Someone New"}, body
+    search_body = admin.get("/api/search").get_json()
+    by_id = {img["id"]: img for img in search_body["images"]}
+    for image_id in ids:
+        f = by_id[image_id]["filmography"]
+        assert f == {"title": "Interstellar", "director": "Christopher Nolan",
+                      "dp": "Someone New", "year": "2014"}, (image_id, f)
+    print("2b. Bulk-set with only DP provided changed DP alone — title/director/year untouched on all 4 images.")
+
+    # 2c. common_filmography in selection-summary reflects the now-shared fields.
+    r = admin.post("/api/tags/selection-summary", json={"image_ids": ids})
+    common = r.get_json()["common_filmography"]
+    assert common == {"title": "Interstellar", "director": "Christopher Nolan",
+                       "dp": "Someone New", "year": "2014"}, common
+    print("2c. selection-summary reports all 4 fields as common across the selection.")
+
+    # 2d. Selection where one image disagrees on `year` -> year drops out of consensus.
+    admin.post("/api/filmography/bulk-set", json={"image_ids": [ids[0]], "year": "1999"})
+    r = admin.post("/api/tags/selection-summary", json={"image_ids": ids})
+    common = r.get_json()["common_filmography"]
+    assert common["year"] is None and common["title"] == "Interstellar", common
+    print("2d. One image disagreeing on year breaks consensus for that field only.")
+    admin.post("/api/filmography/bulk-set", json={"image_ids": [ids[0]], "year": "2014"})  # restore
 
     # 3. Non-admin cannot bulk-set or bulk-clear.
     friend_code = admin.post("/api/admin/invite-codes").get_json()["code"]

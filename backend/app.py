@@ -2258,7 +2258,23 @@ def tags_selection_summary():
         GROUP BY category, value
         ORDER BY cnt DESC
     ''', image_ids).fetchall()
+
+    # Filmography consensus: a field only counts as "common" when EVERY
+    # selected image already agrees on the same non-empty value — missing
+    # data on even one image breaks the consensus (so the bulk form doesn't
+    # falsely imply a field's been verified across the whole selection).
+    film_rows = c.execute(f'''
+        SELECT image_id, title, director, dp, year FROM filmography
+        WHERE image_id IN ({placeholders})
+    ''', image_ids).fetchall()
     conn.close()
+
+    film_by_image = {r['image_id']: r for r in film_rows}
+    common_filmography = {}
+    for field in ('title', 'director', 'dp', 'year'):
+        values = {(film_by_image[iid][field] if iid in film_by_image else None) for iid in image_ids}
+        only_value = next(iter(values)) if len(values) == 1 else None
+        common_filmography[field] = only_value or None
 
     return jsonify({
         'total': len(image_ids),
@@ -2268,7 +2284,8 @@ def tags_selection_summary():
             'catLabel': CAT_LABELS.get(row['category'], row['category']),
             'color': CAT_COLORS.get(row['category'], '#9c988d'),
             'count': row['cnt']
-        } for row in rows]
+        } for row in rows],
+        'common_filmography': common_filmography
     })
 
 @app.route('/api/tags/suggestions', methods=['POST'])
@@ -2375,19 +2392,24 @@ def _parse_bulk_image_ids(data):
 @app.route('/api/filmography/bulk-set', methods=['POST'])
 @admin_required
 def bulk_set_filmography():
-    """Sets the SAME title/director/DP/year on every selected image,
-    overwriting whatever each one had (blank or wrong) — for correcting a
-    batch of stills Gemini mislabeled (or never labeled) from one film."""
+    """Applies only the fields you actually typed to every selected image —
+    a blank field means "leave this field alone" per image, not "clear it."
+    So fixing just the DP across 10 stills that already have the right
+    title/director doesn't blank those out; each image keeps whatever it
+    already had in any field you didn't touch."""
     data = request.get_json(force=True) or {}
     image_ids, error = _parse_bulk_image_ids(data)
     if error:
         return error
 
-    title = (data.get('title') or '').strip()
-    director = (data.get('director') or '').strip()
-    dp = (data.get('dp') or '').strip()
-    year = str(data.get('year') or '').strip()
-    if not any([title, director, dp, year]):
+    touched = {
+        'title': (data.get('title') or '').strip(),
+        'director': (data.get('director') or '').strip(),
+        'dp': (data.get('dp') or '').strip(),
+        'year': str(data.get('year') or '').strip(),
+    }
+    touched = {k: v for k, v in touched.items() if v}
+    if not touched:
         return jsonify({'error': 'At least one of title/director/dp/year is required'}), 400
 
     conn = get_db()
@@ -2398,19 +2420,26 @@ def bulk_set_filmography():
     invalid_ids = [i for i in image_ids if i not in valid_ids]
 
     for image_id in valid_ids:
+        existing = c.execute(
+            'SELECT title, director, dp, year FROM filmography WHERE image_id = ?', (image_id,)
+        ).fetchone()
+        merged = {
+            field: touched.get(field, existing[field] if existing else None)
+            for field in ('title', 'director', 'dp', 'year')
+        }
         c.execute('DELETE FROM filmography WHERE image_id = ?', (image_id,))
-        c.execute(
-            'INSERT INTO filmography (image_id, title, director, dp, year) VALUES (?,?,?,?,?)',
-            (image_id, title or None, director or None, dp or None, year or None)
-        )
+        if any(merged.values()):
+            c.execute(
+                'INSERT INTO filmography (image_id, title, director, dp, year) VALUES (?,?,?,?,?)',
+                (image_id, merged['title'], merged['director'], merged['dp'], merged['year'])
+            )
     conn.commit()
     conn.close()
 
     return jsonify({
         'updated': len(valid_ids),
         'invalid_ids': invalid_ids,
-        'filmography': {'title': title or None, 'director': director or None,
-                         'dp': dp or None, 'year': year or None}
+        'fields_applied': touched,
     })
 
 @app.route('/api/filmography/bulk-clear', methods=['POST'])
