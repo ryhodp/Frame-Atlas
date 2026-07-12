@@ -5,6 +5,7 @@ const BASE_NAV_LINKS = [
   { to: '/', label: 'Home' },
   { to: '/decks', label: 'Decks' },
   { to: '/analytics', label: 'Analytics' },
+  { to: '/recent', label: 'Recent' },
   { to: '/favorites', label: 'Favorites' },
   { to: '/flagged', label: 'Flagged' },
 ]

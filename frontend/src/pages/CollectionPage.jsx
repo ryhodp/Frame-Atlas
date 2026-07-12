@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ImageDetail from '../components/ImageDetail';
 
-// One page, two personalities. view="favorites" shows starred images;
-// view="flagged" shows the flag queue with clear buttons. Clearing a flag
-// only removes the marker — nothing here ever deletes an image.
+// Three personalities in one page. view="favorites" shows starred images
+// (click the star to unstar); view="flagged" shows the flag queue with clear
+// buttons (clearing only removes the marker — nothing here ever deletes an
+// image); view="recent" shows images added within a slider-adjustable window.
 const VIEW_CONFIG = {
   favorites: {
     title: 'Favorites',
-    subtitle: 'Every image you’ve starred.',
+    subtitle: 'Every image you’ve starred. Click the star to unstar.',
     icon: '★',
     accent: '#dcbd76',
     emptyText: 'No favorites yet — open any image and hit ☆ Favorite.',
@@ -19,7 +20,16 @@ const VIEW_CONFIG = {
     accent: '#cf7152',
     emptyText: 'Nothing flagged — the queue is clear.',
   },
+  recent: {
+    title: 'Recently Added',
+    subtitle: 'Images added to your library within the window below.',
+    icon: null,
+    accent: '#7fa9d9',
+    emptyText: 'Nothing added in this window — try dragging the slider further back.',
+  },
 };
+
+const DEFAULT_RECENT_DAYS = 7;
 
 export default function CollectionPage({ view }) {
   const cfg = VIEW_CONFIG[view];
@@ -29,17 +39,33 @@ export default function CollectionPage({ view }) {
   const [winW, setWinW] = useState(window.innerWidth);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [days, setDays] = useState(DEFAULT_RECENT_DAYS);
+  const daysDebounce = useRef(null);
 
-  useEffect(() => {
+  const load = (daysArg) => {
     setLoading(true);
-    setSelectedImage(null);
-    setConfirmClearAll(false);
-    fetch(`/api/views/${view}`)
+    const url = view === 'recent' ? `/api/views/recent?days=${daysArg ?? days}` : `/api/views/${view}`;
+    fetch(url)
       .then(res => res.json())
       .then(data => setImages(data.images || []))
       .catch(err => console.error(`Failed to load ${view}`, err))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    setSelectedImage(null);
+    setConfirmClearAll(false);
+    setDays(DEFAULT_RECENT_DAYS);
+    load(DEFAULT_RECENT_DAYS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
+
+  // Slider drags fire fast — debounce the refetch so it doesn't hammer the API.
+  const onDaysChange = (next) => {
+    setDays(next);
+    clearTimeout(daysDebounce.current);
+    daysDebounce.current = setTimeout(() => load(next), 200);
+  };
 
   useEffect(() => {
     const onResize = () => setWinW(window.innerWidth);
@@ -49,8 +75,13 @@ export default function CollectionPage({ view }) {
 
   // Detail-panel edits: patch the tile; if the image no longer belongs in
   // this view (unstarred on Favorites, unflagged on Flagged), drop it.
+  // Recent isn't affected by favorite/flag edits, so nothing gets dropped there.
   const handleImageUpdated = (id, patch) => {
-    const stillBelongs = (img) => view === 'favorites' ? !!img.is_favorite : !!img.is_flagged;
+    const stillBelongs = (img) => {
+      if (view === 'favorites') return !!img.is_favorite;
+      if (view === 'flagged') return !!img.is_flagged;
+      return true;
+    };
     setImages(prev => prev
       .map(img => img.id === id ? { ...img, ...patch } : img)
       .filter(img => img.id !== id || stillBelongs(img))
@@ -75,6 +106,21 @@ export default function CollectionPage({ view }) {
       }
     } catch (err) {
       console.error('Clear flag failed', err);
+    }
+  };
+
+  // Favorites-only: unstar one straight from the tile, same instant pattern as clearFlag
+  const unfavorite = async (img, e) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/images/${img.id}/favorite`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.is_favorite) {
+        setImages(prev => prev.filter(i => i.id !== img.id));
+        setSelectedImage(prev => (prev && prev.id === img.id) ? null : prev);
+      }
+    } catch (err) {
+      console.error('Unfavorite failed', err);
     }
   };
 
@@ -136,6 +182,23 @@ export default function CollectionPage({ view }) {
             {cfg.subtitle}
           </p>
         </div>
+
+        {/* Day-range slider — recent view only */}
+        {view === 'recent' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, width: '260px' }}>
+            <span style={{ fontSize: '12px', color: '#9c988d', whiteSpace: 'nowrap' }}>
+              Last <strong style={{ color: '#efeadd' }}>{days}</strong> day{days === 1 ? '' : 's'}
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={60}
+              value={days}
+              onChange={e => onDaysChange(Number(e.target.value))}
+              style={{ flex: 1, accentColor: cfg.accent }}
+            />
+          </div>
+        )}
 
         {/* Clear-all — flagged view only, with an inline confirm step */}
         {view === 'flagged' && images.length > 0 && (
@@ -244,14 +307,29 @@ export default function CollectionPage({ view }) {
                     pointerEvents: 'none'
                   }} />
 
-                  {/* View marker */}
-                  <span style={{
-                    position: 'absolute', top: '6px', right: '7px',
-                    color: cfg.accent, fontSize: '13px',
-                    filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
-                  }}>
-                    {cfg.icon}
-                  </span>
+                  {/* View marker — on Favorites, the star itself unfavorites on click */}
+                  {cfg.icon && (view === 'favorites' ? (
+                    <button
+                      onClick={(e) => unfavorite(img, e)}
+                      title="Unfavorite"
+                      style={{
+                        position: 'absolute', top: '4px', right: '5px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: cfg.accent, fontSize: '15px', padding: '4px',
+                        filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))', lineHeight: 1
+                      }}
+                    >
+                      {cfg.icon}
+                    </button>
+                  ) : (
+                    <span style={{
+                      position: 'absolute', top: '6px', right: '7px',
+                      color: cfg.accent, fontSize: '13px',
+                      filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                    }}>
+                      {cfg.icon}
+                    </span>
+                  ))}
 
                   {/* Flagged view: one-click clear on the tile */}
                   {view === 'flagged' && (

@@ -87,6 +87,7 @@ function Shell() {
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/favorites" element={<CollectionPage key="favorites" view="favorites" />} />
         <Route path="/flagged" element={<CollectionPage key="flagged" view="flagged" />} />
+        <Route path="/recent" element={<CollectionPage key="recent" view="recent" />} />
         <Route path="/invites" element={user.role === 'admin' ? <AdminInvitesPage /> : <Navigate to="/" replace />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/register" element={<Navigate to="/" replace />} />

@@ -22,6 +22,7 @@ export default function Home() {
   const [searchText, setSearchText] = useState('');
   const [autocomplete, setAutocomplete] = useState([]);
   const [showAuto, setShowAuto] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [interpreting, setInterpreting] = useState(false);
   const [images, setImages] = useState([]);
   const [total, setTotal] = useState(0);
@@ -29,7 +30,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
   const [winW, setWinW] = useState(window.innerWidth);
-  const [recent, setRecent] = useState([]);       // Recently Added strip (last 7 days)
 
   const [bookmarks, setBookmarks] = useState([]);
   const [showBookmarks, setShowBookmarks] = useState(false);
@@ -161,18 +161,6 @@ export default function Home() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // ── Recently Added strip: anything from the last 7 days, capped at 30 ──────
-  // The strip hides itself when nothing is recent (or while filtering).
-  const loadRecent = useCallback(async () => {
-    try {
-      const res = await fetch('/api/views/recent?days=7&limit=30');
-      const data = await res.json();
-      setRecent(data.images || []);
-    } catch {}
-  }, []);
-
-  useEffect(() => { loadRecent(); }, [loadRecent]);
-
   // ── Load bookmarks on mount ─────────────────────────────────────────────────
   const loadBookmarks = useCallback(async () => {
     try {
@@ -199,6 +187,7 @@ export default function Home() {
         const data = await res.json();
         setAutocomplete(data);
         setShowAuto(data.length > 0);
+        setHighlightedIndex(0);
       } catch {}
     }, 120);
   }, [searchText, chips]);
@@ -276,10 +265,28 @@ export default function Home() {
   const handleEnter = () => {
     const text = searchText.trim();
     if (!text) return;
-    if (autocomplete.length > 0) {
-      addChip(autocomplete[0].value);
+    if (showAuto && autocomplete.length > 0) {
+      const pick = autocomplete[highlightedIndex] || autocomplete[0];
+      addChip(pick.value);
     } else {
       interpretPhrase(text);
+    }
+  };
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      if (!showAuto || !autocomplete.length) return;
+      e.preventDefault();
+      setHighlightedIndex(i => Math.min(i + 1, autocomplete.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      if (!showAuto || !autocomplete.length) return;
+      e.preventDefault();
+      setHighlightedIndex(i => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      handleEnter();
+    } else if (e.key === 'Escape') {
+      setShowAuto(false);
+      setSearchText('');
     }
   };
 
@@ -319,13 +326,11 @@ export default function Home() {
   // ── Detail-panel callbacks: keep grid in sync with edits ────────────────────
   const handleImageUpdated = (id, patch) => {
     setImages(prev => prev.map(img => img.id === id ? { ...img, ...patch } : img));
-    setRecent(prev => prev.map(img => img.id === id ? { ...img, ...patch } : img));
     setSelectedImage(prev => (prev && prev.id === id) ? { ...prev, ...patch } : prev);
   };
 
   const handleImageDeleted = (id) => {
     setImages(prev => prev.filter(img => img.id !== id));
-    setRecent(prev => prev.filter(img => img.id !== id));
     setTotal(t => Math.max(0, t - 1));
     setSelectedImage(prev => (prev && prev.id === id) ? null : prev);
   };
@@ -465,10 +470,7 @@ export default function Home() {
               ref={searchRef}
               value={searchText}
               onChange={e => setSearchText(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') handleEnter();
-                if (e.key === 'Escape') { setShowAuto(false); setSearchText(''); }
-              }}
+              onKeyDown={handleSearchKeyDown}
               onFocus={() => { if (autocomplete.length) setShowAuto(true); }}
               placeholder="Search tags — or describe a feeling and press Enter…"
               disabled={interpreting}
@@ -498,7 +500,7 @@ export default function Home() {
               directly — admin-only until per-user libraries exist (Day 17). */}
           {isAdmin && (
             <>
-              <UploadButton onUploaded={() => { fetchPage(0, false); loadRecent(); }} />
+              <UploadButton onUploaded={() => fetchPage(0, false)} />
 
               <button
                 onClick={toggleTagMode}
@@ -680,19 +682,19 @@ export default function Home() {
             }}>
               MATCHING TAGS
             </div>
-            {autocomplete.map(opt => (
+            {autocomplete.map((opt, i) => (
               <button
                 key={opt.value}
                 onMouseDown={() => addChip(opt.value)}
+                onMouseEnter={() => setHighlightedIndex(i)}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center',
                   justifyContent: 'space-between', gap: '10px',
                   padding: '8px 13px',
-                  background: 'transparent', border: 'none',
+                  background: i === highlightedIndex ? '#222226' : 'transparent',
+                  border: 'none',
                   cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit'
                 }}
-                onMouseEnter={e => e.currentTarget.style.background = '#222226'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{
@@ -950,63 +952,6 @@ export default function Home() {
 
       {/* ── Image grid ──────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-
-        {/* Recently Added strip — last 7 days, hides while filtering/selecting */}
-        {recent.length > 0 && !hasFilters && !similarTo && !tagMode && (
-          <div style={{ marginBottom: '18px' }}>
-            <div style={{
-              fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.12em',
-              color: '#65625a', marginBottom: '8px'
-            }}>
-              RECENTLY ADDED · LAST 7 DAYS
-              <span style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                marginLeft: '8px', color: '#9c988d', letterSpacing: 0
-              }}>
-                {recent.length}
-              </span>
-            </div>
-            <div style={{
-              display: 'flex', gap: '8px', overflowX: 'auto',
-              paddingBottom: '6px'
-            }}>
-              {recent.map(img => (
-                <div
-                  key={`recent-${img.id}`}
-                  onClick={() => setSelectedImage(img)}
-                  title={img.filename}
-                  style={{
-                    height: '92px',
-                    width: `${Math.round(92 * (img.ar_float || 1.78))}px`,
-                    flexShrink: 0,
-                    borderRadius: '6px',
-                    overflow: 'hidden',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                    transition: 'transform 0.15s ease'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.03)'}
-                  onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
-                >
-                  <img
-                    src={img.thumbnail}
-                    alt={img.filename}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                    loading="lazy"
-                  />
-                  {img.is_favorite && (
-                    <span style={{
-                      position: 'absolute', top: '4px', right: '5px',
-                      color: '#dcbd76', fontSize: '10px',
-                      filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
-                    }}>★</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Empty state */}
         {!loading && images.length === 0 && (
