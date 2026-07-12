@@ -12,6 +12,7 @@ const PRESET_SWATCHES = [
 ];
 
 const PER_PAGE = 60;
+const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP' };
 
 export default function Home() {
   const { isAdmin } = useAuth();
@@ -219,6 +220,17 @@ export default function Home() {
     searchRef.current?.focus();
   };
 
+  // Selecting a film match from the search dropdown — same 🎬 filter as
+  // clicking a title/director/DP in the detail panel (onSearchFilm below).
+  const selectFilm = (name) => {
+    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
+    setFilm(name);
+    setSearchText('');
+    setShowAuto(false);
+    setAutocomplete([]);
+    searchRef.current?.focus();
+  };
+
   const removeChip = (tag) => setChips(prev => prev.filter(t => t !== tag));
   const removeNlChip = (phrase) => setNlChips(prev => prev.filter(n => n.phrase !== phrase));
 
@@ -267,7 +279,8 @@ export default function Home() {
     if (!text) return;
     if (showAuto && autocomplete.length > 0) {
       const pick = autocomplete[highlightedIndex] || autocomplete[0];
-      addChip(pick.value);
+      if (pick.type === 'film') selectFilm(pick.value);
+      else addChip(pick.value);
     } else {
       interpretPhrase(text);
     }
@@ -692,12 +705,12 @@ export default function Home() {
               fontSize: '9.5px', fontWeight: 600,
               letterSpacing: '0.12em', color: '#65625a'
             }}>
-              MATCHING TAGS
+              MATCHES
             </div>
             {autocomplete.map((opt, i) => (
               <button
-                key={opt.value}
-                onMouseDown={() => addChip(opt.value)}
+                key={`${opt.type}-${opt.value}`}
+                onMouseDown={() => opt.type === 'film' ? selectFilm(opt.value) : addChip(opt.value)}
                 onMouseEnter={() => setHighlightedIndex(i)}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center',
@@ -708,14 +721,24 @@ export default function Home() {
                   cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit'
                 }}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{
-                    width: '7px', height: '7px', borderRadius: '2px',
-                    background: opt.color, flexShrink: 0
-                  }} />
-                  <span style={{ fontSize: '13.5px', color: '#efeadd' }}>{opt.value}</span>
-                  <span style={{ fontSize: '11px', color: '#65625a' }}>{opt.catLabel}</span>
-                </span>
+                {opt.type === 'film' ? (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '11px', flexShrink: 0 }}>🎬</span>
+                    <span style={{ fontSize: '13.5px', color: '#8fc3d8' }}>{opt.value}</span>
+                    <span style={{ fontSize: '11px', color: '#65625a' }}>
+                      {FILM_FIELD_LABELS[opt.field] || opt.field}
+                    </span>
+                  </span>
+                ) : (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{
+                      width: '7px', height: '7px', borderRadius: '2px',
+                      background: opt.color, flexShrink: 0
+                    }} />
+                    <span style={{ fontSize: '13.5px', color: '#efeadd' }}>{opt.value}</span>
+                    <span style={{ fontSize: '11px', color: '#65625a' }}>{opt.catLabel}</span>
+                  </span>
+                )}
                 <span style={{
                   fontFamily: "'JetBrains Mono', monospace",
                   fontSize: '10px', color: '#65625a'

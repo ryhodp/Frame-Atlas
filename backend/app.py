@@ -1547,15 +1547,48 @@ def autocomplete():
             LIMIT 20
         ''', (uid, f'{q}%')).fetchall()
 
+    # Filmography matches — lets the same search bar find "Her" by title or
+    # "Spike Jonze" by director/DP, reusing the exact film= filter that
+    # clicking a name in the detail panel already applies (see /api/search).
+    like = f'{q}%'
+    film_rows = c.execute('''
+        SELECT f.title AS value, 'title' AS field, COUNT(DISTINCT f.image_id) AS cnt
+        FROM filmography f JOIN images i ON i.id = f.image_id
+        WHERE i.user_id = ? AND f.title IS NOT NULL AND LOWER(f.title) LIKE ?
+        GROUP BY f.title
+        UNION ALL
+        SELECT f.director, 'director', COUNT(DISTINCT f.image_id)
+        FROM filmography f JOIN images i ON i.id = f.image_id
+        WHERE i.user_id = ? AND f.director IS NOT NULL AND LOWER(f.director) LIKE ?
+        GROUP BY f.director
+        UNION ALL
+        SELECT f.dp, 'dp', COUNT(DISTINCT f.image_id)
+        FROM filmography f JOIN images i ON i.id = f.image_id
+        WHERE i.user_id = ? AND f.dp IS NOT NULL AND LOWER(f.dp) LIKE ?
+        GROUP BY f.dp
+        ORDER BY cnt DESC
+        LIMIT 8
+    ''', (uid, like, uid, like, uid, like)).fetchall()
+
     conn.close()
 
-    return jsonify([{
+    tag_results = [{
+        'type': 'tag',
         'value': row['value'],
         'category': row['category'],
         'catLabel': CAT_LABELS.get(row['category'], row['category']),
         'color': CAT_COLORS.get(row['category'], '#9c988d'),
         'count': row['cnt']
-    } for row in rows])
+    } for row in rows]
+
+    film_results = [{
+        'type': 'film',
+        'value': row['value'],
+        'field': row['field'],
+        'count': row['cnt']
+    } for row in film_rows]
+
+    return jsonify(tag_results + film_results)
 
 @app.route('/api/tag-categories')
 def tag_categories():
@@ -2131,10 +2164,14 @@ def toggle_flag(image_id):
 @admin_required
 def edit_tags(image_id):
     data = request.get_json(force=True) or {}
-    category = (data.get('category') or '').strip()
+    # No category picked -> misc. Kept out of CAT_LABELS/CAT_COLORS on
+    # purpose so it never shows up as a pickable option in the category
+    # dropdown, but renders fine everywhere via the existing .get(x, x)
+    # fallbacks (label becomes literally "misc", color a neutral gray).
+    category = (data.get('category') or '').strip() or 'misc'
     value = (data.get('value') or '').strip().lower()
-    if not category or not value:
-        return jsonify({'error': 'category and value are required'}), 400
+    if not value:
+        return jsonify({'error': 'value is required'}), 400
 
     conn = get_db()
     c = conn.cursor()
@@ -2169,13 +2206,14 @@ def _parse_bulk_tag_request(data):
     (image_ids, category, value, error_response). error_response is None
     if validation passed."""
     image_ids = data.get('image_ids')
-    category = (data.get('category') or '').strip()
+    # Blank category -> misc, same as the single-image tag editor.
+    category = (data.get('category') or '').strip() or 'misc'
     value = (data.get('value') or '').strip().lower()
 
     if not isinstance(image_ids, list) or not image_ids or \
             not all(isinstance(i, int) for i in image_ids):
         return None, None, None, (jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400)
-    if category not in CAT_LABELS:
+    if category != 'misc' and category not in CAT_LABELS:
         return None, None, None, (jsonify({'error': 'invalid category'}), 400)
     if not value:
         return None, None, None, (jsonify({'error': 'value is required'}), 400)

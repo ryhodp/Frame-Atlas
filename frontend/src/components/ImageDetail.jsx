@@ -27,7 +27,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const [isFlagged, setIsFlagged] = useState(!!image?.is_flagged);
 
   const [editingTags, setEditingTags] = useState(false);
-  const [newTagCat, setNewTagCat] = useState('mood');
+  const [newTagCat, setNewTagCat] = useState(''); // blank = misc, matches the backend default
   const [newTagValue, setNewTagValue] = useState('');
 
   const [film, setFilm] = useState(image?.filmography || null);
@@ -557,6 +557,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     fontSize: '11.5px', fontFamily: 'inherit', outline: 'none'
                   }}
                 >
+                  <option value="">— optional —</option>
                   {CAT_ORDER.map(cat => (
                     <option key={cat} value={cat}>{CAT_LABELS[cat] || cat}</option>
                   ))}
@@ -594,7 +595,10 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 No tags yet — this image hasn't been through the AI tagging pass.
               </p>
             )}
-            {CAT_ORDER.map(cat => {
+            {/* CAT_ORDER first, then any category not in that fixed list (misc,
+                and defensively anything else) tacked on at the end so nothing
+                typed without a category silently disappears from view. */}
+            {[...CAT_ORDER, ...Object.keys(categories).filter(c => !CAT_ORDER.includes(c))].map(cat => {
               if (!categories[cat] || categories[cat].length === 0) return null;
               return (
                 <div key={cat} style={{ marginBottom: '16px' }}>

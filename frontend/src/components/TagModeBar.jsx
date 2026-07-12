@@ -184,7 +184,7 @@ export default function TagModeBar({
     setShowAuto(false);
   };
 
-  const catLabelFor = (key) => categories.find(c => c.key === key)?.label || key;
+  const catLabelFor = (key) => categories.find(c => c.key === key)?.label || key || 'Misc';
   const catColorFor = (key) => categories.find(c => c.key === key)?.color || '#8b7cf6';
 
   // ── Add to Deck ─────────────────────────────────────────────────────────────
@@ -255,7 +255,7 @@ export default function TagModeBar({
   // ── Apply / remove flow ────────────────────────────────────────────────────
   const openApplyConfirm = () => {
     const value = tagName.trim().toLowerCase();
-    if (!value || !tagCategory) return;
+    if (!value) return;
     setConfirm({ kind: 'apply', category: tagCategory, value, catLabel: catLabelFor(tagCategory) });
   };
 
@@ -338,7 +338,7 @@ export default function TagModeBar({
     setConfirm(null);
   };
 
-  const canApply = tagName.trim().length > 0 && !!tagCategory;
+  const canApply = tagName.trim().length > 0;
 
   return (
     <>
