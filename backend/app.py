@@ -2364,6 +2364,79 @@ def update_filmography(image_id):
     conn.close()
     return jsonify({'success': True, 'filmography': filmography})
 
+def _parse_bulk_image_ids(data):
+    """Shared image_ids validation for the bulk filmography endpoints."""
+    image_ids = data.get('image_ids')
+    if not isinstance(image_ids, list) or not image_ids or \
+            not all(isinstance(i, int) for i in image_ids):
+        return None, (jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400)
+    return image_ids, None
+
+@app.route('/api/filmography/bulk-set', methods=['POST'])
+@admin_required
+def bulk_set_filmography():
+    """Sets the SAME title/director/DP/year on every selected image,
+    overwriting whatever each one had (blank or wrong) — for correcting a
+    batch of stills Gemini mislabeled (or never labeled) from one film."""
+    data = request.get_json(force=True) or {}
+    image_ids, error = _parse_bulk_image_ids(data)
+    if error:
+        return error
+
+    title = (data.get('title') or '').strip()
+    director = (data.get('director') or '').strip()
+    dp = (data.get('dp') or '').strip()
+    year = str(data.get('year') or '').strip()
+    if not any([title, director, dp, year]):
+        return jsonify({'error': 'At least one of title/director/dp/year is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    valid_ids = [r[0] for r in c.execute(
+        f"SELECT id FROM images WHERE id IN ({','.join('?' * len(image_ids))})", image_ids
+    ).fetchall()]
+    invalid_ids = [i for i in image_ids if i not in valid_ids]
+
+    for image_id in valid_ids:
+        c.execute('DELETE FROM filmography WHERE image_id = ?', (image_id,))
+        c.execute(
+            'INSERT INTO filmography (image_id, title, director, dp, year) VALUES (?,?,?,?,?)',
+            (image_id, title or None, director or None, dp or None, year or None)
+        )
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'updated': len(valid_ids),
+        'invalid_ids': invalid_ids,
+        'filmography': {'title': title or None, 'director': director or None,
+                         'dp': dp or None, 'year': year or None}
+    })
+
+@app.route('/api/filmography/bulk-clear', methods=['POST'])
+@admin_required
+def bulk_clear_filmography():
+    """Wipes filmography from every selected image — for stills Gemini
+    guessed a film on that isn't one at all."""
+    data = request.get_json(force=True) or {}
+    image_ids, error = _parse_bulk_image_ids(data)
+    if error:
+        return error
+
+    conn = get_db()
+    c = conn.cursor()
+    valid_ids = [r[0] for r in c.execute(
+        f"SELECT id FROM images WHERE id IN ({','.join('?' * len(image_ids))})", image_ids
+    ).fetchall()]
+    invalid_ids = [i for i in image_ids if i not in valid_ids]
+
+    for image_id in valid_ids:
+        c.execute('DELETE FROM filmography WHERE image_id = ?', (image_id,))
+    conn.commit()
+    conn.close()
+
+    return jsonify({'cleared': len(valid_ids), 'invalid_ids': invalid_ids})
+
 @app.route('/api/images/<int:image_id>/download')
 def download_image(image_id):
     import mimetypes

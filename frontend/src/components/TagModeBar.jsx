@@ -76,9 +76,15 @@ export default function TagModeBar({
   const autoDebounce = useRef(null);
   const summaryDebounce = useRef(null);
 
-  // Confirm modal state — { kind: 'apply'|'remove', category, value, catLabel }
+  // Confirm modal state — { kind: 'apply'|'remove'|'filmography-set'|'filmography-clear', ... }
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  // Set-filmography panel state
+  const [filmTitle, setFilmTitle] = useState('');
+  const [filmDirector, setFilmDirector] = useState('');
+  const [filmDp, setFilmDp] = useState('');
+  const [filmYear, setFilmYear] = useState('');
 
   // Add-to-Deck panel state
   const [decks, setDecks] = useState([]);
@@ -246,12 +252,46 @@ export default function TagModeBar({
     setConfirm({ kind: 'remove', category: tag.category, value: tag.value, catLabel: tag.catLabel });
   };
 
+  // ── Set / clear filmography flow ───────────────────────────────────────────
+  const canSetFilm = filmTitle.trim() || filmDirector.trim() || filmDp.trim() || filmYear.trim();
+
+  const openFilmSetConfirm = () => {
+    if (!canSetFilm) return;
+    setConfirm({
+      kind: 'filmography-set',
+      title: filmTitle.trim(), director: filmDirector.trim(),
+      dp: filmDp.trim(), year: filmYear.trim(),
+    });
+  };
+
+  const openFilmClearConfirm = () => setConfirm({ kind: 'filmography-clear' });
+
   const runConfirm = async () => {
     if (!confirm) return;
     setBusy(true);
     const ids = Array.from(selectedIds);
     try {
-      if (confirm.kind === 'apply') {
+      if (confirm.kind === 'filmography-set') {
+        const filmography = { title: confirm.title, director: confirm.director, dp: confirm.dp, year: confirm.year };
+        await fetch('/api/filmography/bulk-set', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_ids: ids, ...filmography })
+        });
+        const cleanFilm = {
+          title: filmography.title || null, director: filmography.director || null,
+          dp: filmography.dp || null, year: filmography.year || null,
+        };
+        onBulkChanged?.(ids, (img) => ids.includes(img.id) ? { ...img, filmography: cleanFilm } : img);
+        setFilmTitle(''); setFilmDirector(''); setFilmDp(''); setFilmYear('');
+      } else if (confirm.kind === 'filmography-clear') {
+        await fetch('/api/filmography/bulk-clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_ids: ids })
+        });
+        onBulkChanged?.(ids, (img) => ids.includes(img.id) ? { ...img, filmography: null } : img);
+      } else if (confirm.kind === 'apply') {
         await fetch('/api/tags/bulk-apply', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -410,6 +450,67 @@ export default function TagModeBar({
               >
                 Apply to {count} image{count === 1 ? '' : 's'}
               </button>
+            </div>
+
+            {/* Set/clear filmography panel */}
+            <div style={{ minWidth: '280px', flex: '1 1 280px' }} data-tagmode-area>
+              <div style={sectionLabel()}>FILMOGRAPHY</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <input
+                  value={filmTitle}
+                  onChange={e => setFilmTitle(e.target.value)}
+                  placeholder="Title"
+                  style={inputStyle()}
+                />
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    value={filmDirector}
+                    onChange={e => setFilmDirector(e.target.value)}
+                    placeholder="Director"
+                    style={inputStyle()}
+                  />
+                  <input
+                    value={filmDp}
+                    onChange={e => setFilmDp(e.target.value)}
+                    placeholder="DP"
+                    style={inputStyle()}
+                  />
+                  <input
+                    value={filmYear}
+                    onChange={e => setFilmYear(e.target.value)}
+                    placeholder="Year"
+                    style={{ ...inputStyle(), flex: '0 0 70px' }}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                <button
+                  onClick={openFilmSetConfirm}
+                  disabled={!canSetFilm}
+                  style={{
+                    flex: 1,
+                    background: canSetFilm ? '#d9a441' : 'rgba(217,164,65,0.2)',
+                    color: canSetFilm ? '#3d2f00' : '#8e9099',
+                    border: 'none', borderRadius: '8px',
+                    padding: '8px 10px', fontSize: '12.5px', fontWeight: 500,
+                    cursor: canSetFilm ? 'pointer' : 'default', fontFamily: 'inherit'
+                  }}
+                >
+                  Set on {count}
+                </button>
+                <button
+                  onClick={openFilmClearConfirm}
+                  title="Clear filmography from every selected image"
+                  style={{
+                    background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+                    color: '#ffb4ab', borderRadius: '8px',
+                    padding: '8px 10px', fontSize: '12.5px',
+                    cursor: 'pointer', fontFamily: 'inherit'
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
             </div>
 
             {/* Shared tags panel */}
@@ -579,10 +680,21 @@ export default function TagModeBar({
           text={
             confirm.kind === 'apply'
               ? <>Add "<strong>{confirm.value}</strong>" ({confirm.catLabel}) to <strong>{count}</strong> image{count === 1 ? '' : 's'}?</>
-              : <>Remove "<strong>{confirm.value}</strong>" from <strong>{count}</strong> image{count === 1 ? '' : 's'}?</>
+              : confirm.kind === 'remove'
+              ? <>Remove "<strong>{confirm.value}</strong>" from <strong>{count}</strong> image{count === 1 ? '' : 's'}?</>
+              : confirm.kind === 'filmography-set'
+              ? <>Set filmography on <strong>{count}</strong> image{count === 1 ? '' : 's'} to
+                  "<strong>{confirm.title || '(no title)'}</strong>"{confirm.director ? <> · dir. {confirm.director}</> : null}?
+                  This overwrites whatever each image had before.</>
+              : <>Clear filmography from <strong>{count}</strong> image{count === 1 ? '' : 's'}?</>
           }
-          confirmLabel={confirm.kind === 'apply' ? 'Apply' : 'Remove'}
-          danger={confirm.kind === 'remove'}
+          confirmLabel={
+            confirm.kind === 'apply' ? 'Apply'
+            : confirm.kind === 'filmography-set' ? 'Set filmography'
+            : confirm.kind === 'filmography-clear' ? 'Clear'
+            : 'Remove'
+          }
+          danger={confirm.kind === 'remove' || confirm.kind === 'filmography-clear'}
           busy={busy}
           onConfirm={runConfirm}
           onCancel={() => !busy && setConfirm(null)}

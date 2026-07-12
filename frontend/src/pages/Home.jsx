@@ -335,6 +335,18 @@ export default function Home() {
     setSelectedImage(prev => (prev && prev.id === id) ? null : prev);
   };
 
+  // Quick-favorite star on the grid tile itself — no need to open the detail panel
+  const toggleFavorite = async (img, e) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/images/${img.id}/favorite`, { method: 'POST' });
+      const data = await res.json();
+      handleImageUpdated(img.id, { is_favorite: data.is_favorite });
+    } catch (err) {
+      console.error('Toggle favorite failed', err);
+    }
+  };
+
   // ── Tag Mode: toggling in/out, tile clicks, box-select drag ─────────────────
   const toggleTagMode = () => {
     setTagMode(v => {
@@ -1043,8 +1055,16 @@ export default function Home() {
                     border: isSelected ? '2px solid #b8cea1' : '1px solid rgba(255,255,255,0.04)',
                     transition: 'transform 0.15s ease'
                   }}
-                  onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.01)'}
-                  onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.transform = 'scale(1.01)';
+                    const star = e.currentTarget.querySelector('[data-quickfav]');
+                    if (star && !img.is_favorite) star.style.opacity = '1';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.transform = 'scale(1)';
+                    const star = e.currentTarget.querySelector('[data-quickfav]');
+                    if (star && !img.is_favorite) star.style.opacity = '0';
+                  }}
                 >
                   {/* Thumbnail — box matches the image's true ratio, so nothing crops */}
                   {img.thumbnail && (
@@ -1078,8 +1098,28 @@ export default function Home() {
                     {img.ar_label || img.aspect_ratio}
                   </span>
 
-                  {/* Star / flag */}
-                  {img.is_favorite && (
+                  {/* Quick-favorite star — always visible (gold) once favorited; otherwise
+                      a translucent gray star that only shows up on hover (opacity toggled
+                      imperatively above, same pattern as the tile's own scale-on-hover).
+                      Hidden entirely in Tag Mode so it doesn't fight tile-selection clicks. */}
+                  {!tagMode && (
+                    <button
+                      data-quickfav
+                      onClick={(e) => toggleFavorite(img, e)}
+                      title={img.is_favorite ? 'Unfavorite' : 'Favorite'}
+                      style={{
+                        position: 'absolute', top: '4px', right: '5px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        padding: '4px', lineHeight: 1, zIndex: 2,
+                        fontSize: img.is_favorite ? '13px' : '14px',
+                        color: img.is_favorite ? '#dcbd76' : 'rgba(239,234,221,0.65)',
+                        opacity: img.is_favorite ? 1 : 0,
+                        transition: 'opacity 120ms ease',
+                        filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                      }}
+                    >★</button>
+                  )}
+                  {tagMode && img.is_favorite && (
                     <span style={{
                       position: 'absolute', top: '6px', right: '7px',
                       color: '#dcbd76', fontSize: '13px',
