@@ -51,6 +51,7 @@ export default function Home() {
 
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
+  const autoRequestId = useRef(0);
   const pageRef = useRef(0);
   const fetchingRef = useRef(false);
   const sentinelRef = useRef(null);
@@ -180,12 +181,20 @@ export default function Home() {
       setShowAuto(false);
       return;
     }
+    // The debounce timer alone doesn't stop an in-flight fetch for the
+    // PREVIOUS keystroke from resolving after this one's — on a slow or
+    // jittery connection the older, broader-prefix response (e.g. "ten")
+    // can land after the newer, more specific one ("tenet") and silently
+    // overwrite it with worse-ranked results. A monotonic request id lets a
+    // late response recognize it's stale and drop itself instead.
+    const requestId = ++autoRequestId.current;
     autoDebounce.current = setTimeout(async () => {
       try {
         const params = new URLSearchParams({ q: searchText });
         if (chips.length) params.set('chips', chips.join(','));
         const res = await fetch(`/api/autocomplete?${params}`);
         const data = await res.json();
+        if (requestId !== autoRequestId.current) return; // a newer request has since superseded this one
         setAutocomplete(data);
         setShowAuto(data.length > 0);
         setHighlightedIndex(0);

@@ -15,11 +15,15 @@ const ADMIN_NAV_LINKS = [
   { to: '/invites', label: 'Invite' },
 ]
 
+const NON_ADMIN_NAV_LINKS = [
+  { to: '/account', label: 'My Library' },
+]
+
 function Header() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, isAdmin, logout } = useAuth()
-  const NAV_LINKS = isAdmin ? [...BASE_NAV_LINKS, ...ADMIN_NAV_LINKS] : BASE_NAV_LINKS
+  const NAV_LINKS = isAdmin ? [...BASE_NAV_LINKS, ...ADMIN_NAV_LINKS] : [...BASE_NAV_LINKS, ...NON_ADMIN_NAV_LINKS]
 
   const handleLogout = async () => {
     await logout()

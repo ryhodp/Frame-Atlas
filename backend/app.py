@@ -70,6 +70,7 @@ CAT_LABELS = {
 
 sync_state = {
     'in_progress': False,
+    'user_id': None,  # whose sync is running — one sync at a time, app-wide (Day 14 Stage 2)
     'processed': 0,
     'total': 0,
     'current_file': '',
@@ -423,6 +424,20 @@ def init_db():
     c.execute("""
         INSERT OR IGNORE INTO user_flags (user_id, image_id)
         SELECT 1, id FROM images WHERE is_flagged = 1
+    """)
+    conn.commit()
+
+    # One-time cleanup: the AI tagging pipeline wasn't lowercasing Gemini's
+    # output (fixed above), so a tag like "Tense" from one run and "tense"
+    # from another could sit as two case-different rows on the same image —
+    # invisible as a real duplicate anywhere tags get grouped (autocomplete,
+    # search dropdown), since SQLite groups strings case-sensitively.
+    # Idempotent: a no-op once everything's already lowercase and deduped.
+    c.execute("UPDATE tags SET value = LOWER(value) WHERE value != LOWER(value)")
+    c.execute("""
+        DELETE FROM tags WHERE id NOT IN (
+            SELECT MIN(id) FROM tags GROUP BY image_id, category, value
+        )
     """)
     conn.commit()
     conn.close()
@@ -807,9 +822,16 @@ def _run_tagging_job():
             for category, values in data.get('tags', {}).items():
                 for val in values:
                     if val and val.strip():
+                        # Lowercase to match every other tag-writing path
+                        # (manual edit, bulk apply) — Gemini's casing isn't
+                        # consistent run to run, and SQLite string grouping
+                        # is case-sensitive, so "Tense" and "tense" would
+                        # otherwise sit as two separate-looking duplicates
+                        # anywhere tags get grouped (autocomplete, detail
+                        # panel, analytics).
                         c.execute(
                             "INSERT INTO tags (image_id, user_id, category, value) VALUES (?, 1, ?, ?)",
-                            (img_id, category, val.strip())
+                            (img_id, category, val.strip().lower())
                         )
 
             caption = data.get('caption', '')
@@ -906,12 +928,13 @@ def get_oauth_flow(redirect_uri):
     }
     return Flow.from_client_config(client_config, scopes=UPLOAD_SCOPES, redirect_uri=redirect_uri)
 
-def get_user_drive_service():
-    """Drive client acting as the signed-in user (for uploads). Returns None
-    if nobody has signed in yet."""
+def get_user_credentials(user_id):
+    """Refreshed google-auth Credentials for this user's own Google sign-in
+    (Day 8, generalized Day 14 Stage 2 — used to be admin-only/hardcoded to
+    user 1). Returns None if that user hasn't connected Google yet."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT google_oauth_token FROM users WHERE id = 1')
+    c.execute('SELECT google_oauth_token FROM users WHERE id = ?', (user_id,))
     row = c.fetchone()
     conn.close()
     if not row or not row['google_oauth_token']:
@@ -922,10 +945,16 @@ def get_user_drive_service():
         creds.refresh(Request())
         conn = get_db()
         c = conn.cursor()
-        c.execute('UPDATE users SET google_oauth_token = ? WHERE id = 1', (creds.to_json(),))
+        c.execute('UPDATE users SET google_oauth_token = ? WHERE id = ?', (creds.to_json(), user_id))
         conn.commit()
         conn.close()
-    return build('drive', 'v3', credentials=creds)
+    return creds
+
+def get_user_drive_service(user_id):
+    """Drive client acting as the given signed-in user. Returns None if that
+    user hasn't connected Google yet."""
+    creds = get_user_credentials(user_id)
+    return build('drive', 'v3', credentials=creds) if creds else None
 
 def list_images_in_folder(service, folder_id, page_token=None):
     images = []
@@ -997,11 +1026,14 @@ def phash_distance(a, b):
 # near-duplicates. 0 = pixel-identical layout; 6 tolerates resize/re-compress.
 PHASH_NEAR_DUP_THRESHOLD = 6
 
-def get_root_folder_id():
-    """The Drive folder being synced — where _Removed lives."""
+def get_root_folder_id(user_id):
+    """The Drive folder being synced for this user — where their _Removed
+    lives. MUST be scoped by user_id: with more than one person syncing,
+    picking "whichever sync_settings row is newest" (the old behavior) could
+    silently return a different user's folder."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT folder_id FROM sync_settings ORDER BY id DESC LIMIT 1')
+    c.execute('SELECT folder_id FROM sync_settings WHERE user_id = ? ORDER BY id DESC LIMIT 1', (user_id,))
     row = c.fetchone()
     conn.close()
     return row['folder_id'] if row else '1LHPVyo3QjOEcizc1Io2UVjxzX4FQ7yDG'
@@ -1217,12 +1249,23 @@ def sync_folder_worker(folder_id, user_id):
     global sync_state
     try:
         sync_state['in_progress'] = True
+        sync_state['user_id'] = user_id
         sync_state['processed'] = 0
         sync_state['total'] = 0
         sync_state['current_file'] = ''
         sync_state['errors'] = []
 
-        service = get_drive_service()
+        # Admin keeps syncing through the shared read-only service account
+        # (unchanged since Day 2/3). Everyone else (Day 14 Stage 2) syncs
+        # through their OWN Google connection, since the service account has
+        # no access to a friend's personal Drive folder at all.
+        if user_id == 1:
+            service = get_drive_service()
+        else:
+            service = get_user_drive_service(user_id)
+            if not service:
+                sync_state['errors'].append('Google Drive is not connected — reconnect and try again.')
+                return
         print(f"Listing images in folder {folder_id}...")
         all_images = list_images_in_folder(service, folder_id)
         sync_state['total'] = len(all_images)
@@ -1299,7 +1342,13 @@ def sync_folder_worker(folder_id, user_id):
         sync_state['errors'].append(f"Sync failed: {str(e)}")
     finally:
         sync_state['in_progress'] = False
-        trigger_tagging()
+        # Auto-tagging after sync uses the shared admin Gemini key (Day 5) —
+        # only fire it for the admin's own library. Stage 2b will give each
+        # user their own tag-my-photos trigger using their own key; until
+        # then a friend's newly-synced photos just sit untagged (searchable,
+        # zero cost) rather than silently spending the admin's budget.
+        if user_id == 1:
+            trigger_tagging()
 
 # ============================================================================
 # API ROUTES
@@ -1325,7 +1374,15 @@ def retry_failed():
 
 @app.route('/api/config', methods=['GET'])
 def config():
-    return jsonify({'app_name': 'Frame Atlas', 'version': 'V5', 'gemini_model': GEMINI_MODEL})
+    return jsonify({
+        'app_name': 'Frame Atlas', 'version': 'V5', 'gemini_model': GEMINI_MODEL,
+        # Both safe to expose to any logged-in browser: the OAuth client id
+        # is meant to be public (only the client SECRET is sensitive, and
+        # that never leaves the server), and the Picker key is restricted
+        # server-side (Google Cloud Console) to the Picker API only.
+        'google_client_id': os.environ.get('GOOGLE_OAUTH_CLIENT_ID'),
+        'google_picker_api_key': os.environ.get('GOOGLE_PICKER_API_KEY'),
+    })
 
 @app.route('/api/models', methods=['GET'])
 @admin_required
@@ -1351,7 +1408,6 @@ def get_folders():
     ]})
 
 @app.route('/api/sync/settings', methods=['GET', 'POST'])
-@admin_required
 def sync_settings():
     user_id = session['user_id']
 
@@ -1384,12 +1440,14 @@ def sync_settings():
         return jsonify({'success': True})
 
 @app.route('/api/sync/start', methods=['POST'])
-@admin_required
 def start_sync():
     user_id = session['user_id']
 
     if sync_state['in_progress']:
-        return jsonify({'error': 'Sync already in progress'}), 400
+        return jsonify({'error': 'Sync already in progress', 'user_id': sync_state['user_id']}), 400
+
+    if user_id != 1 and not get_user_credentials(user_id):
+        return jsonify({'error': 'not_signed_in', 'message': 'Connect Google Drive first.'}), 400
 
     conn = get_db()
     c = conn.cursor()
@@ -1408,7 +1466,6 @@ def start_sync():
     return jsonify({'success': True, 'message': 'Sync started'})
 
 @app.route('/api/sync/status', methods=['GET'])
-@admin_required
 def sync_status():
     return jsonify(sync_state)
 
@@ -2014,17 +2071,18 @@ def extract_colors():
 # ============================================================================
 
 @app.route('/api/auth/status')
-@admin_required
 def auth_status():
+    """Day 8: admin-only (upload sign-in). Day 14 Stage 2: generalized to
+    whoever's logged in, since every user now connects their own Google
+    account — session['user_id'] instead of a hardcoded 1."""
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT google_oauth_token FROM users WHERE id = 1')
+    c.execute('SELECT google_oauth_token FROM users WHERE id = ?', (session['user_id'],))
     row = c.fetchone()
     conn.close()
     return jsonify({'signed_in': bool(row and row['google_oauth_token'])})
 
 @app.route('/api/auth/google/login')
-@admin_required
 def google_login():
     redirect_uri = request.url_root.rstrip('/') + '/api/auth/google/callback'
     flow = get_oauth_flow(redirect_uri)
@@ -2033,8 +2091,19 @@ def google_login():
     session['oauth_state'] = state
     return redirect(auth_url)
 
+@app.route('/api/drive/picker-token')
+def drive_picker_token():
+    """A short-lived OAuth access token for the CURRENT user, handed to the
+    Google Picker widget in the browser so they can pick a folder from their
+    own Drive. Same drive.file scope as everything else here — the Picker is
+    what lets that narrow scope reach an arbitrary folder the user chooses,
+    without ever requesting broader Drive access."""
+    creds = get_user_credentials(session['user_id'])
+    if not creds:
+        return jsonify({'error': 'not_signed_in'}), 401
+    return jsonify({'access_token': creds.token})
+
 @app.route('/api/auth/google/callback')
-@admin_required
 def google_callback():
     redirect_uri = request.url_root.rstrip('/') + '/api/auth/google/callback'
     flow = get_oauth_flow(redirect_uri)
@@ -2045,7 +2114,7 @@ def google_callback():
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('UPDATE users SET google_oauth_token = ? WHERE id = 1', (flow.credentials.to_json(),))
+    c.execute('UPDATE users SET google_oauth_token = ? WHERE id = ?', (flow.credentials.to_json(), session['user_id']))
     conn.commit()
     conn.close()
     return redirect('/?signed_in=1')
@@ -2053,7 +2122,10 @@ def google_callback():
 @app.route('/api/upload', methods=['POST'])
 @admin_required
 def upload_images():
-    service = get_user_drive_service()
+    # Uploads always go into the shared admin library (Stage 1 decision,
+    # unchanged by Stage 2) — always user 1's own Google connection/folder,
+    # regardless of who's calling (only admin can reach this route anyway).
+    service = get_user_drive_service(1)
     if not service:
         return jsonify({'error': 'not_signed_in', 'message': 'Sign in with Google first.'}), 401
 
@@ -2062,7 +2134,7 @@ def upload_images():
     if not files:
         return jsonify({'error': 'No files provided'}), 400
 
-    folder_id = get_root_folder_id()
+    folder_id = get_root_folder_id(1)
     results = []
 
     conn = get_db()
@@ -2552,7 +2624,7 @@ def delete_image(image_id):
         file_id = row['drive_file_id']
         f = service.files().get(fileId=file_id, fields='parents').execute()
         prev_parents = ','.join(f.get('parents', []))
-        removed_id = get_or_create_removed_folder(service, get_root_folder_id())
+        removed_id = get_or_create_removed_folder(service, get_root_folder_id(1))
         service.files().update(
             fileId=file_id,
             addParents=removed_id,
@@ -2603,7 +2675,7 @@ def duplicates_scan():
     if missing_md5:
         try:
             service = get_drive_service()
-            files = list_images_in_folder(service, get_root_folder_id())
+            files = list_images_in_folder(service, get_root_folder_id(1))
             md5_map = {f['id']: f.get('md5Checksum') for f in files}
             conn = get_db()
             c = conn.cursor()
