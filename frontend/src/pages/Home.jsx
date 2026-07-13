@@ -453,8 +453,10 @@ export default function Home() {
   // ── True masonry: distribute images into columns, shortest-first ────────────
   // Every image keeps its full aspect ratio — nothing is cropped.
   // Placement is greedy in order, so appending a page never reshuffles
-  // images that are already on screen.
-  const colCount = Math.max(2, Math.min(5, Math.floor((winW - 280) / 320)));
+  // images that are already on screen. colWidth is the density slider's
+  // target column width — smaller means more, denser columns.
+  const [colWidth, setColWidth] = useState(320);
+  const colCount = Math.max(2, Math.min(7, Math.floor((winW - 280) / colWidth)));
   const columns = (() => {
     const cols = Array.from({ length: colCount }, () => ({ items: [], h: 0 }));
     for (const img of images) {
@@ -992,6 +994,29 @@ export default function Home() {
             animation: 'spin 0.7s linear infinite'
           }} />
         )}
+
+        <div style={{ flex: 1 }} />
+
+        {/* Grid density — smaller column target width = more, smaller tiles */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }} title="Grid density">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#65625a" strokeWidth="2">
+            <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+          </svg>
+          <input
+            type="range"
+            min={220}
+            max={420}
+            step={10}
+            value={colWidth}
+            onChange={e => setColWidth(Number(e.target.value))}
+            style={{ width: '90px', accentColor: '#c9a253' }}
+          />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#65625a" strokeWidth="2">
+            <rect x="3" y="3" width="8" height="8" /><rect x="13" y="3" width="8" height="8" />
+            <rect x="3" y="13" width="8" height="8" /><rect x="13" y="13" width="8" height="8" />
+          </svg>
+        </div>
       </div>
 
       {/* ── Image grid ──────────────────────────────────────────────────────── */}

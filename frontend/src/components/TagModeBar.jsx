@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { SIDEBAR_WIDTH } from './Sidebar';
 
 // ── Confirm step — small inline modal, dark panel look ────────────────────────
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -345,7 +346,7 @@ export default function TagModeBar({
       <div
         data-tagmode-area
         style={{
-          position: 'fixed', left: 0, right: 0, bottom: 0,
+          position: 'fixed', left: `${SIDEBAR_WIDTH}px`, right: 0, bottom: 0,
           zIndex: 900,
           background: '#1a1c20',
           borderTop: '1px solid #44474f',

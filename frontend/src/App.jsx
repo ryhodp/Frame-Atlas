@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import Header from './components/Header'
+import Sidebar from './components/Sidebar'
 import Home from './pages/Home'
 import SyncManager from './components/SyncManager'
 import DecksPage from './pages/DecksPage'
@@ -13,6 +13,7 @@ import RegisterPage from './pages/RegisterPage'
 import SetupPage from './pages/SetupPage'
 import AdminInvitesPage from './pages/AdminInvitesPage'
 import AccountPage from './pages/AccountPage'
+import SettingsPage from './pages/SettingsPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import './App.css'
 
@@ -78,22 +79,25 @@ function Shell() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0b', color: '#efeadd' }}>
-      <Header />
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/sync" element={user.role === 'admin' ? <SyncManager /> : <Navigate to="/" replace />} />
-        <Route path="/decks" element={<DecksPage />} />
-        <Route path="/decks/:id" element={<DeckDetail />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/favorites" element={<CollectionPage key="favorites" view="favorites" />} />
-        <Route path="/flagged" element={<CollectionPage key="flagged" view="flagged" />} />
-        <Route path="/recent" element={<CollectionPage key="recent" view="recent" />} />
-        <Route path="/invites" element={user.role === 'admin' ? <AdminInvitesPage /> : <Navigate to="/" replace />} />
-        <Route path="/account" element={<AccountPage />} />
-        <Route path="/login" element={<Navigate to="/" replace />} />
-        <Route path="/register" element={<Navigate to="/" replace />} />
-      </Routes>
+    <div style={{ display: 'flex', background: '#0a0a0b', color: '#efeadd' }}>
+      <Sidebar />
+      <div style={{ flex: 1, minWidth: 0, height: '100vh', overflowY: 'auto' }}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/sync" element={user.role === 'admin' ? <SyncManager /> : <Navigate to="/" replace />} />
+          <Route path="/decks" element={<DecksPage />} />
+          <Route path="/decks/:id" element={<DeckDetail />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/favorites" element={<CollectionPage key="favorites" view="favorites" />} />
+          <Route path="/flagged" element={<CollectionPage key="flagged" view="flagged" />} />
+          <Route path="/recent" element={<CollectionPage key="recent" view="recent" />} />
+          <Route path="/invites" element={user.role === 'admin' ? <AdminInvitesPage /> : <Navigate to="/" replace />} />
+          <Route path="/account" element={<AccountPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="/register" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
     </div>
   )
 }
