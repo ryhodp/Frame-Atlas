@@ -4,6 +4,7 @@ import base64
 import secrets
 import io
 import gzip
+import re
 import sqlite3
 import time
 import zlib
@@ -57,6 +58,7 @@ CAT_COLORS = {
     'subject_camera_relationship': '#a78bfa', 'genre_aesthetic': '#f43f5e',
     'era_decade': '#fb923c', 'camera_format': '#22d3ee',
     'performance_emotion': '#e879f9',
+    'my_work': '#d9a441',
 }
 CAT_LABELS = {
     'mood': 'Mood', 'lighting_quality': 'Lighting',
@@ -67,7 +69,22 @@ CAT_LABELS = {
     'subject_camera_relationship': 'Camera Rel.', 'genre_aesthetic': 'Genre',
     'era_decade': 'Era', 'camera_format': 'Format',
     'performance_emotion': 'Emotion',
+    'my_work': 'My Work',
 }
+
+# V15: categories only a human can apply — the AI tagger never writes these,
+# and re-tagging an image must never delete them. 'my_work' marks Ryan's own
+# projects (gaffed / DP'd / photographed); 'misc' is the free-form bucket the
+# manual tag editor uses when no category is picked.
+MANUAL_TAG_CATEGORIES = ('misc', 'my_work')
+
+def clear_ai_tags(cursor, image_id):
+    """Delete an image's AI-written tags ahead of a re-tag, preserving every
+    manually-applied category (see MANUAL_TAG_CATEGORIES)."""
+    ph = ','.join('?' * len(MANUAL_TAG_CATEGORIES))
+    cursor.execute(
+        f"DELETE FROM tags WHERE image_id = ? AND category NOT IN ({ph})",
+        (image_id, *MANUAL_TAG_CATEGORIES))
 
 sync_state = {
     'in_progress': False,
@@ -843,7 +860,9 @@ def _run_tagging_job():
             conn = get_db()
             c = conn.cursor()
 
-            c.execute("DELETE FROM tags WHERE image_id = ?", (img_id,))
+            # V15: replace only the AI's own tags. Manual categories (My Work,
+            # misc) are human decisions — a re-tag must never erase them.
+            clear_ai_tags(c, img_id)
             for category, values in data.get('tags', {}).items():
                 for val in values:
                     if val and val.strip():
@@ -1110,17 +1129,59 @@ def normalize_ar_label(ar_float):
     # Log distance treats "too wide" and "too tall" symmetrically
     return min(STANDARD_ASPECT_RATIOS, key=lambda s: abs(log(ar_float / s[1])))[0]
 
+def ar_float_from_str(ar_str):
+    """Parse a stored aspect_ratio string ("80:43", "1.85:1", "2") to a float.
+    Single source of truth for this parsing — build_image_dict (display) and
+    /api/search's ar filter (V15) must always agree on what bucket an image
+    falls in, or search results wouldn't match the labels shown on tiles."""
+    ar_str = ar_str or '16:9'
+    try:
+        w, h = ar_str.split(':', 1) if ':' in ar_str else (ar_str, '1')
+        return float(w) / float(h)
+    except Exception:
+        return 16 / 9
+
+# V15: plain-English ways a cinematographer might type a format into search
+AR_QUERY_ALIASES = {
+    'scope': '2.39:1', 'anamorphic': '2.39:1', 'cinemascope': '2.39:1',
+    'flat': '1.85:1', 'vertical': '9:16', 'portrait': '9:16',
+    'square': '1:1', 'widescreen': '16:9',
+}
+
+def ar_query_labels(q):
+    """Which standard aspect-ratio buckets does a search query point at?
+    Pure string logic, no database. Three ways to match:
+      - alias words: "scope" / "vertical" / "square" ...
+      - a typed ratio or decimal ("2.35", "2.35:1", "9:16", "16x9") snaps to
+        the nearest standard bucket — so 2.35 and 2.39 both find Scope.
+        Bare integers are excluded here ("9" shouldn't mean "9.0:1 wide").
+      - substring on the label itself: "16" hits both 16:9 and 9:16.
+    """
+    labels = []
+    alias = AR_QUERY_ALIASES.get(q)
+    if alias:
+        labels.append(alias)
+    m = re.fullmatch(r'(\d+(?:\.\d+)?)\s*[:/x]\s*(\d+(?:\.\d+)?)|(\d+\.\d+)', q)
+    if m:
+        try:
+            num = float(m.group(1) or m.group(3))
+            den = float(m.group(2)) if m.group(2) else 1.0
+            if num > 0 and den > 0:
+                labels.append(normalize_ar_label(num / den))
+        except (ValueError, ZeroDivisionError):
+            pass
+    for label, _ in STANDARD_ASPECT_RATIOS:
+        if q in label:
+            labels.append(label)
+    return list(dict.fromkeys(labels))  # dedupe, keep order
+
 def build_image_dict(row, tags, palette, filmography):
     """Turns one `images` row (must include id, filename, thumbnail_blob,
     caption, aspect_ratio, is_favorite, is_flagged) into the JSON shape used
     by both /api/search and /api/images/<id>/similar. Keep these two routes
     using this single helper so their image objects can never drift apart."""
     ar_str = row['aspect_ratio'] or '16:9'
-    try:
-        w, h = ar_str.split(':', 1) if ':' in ar_str else (ar_str, '1')
-        ar_float = float(w) / float(h)
-    except Exception:
-        ar_float = 16 / 9
+    ar_float = ar_float_from_str(ar_str)
 
     thumb_b64 = base64.b64encode(row['thumbnail_blob']).decode('utf-8')
     return {
@@ -1652,6 +1713,23 @@ def autocomplete():
         LIMIT 8
     ''', (uid, like, uid, like, uid, like)).fetchall()
 
+    # V15: aspect-ratio matches — "9:16", "2.35", "scope" etc. suggest format
+    # buckets. Counting requires a scan of the user's images, so only do it
+    # when the query actually looks like a ratio (ar_query_labels is pure
+    # string logic and returns [] for normal tag searches).
+    ar_results = []
+    ar_labels = ar_query_labels(q)
+    if ar_labels:
+        bucket_counts = {}
+        for row in c.execute('SELECT aspect_ratio FROM images WHERE user_id = ?', (uid,)).fetchall():
+            label = normalize_ar_label(ar_float_from_str(row['aspect_ratio']))
+            bucket_counts[label] = bucket_counts.get(label, 0) + 1
+        ar_results = [{
+            'type': 'ar',
+            'value': label,
+            'count': bucket_counts[label]
+        } for label in ar_labels if bucket_counts.get(label)]
+
     conn.close()
 
     tag_results = [{
@@ -1674,7 +1752,7 @@ def autocomplete():
     # always sit at the very top regardless of type or how many images carry
     # it — otherwise a popular tag that merely starts with the same letters
     # can bury the one result you actually typed for.
-    combined = tag_results + film_results
+    combined = tag_results + film_results + ar_results
     combined.sort(key=lambda r: (r['value'].lower() != q, -r['count']))
     return jsonify(combined)
 
@@ -1694,6 +1772,7 @@ def search():
     nl_raw = request.args.get('nl', '').strip()
     color_raw = request.args.get('color', '').strip()
     film_raw = request.args.get('film', '').strip()
+    ar_raw = request.args.get('ar', '').strip()  # V15: aspect-ratio bucket, e.g. "2.39:1"
     page = int(request.args.get('page', 0))
     per = int(request.args.get('per', 50))
     active_chips = [t.strip() for t in chips_raw.split(',') if t.strip()] if chips_raw else []
@@ -1748,6 +1827,24 @@ def search():
         else:
             conditions.append('1 = 0')
 
+    if ar_raw:
+        # V15: aspect-ratio filter. Same trick as the color filter above —
+        # small library, so snap every image to its nearest standard format
+        # in Python (identical math to the ar_label shown on tiles) and pass
+        # the matching ids into SQL.
+        ar_ids = [
+            row['id'] for row in c.execute(
+                'SELECT id, aspect_ratio FROM images WHERE user_id = ?', (uid,)
+            ).fetchall()
+            if normalize_ar_label(ar_float_from_str(row['aspect_ratio'])) == ar_raw
+        ]
+        if ar_ids:
+            aph = ','.join('?' * len(ar_ids))
+            conditions.append(f'id IN ({aph})')
+            params.extend(ar_ids)
+        else:
+            conditions.append('1 = 0')
+
     if film_raw:
         # Clicking a name in the detail panel sends the exact string, so try an
         # exact (case-insensitive) match first. Only fall back to substring
@@ -1781,7 +1878,7 @@ def search():
     # so each visit leads with fresher inspiration. Any active filter switches
     # back to the normal newest-first ordering.
     seed = request.args.get('seed', '').strip()
-    is_unfiltered = not (active_chips or nl_groups or color_raw or film_raw)
+    is_unfiltered = not (active_chips or nl_groups or color_raw or film_raw or ar_raw)
     if seed and is_unfiltered:
         order_by = '''CASE WHEN EXISTS(
                 SELECT 1 FROM image_views iv

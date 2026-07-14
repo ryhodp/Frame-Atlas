@@ -9,9 +9,13 @@ const CAT_LABELS = {
   'subject_camera_relationship': 'Camera Rel.', 'genre_aesthetic': 'Genre',
   'era_decade': 'Era', 'camera_format': 'Format',
   'performance_emotion': 'Emotion',
+  'my_work': 'My Work',
 };
 
+// my_work leads: it's rare (only Ryan's own projects carry it), so when
+// present it's the most important thing on the card.
 const CAT_ORDER = [
+  'my_work',
   'mood', 'lighting_quality', 'lighting_color_temperature', 'color_palette',
   'shot_type', 'framing_composition', 'location_type', 'time_of_day_weather',
   'source_type', 'subject_count', 'subject_camera_relationship', 'performance_emotion',

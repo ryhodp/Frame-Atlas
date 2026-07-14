@@ -117,6 +117,7 @@ These are hard-won lessons from debugging. Don't second-guess them.
 
 **Gemini AI**
 - Use `google-genai==1.16.0` — NOT `google-generativeai==0.3.0` (that one hits a broken old endpoint)
+- Re-tagging an image wipes only AI-written tags (`clear_ai_tags()`); manual categories in `MANUAL_TAG_CATEGORIES` (`my_work`, `misc`) always survive. `my_work` (V15) is Ryan's own-projects category (gaffed / DP'd / photographed) — human-applied only, never in the Gemini prompt
 
 **Environment Variables on Railway**
 - To confirm a variable is actually set, use the Railway Console tab and run: `echo $VARIABLE_NAME`
@@ -138,9 +139,9 @@ These are hard-won lessons from debugging. Don't second-guess them.
 
 **API Endpoints (complete)**
 - `/api/images` — all images
-- `/api/search` — AND-filter tag search; optional `seed` param (V14) switches the unfiltered grid to a deterministic shuffled order — images the user viewed in the last 7 days sort below unseen ones; any active filter ignores the seed and stays newest-first
+- `/api/search` — AND-filter tag search; optional `seed` param (V14) switches the unfiltered grid to a deterministic shuffled order — images the user viewed in the last 7 days sort below unseen ones; any active filter ignores the seed and stays newest-first. Optional `ar` param (V15) filters by aspect-ratio bucket (e.g. `ar=2.39:1`) — every image snaps to its nearest standard format via `normalize_ar_label()`, same math as the tile labels
 - `/api/views/log` — POST (V14), body `{image_ids: [...]}`; upserts per-user `image_views` rows (`last_seen_at`, `seen_count`). Frontend batches viewed tiles and flushes only on tab-hide/page-leave so the shuffle order never shifts mid-visit
-- `/api/autocomplete` — tag suggestions, frequency-sorted
+- `/api/autocomplete` — tag suggestions, frequency-sorted; also returns film matches (title/director/DP) and (V15) aspect-ratio bucket suggestions (`type: 'ar'`) when the query looks like a ratio ("9:16", "2.35") or an alias ("scope", "vertical", "square")
 - `/api/sync/status` — current sync state
 - `/api/tag-progress` — tagging progress
 - `/api/tag-progress/stream` — SSE stream for live progress UI

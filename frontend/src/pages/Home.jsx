@@ -20,6 +20,7 @@ export default function Home() {
   const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
   const [color, setColor] = useState(null);           // active hex or null
   const [film, setFilm] = useState(null);             // film/director/DP text filter
+  const [ar, setAr] = useState(null);                 // V15: aspect-ratio bucket, e.g. "2.39:1"
   const [searchText, setSearchText] = useState('');
   const [autocomplete, setAutocomplete] = useState([]);
   const [showAuto, setShowAuto] = useState(false);
@@ -64,7 +65,7 @@ export default function Home() {
   const seenIdsRef = useRef(new Set());   // every id already queued this visit
   const pendingViewsRef = useRef(new Set()); // queued but not yet sent to the server
 
-  const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color || !!film;
+  const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color || !!film || !!ar;
 
   // ── Fetch one page of results; append=true keeps existing images ───────────
   const fetchPage = useCallback(async (pageNum, append) => {
@@ -77,8 +78,9 @@ export default function Home() {
       if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
       if (color) params.set('color', color);
       if (film) params.set('film', film);
+      if (ar) params.set('ar', ar);
       // No filters → default browse view → ask the server for this visit's shuffle
-      if (!chips.length && !nlChips.length && !color && !film) {
+      if (!chips.length && !nlChips.length && !color && !film && !ar) {
         params.set('seed', shuffleSeedRef.current);
       }
       params.set('page', pageNum);
@@ -94,7 +96,7 @@ export default function Home() {
     }
     setLoading(false);
     fetchingRef.current = false;
-  }, [chips, nlChips, color, film]);
+  }, [chips, nlChips, color, film, ar]);
 
   // Filters changed → reset to page 0 (skip while in Find Similar mode)
   useEffect(() => {
@@ -299,6 +301,16 @@ export default function Home() {
     searchRef.current?.focus();
   };
 
+  // V15: selecting an aspect-ratio match ("9:16", "2.39:1") from the dropdown
+  const selectAr = (label) => {
+    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
+    setAr(label);
+    setSearchText('');
+    setShowAuto(false);
+    setAutocomplete([]);
+    searchRef.current?.focus();
+  };
+
   const removeChip = (tag) => setChips(prev => prev.filter(t => t !== tag));
   const removeNlChip = (phrase) => setNlChips(prev => prev.filter(n => n.phrase !== phrase));
 
@@ -313,6 +325,7 @@ export default function Home() {
     setNlChips([]);
     setColor(null);
     setFilm(null);
+    setAr(null);
     setSimilarTo(null);
     setSimilarNotice(null);
   };
@@ -348,6 +361,7 @@ export default function Home() {
     if (showAuto && autocomplete.length > 0) {
       const pick = autocomplete[highlightedIndex] || autocomplete[0];
       if (pick.type === 'film') selectFilm(pick.value);
+      else if (pick.type === 'ar') selectAr(pick.value);
       else addChip(pick.value);
     } else {
       interpretPhrase(text);
@@ -379,7 +393,7 @@ export default function Home() {
       await fetch('/api/bookmarks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, state: { chips, nlChips, color, film } })
+        body: JSON.stringify({ name, state: { chips, nlChips, color, film, ar } })
       });
       setSaveName('');
       loadBookmarks();
@@ -393,6 +407,7 @@ export default function Home() {
     setNlChips(bm.state.nlChips || []);
     setColor(bm.state.color || null);
     setFilm(bm.state.film || null);
+    setAr(bm.state.ar || null);
     setShowBookmarks(false);
   };
 
@@ -728,6 +743,7 @@ export default function Home() {
                             ...(bm.state.chips || []),
                             ...(bm.state.nlChips || []).map(n => `“${n.phrase}”`),
                             ...(bm.state.film ? [`🎬 ${bm.state.film}`] : []),
+                            ...(bm.state.ar ? [`▭ ${bm.state.ar}`] : []),
                             ...(bm.state.color ? [bm.state.color] : [])
                           ].join(' · ') || 'empty'}
                         </div>
@@ -780,7 +796,11 @@ export default function Home() {
             {autocomplete.map((opt, i) => (
               <button
                 key={`${opt.type}-${opt.value}`}
-                onMouseDown={() => opt.type === 'film' ? selectFilm(opt.value) : addChip(opt.value)}
+                onMouseDown={() => {
+                  if (opt.type === 'film') selectFilm(opt.value);
+                  else if (opt.type === 'ar') selectAr(opt.value);
+                  else addChip(opt.value);
+                }}
                 onMouseEnter={() => setHighlightedIndex(i)}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center',
@@ -798,6 +818,12 @@ export default function Home() {
                     <span style={{ fontSize: '11px', color: '#65625a' }}>
                       {FILM_FIELD_LABELS[opt.field] || opt.field}
                     </span>
+                  </span>
+                ) : opt.type === 'ar' ? (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '11px', flexShrink: 0 }}>▭</span>
+                    <span style={{ fontSize: '13.5px', color: '#7dd3c8' }}>{opt.value}</span>
+                    <span style={{ fontSize: '11px', color: '#65625a' }}>Aspect Ratio</span>
                   </span>
                 ) : (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -883,8 +909,8 @@ export default function Home() {
           )}
         </div>
 
-        {/* Active chips (tags + NL phrases + film + similar) */}
-        {(chips.length > 0 || nlChips.length > 0 || film || similarTo) && (
+        {/* Active chips (tags + NL phrases + film + aspect ratio + similar) */}
+        {(chips.length > 0 || nlChips.length > 0 || film || ar || similarTo) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginTop: '12px' }}>
             {/* Similar chip — from "Find Similar" in the detail panel. Soft violet, distinct from NL/film chips */}
             {similarTo && (
@@ -923,6 +949,28 @@ export default function Home() {
                   onClick={() => setFilm(null)}
                   style={{
                     background: 'none', border: 'none', color: '#8fc3d8',
+                    cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
+                >×</button>
+              </span>
+            )}
+            {/* Aspect-ratio chip (V15) — from picking a format in the search dropdown */}
+            {ar && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                background: 'rgba(125,211,200,0.12)',
+                border: '1px solid rgba(125,211,200,0.45)',
+                borderRadius: '6px',
+                padding: '4px 8px 4px 9px',
+                fontSize: '12.5px', color: '#7dd3c8', fontWeight: 500
+              }}>
+                ▭ {ar}
+                <button
+                  onClick={() => setAr(null)}
+                  style={{
+                    background: 'none', border: 'none', color: '#7dd3c8',
                     cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
                   }}
                   onMouseEnter={e => e.currentTarget.style.opacity = '1'}
