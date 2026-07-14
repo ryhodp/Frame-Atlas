@@ -56,6 +56,14 @@ export default function Home() {
   const fetchingRef = useRef(false);
   const sentinelRef = useRef(null);
 
+  // ── V14: shuffled home feed ────────────────────────────────────────────────
+  // One seed per visit: every reload gets a fresh shuffle, but scrolling within
+  // a visit paginates through the same fixed order (no repeats or gaps).
+  const shuffleSeedRef = useRef(String(Date.now()));
+  const viewObserverRef = useRef(null);   // watches tiles entering the viewport
+  const seenIdsRef = useRef(new Set());   // every id already queued this visit
+  const pendingViewsRef = useRef(new Set()); // queued but not yet sent to the server
+
   const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color || !!film;
 
   // ── Fetch one page of results; append=true keeps existing images ───────────
@@ -69,6 +77,10 @@ export default function Home() {
       if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
       if (color) params.set('color', color);
       if (film) params.set('film', film);
+      // No filters → default browse view → ask the server for this visit's shuffle
+      if (!chips.length && !nlChips.length && !color && !film) {
+        params.set('seed', shuffleSeedRef.current);
+      }
       params.set('page', pageNum);
       params.set('per', PER_PAGE);
       const res = await fetch(`/api/search?${params}`);
@@ -155,6 +167,53 @@ export default function Home() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [hasMore, fetchPage]);
+
+  // ── V14: mark tiles as "seen" once at least half of one is on screen ───────
+  useEffect(() => {
+    const obs = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const id = Number(entry.target.dataset.imageId);
+        if (id && !seenIdsRef.current.has(id)) {
+          seenIdsRef.current.add(id);
+          pendingViewsRef.current.add(id);
+        }
+        obs.unobserve(entry.target); // each tile only needs to be counted once
+      }
+    }, { threshold: 0.5 });
+    viewObserverRef.current = obs;
+    return () => obs.disconnect();
+  }, []);
+
+  // ── V14: send the seen-image batch when the user leaves ────────────────────
+  // Flushing only on exit (not mid-scroll) keeps this visit's shuffled order
+  // stable — the server ordering never shifts under an open page.
+  const flushViews = useCallback(() => {
+    const pending = pendingViewsRef.current;
+    if (!pending.size) return;
+    const ids = [...pending];
+    pending.clear();
+    try {
+      // keepalive lets the request finish even as the tab closes
+      fetch('/api/views/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_ids: ids }),
+        keepalive: true
+      }).catch(() => {});
+    } catch { /* view logging is best-effort — never break the page over it */ }
+  }, []);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flushViews();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      flushViews(); // also fires when navigating to another page in the app
+    };
+  }, [flushViews]);
 
   // ── Track window width for responsive column count ─────────────────────────
   useEffect(() => {
@@ -1086,9 +1145,14 @@ export default function Home() {
                 return (
                 <div
                   key={img.id}
+                  data-image-id={img.id}
                   ref={node => {
-                    if (node) tileRefs.current.set(img.id, node);
-                    else tileRefs.current.delete(img.id);
+                    if (node) {
+                      tileRefs.current.set(img.id, node);
+                      viewObserverRef.current?.observe(node); // V14: count as seen once visible
+                    } else {
+                      tileRefs.current.delete(img.id);
+                    }
                   }}
                   onClick={() => {
                     if (tagMode) {

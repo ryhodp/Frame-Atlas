@@ -138,7 +138,8 @@ These are hard-won lessons from debugging. Don't second-guess them.
 
 **API Endpoints (complete)**
 - `/api/images` — all images
-- `/api/search` — AND-filter tag search
+- `/api/search` — AND-filter tag search; optional `seed` param (V14) switches the unfiltered grid to a deterministic shuffled order — images the user viewed in the last 7 days sort below unseen ones; any active filter ignores the seed and stays newest-first
+- `/api/views/log` — POST (V14), body `{image_ids: [...]}`; upserts per-user `image_views` rows (`last_seen_at`, `seen_count`). Frontend batches viewed tiles and flushes only on tab-hide/page-leave so the shuffle order never shifts mid-visit
 - `/api/autocomplete` — tag suggestions, frequency-sorted
 - `/api/sync/status` — current sync state
 - `/api/tag-progress` — tagging progress

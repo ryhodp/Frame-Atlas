@@ -6,6 +6,7 @@ import io
 import gzip
 import sqlite3
 import time
+import zlib
 import threading
 import queue as queue_module
 from array import array
@@ -180,9 +181,17 @@ Phrase: """
 # DATABASE INITIALIZATION
 # ============================================================================
 
+def _shuffle_key(seed, image_id):
+    # Deterministic pseudo-random sort key: the same (seed, image) pair always
+    # produces the same number, so page 2 of a shuffled feed continues exactly
+    # where page 1 left off. A new seed produces a completely different order.
+    # crc32 (unlike Python's hash()) gives identical results across restarts.
+    return zlib.crc32(f'{seed}:{image_id}'.encode())
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.create_function('shuffle_key', 2, _shuffle_key)
     return conn
 
 def init_db():
@@ -355,6 +364,22 @@ def init_db():
             user_id INTEGER NOT NULL,
             image_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, image_id),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (image_id) REFERENCES images(id)
+        )
+    ''')
+
+    # V14: which images each user has actually scrolled past, and when.
+    # The shuffled home feed uses last_seen_at to demote images seen in the
+    # last 7 days so fresh inspiration surfaces first.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS image_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            image_id INTEGER NOT NULL,
+            last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            seen_count INTEGER DEFAULT 1,
             UNIQUE(user_id, image_id),
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (image_id) REFERENCES images(id)
@@ -1750,11 +1775,30 @@ def search():
 
     where = 'WHERE ' + ' AND '.join(conditions)
 
+    # V14: shuffled home feed. When the default (unfiltered) grid sends a seed,
+    # order by a seeded shuffle instead of newest-first. Images the user has
+    # scrolled past in the last 7 days sink below ones they haven't seen lately,
+    # so each visit leads with fresher inspiration. Any active filter switches
+    # back to the normal newest-first ordering.
+    seed = request.args.get('seed', '').strip()
+    is_unfiltered = not (active_chips or nl_groups or color_raw or film_raw)
+    if seed and is_unfiltered:
+        order_by = '''CASE WHEN EXISTS(
+                SELECT 1 FROM image_views iv
+                WHERE iv.user_id = ? AND iv.image_id = images.id
+                  AND iv.last_seen_at > datetime('now', '-7 days')
+            ) THEN 1 ELSE 0 END,
+            shuffle_key(?, images.id)'''
+        order_params = [uid, seed]
+    else:
+        order_by = 'date_added DESC'
+        order_params = []
+
     rows = c.execute(f'''
         SELECT id, filename, thumbnail_blob, caption, aspect_ratio, {fav_flag_cols(uid)}
         FROM images {where}
-        ORDER BY date_added DESC LIMIT ? OFFSET ?
-    ''', params + [per, page * per]).fetchall()
+        ORDER BY {order_by} LIMIT ? OFFSET ?
+    ''', params + order_params + [per, page * per]).fetchall()
     total = c.execute(f'SELECT COUNT(*) FROM images {where}', params).fetchone()[0]
 
     images_out = hydrate_image_rows(c, rows)
@@ -3310,6 +3354,49 @@ def clear_all_flags():
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'cleared': cleared})
+
+# ============================================================================
+# V14: SHUFFLED HOME FEED — VIEW LOG
+# ============================================================================
+
+@app.route('/api/views/log', methods=['POST'])
+def log_image_views():
+    """Record that the logged-in user scrolled past these images just now.
+
+    The frontend batches IDs as tiles enter the viewport and flushes them when
+    the user leaves the page (tab hidden / navigated away). Flushing only on
+    exit — never mid-scroll — keeps the shuffled order stable while paginating:
+    nothing an ORDER BY depends on changes until the visit is over.
+
+    Upsert per image: one row per (user, image), bumping last_seen_at and
+    seen_count on repeat views.
+    """
+    uid = session['user_id']
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get('image_ids', [])
+    if not isinstance(raw_ids, list):
+        return jsonify({'error': 'image_ids must be a list'}), 400
+    ids = [int(i) for i in raw_ids if str(i).isdigit()][:500]
+    if not ids:
+        return jsonify({'logged': 0})
+
+    conn = get_db()
+    c = conn.cursor()
+    ph = ','.join('?' * len(ids))
+    owned = [r[0] for r in c.execute(
+        f'SELECT id FROM images WHERE user_id = ? AND id IN ({ph})', [uid] + ids
+    ).fetchall()]
+    for image_id in owned:
+        c.execute('''
+            INSERT INTO image_views (user_id, image_id, last_seen_at, seen_count)
+            VALUES (?, ?, CURRENT_TIMESTAMP, 1)
+            ON CONFLICT(user_id, image_id)
+            DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP,
+                          seen_count = seen_count + 1
+        ''', (uid, image_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'logged': len(owned)})
 
 @app.route('/api/analytics')
 def analytics():
