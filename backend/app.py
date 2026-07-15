@@ -46,6 +46,17 @@ DB_PATH = '/app/data/library.db'
 # Gemini model — overridable via Railway env var if Google retires this one
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
 
+# USD per 1,000,000 tokens. Every user is expected to run the same
+# GEMINI_MODEL (see get_user_gemini_key) so one entry covers everyone — if
+# that ever changes, add a row here per model.
+GEMINI_PRICING = {
+    'gemini-2.5-flash': {'input': 0.30, 'output': 2.50},
+}
+DEFAULT_GEMINI_PRICING = {'input': 0.30, 'output': 2.50}
+
+def get_model_pricing(model_name):
+    return GEMINI_PRICING.get(model_name, DEFAULT_GEMINI_PRICING)
+
 # Fixed tag category taxonomy — display color/label for each of the 15
 # categories Gemini tags images with. Used by /api/autocomplete,
 # /api/tag-categories, and the bulk tag endpoints below.
@@ -400,6 +411,22 @@ def init_db():
             UNIQUE(user_id, image_id),
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (image_id) REFERENCES images(id)
+        )
+    ''')
+
+    # Per-user Gemini spend: one running-total row per (user, calendar month),
+    # updated in place every time that user's key gets a response back
+    # (tagging or NL search). Powers the "Gemini spend" number on Settings.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS gemini_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            month TEXT NOT NULL,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0,
+            UNIQUE(user_id, month),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
 
@@ -796,26 +823,65 @@ def _broadcast_progress():
             _sse_queues.remove(q)
 
 # ============================================================================
+# GEMINI KEYS & USAGE
+# ============================================================================
+
+def get_user_gemini_key(user_id):
+    """Admin (user 1) rides the shared Railway env key. Everyone else must
+    have saved their own key in Account settings — a friend's AI tagging and
+    NL search run on their own key/budget, never the admin's."""
+    if user_id == 1:
+        return os.environ.get('GEMINI_API_KEY')
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute('SELECT gemini_api_key FROM users WHERE id = ?', (user_id,)).fetchone()
+    conn.close()
+    return row['gemini_api_key'] if row and row['gemini_api_key'] else None
+
+def record_gemini_usage(user_id, usage_metadata, model_name=None):
+    """Adds one API response's token counts to this user's running total for
+    the current calendar month, so Settings can show an estimated spend."""
+    if not usage_metadata:
+        return
+    pricing = get_model_pricing(model_name or GEMINI_MODEL)
+    input_tokens = getattr(usage_metadata, 'prompt_token_count', 0) or 0
+    output_tokens = getattr(usage_metadata, 'candidates_token_count', None)
+    if output_tokens is None:
+        output_tokens = getattr(usage_metadata, 'response_token_count', 0) or 0
+    cost = (input_tokens / 1_000_000) * pricing['input'] + (output_tokens / 1_000_000) * pricing['output']
+
+    month = datetime.utcnow().strftime('%Y-%m')
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO gemini_usage (user_id, month, input_tokens, output_tokens, cost_usd)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, month) DO UPDATE SET
+            input_tokens = input_tokens + excluded.input_tokens,
+            output_tokens = output_tokens + excluded.output_tokens,
+            cost_usd = cost_usd + excluded.cost_usd
+    ''', (user_id, month, input_tokens, output_tokens, cost))
+    conn.commit()
+    conn.close()
+
+# ============================================================================
 # TAGGING WORKER
 # ============================================================================
 
-def _run_tagging_job():
-    gemini_api_key = os.environ.get('GEMINI_API_KEY')
-    if not gemini_api_key:
-        with _tag_progress_lock:
-            _tag_progress.update({'status': 'error', 'message': 'GEMINI_API_KEY not set'})
-        _broadcast_progress()
-        return
-
-    client = genai_client.Client(api_key=gemini_api_key)
-
+def _run_tagging_job_inner(user_id=None):
+    """user_id=None tags every pending/failed image across every owner (the
+    admin's global 'tag now' / post-sync trigger). A specific user_id scopes
+    the run to just that person's own library (friend's 'Tag my photos').
+    Either way, each image is tagged with ITS OWNER's key — owners who
+    haven't saved a key are skipped, their photos left untagged but
+    searchable, at zero cost to anyone."""
     conn = get_db()
     c = conn.cursor()
-
-    c.execute("""
-        SELECT id, thumbnail_blob, filename
+    query = """
+        SELECT id, user_id, thumbnail_blob, filename
         FROM images
         WHERE tagging_status != 'done'
+        {owner_filter}
         ORDER BY
             CASE tagging_status
                 WHEN 'pending' THEN 0
@@ -823,9 +889,31 @@ def _run_tagging_job():
                 ELSE 2
             END,
             id ASC
-    """)
-    images = c.fetchall()
+    """
+    if user_id is not None:
+        rows = c.execute(query.format(owner_filter='AND user_id = ?'), (user_id,)).fetchall()
+    else:
+        rows = c.execute(query.format(owner_filter='')).fetchall()
     conn.close()
+
+    clients = {}
+    images = []
+    for row in rows:
+        owner_id = row['user_id']
+        if owner_id not in clients:
+            key = get_user_gemini_key(owner_id)
+            clients[owner_id] = genai_client.Client(api_key=key) if key else None
+        if clients[owner_id] is not None:
+            images.append(row)
+
+    if not images:
+        with _tag_progress_lock:
+            _tag_progress.update({
+                'running': False, 'status': 'error',
+                'message': 'No Gemini API key available for the queued photos.'
+            })
+        _broadcast_progress()
+        return
 
     with _tag_progress_lock:
         _tag_progress.update({
@@ -840,8 +928,10 @@ def _run_tagging_job():
 
     for img in images:
         img_id = img['id']
+        owner_id = img['user_id']
         thumb_blob = img['thumbnail_blob']
         filename = img['filename']
+        client = clients[owner_id]
 
         try:
             pil_img = Image.open(io.BytesIO(thumb_blob))
@@ -850,6 +940,7 @@ def _run_tagging_job():
                 model=GEMINI_MODEL,
                 contents=[GEMINI_TAGGING_PROMPT, pil_img]
             )
+            record_gemini_usage(owner_id, getattr(response, 'usage_metadata', None))
             raw = response.text.strip()
 
             if raw.startswith('```'):
@@ -874,8 +965,8 @@ def _run_tagging_job():
                         # anywhere tags get grouped (autocomplete, detail
                         # panel, analytics).
                         c.execute(
-                            "INSERT INTO tags (image_id, user_id, category, value) VALUES (?, 1, ?, ?)",
-                            (img_id, category, val.strip().lower())
+                            "INSERT INTO tags (image_id, user_id, category, value) VALUES (?, ?, ?, ?)",
+                            (img_id, owner_id, category, val.strip().lower())
                         )
 
             caption = data.get('caption', '')
@@ -927,11 +1018,21 @@ def _run_tagging_job():
     _broadcast_progress()
 
 
-def trigger_tagging():
+def _run_tagging_job(user_id=None):
+    try:
+        _run_tagging_job_inner(user_id=user_id)
+    except Exception as e:
+        print(f"[tagging] Job failed: {e}")
+        with _tag_progress_lock:
+            _tag_progress.update({'running': False, 'status': 'error', 'message': str(e)})
+        _broadcast_progress()
+
+
+def trigger_tagging(user_id=None):
     with _tag_progress_lock:
         if _tag_progress['running']:
             return
-    t = threading.Thread(target=_run_tagging_job, daemon=True)
+    t = threading.Thread(target=_run_tagging_job, kwargs={'user_id': user_id}, daemon=True)
     t.start()
 
 # ============================================================================
@@ -1623,15 +1724,106 @@ def tag_start():
     trigger_tagging()
     return jsonify({'success': True, 'message': 'Tagging started', 'force': force})
 
+@app.route('/api/account/gemini-key', methods=['GET', 'POST'])
+def account_gemini_key():
+    """Non-admin users save their own Gemini key here (admin rides the shared
+    Railway env var — see get_user_gemini_key). Fully optional: skipping this
+    just means a friend's synced photos stay untagged but searchable."""
+    uid = current_user_id()
+    conn = get_db()
+    c = conn.cursor()
+
+    if request.method == 'POST':
+        key = (request.get_json() or {}).get('key', '').strip()
+        if not key:
+            conn.close()
+            return jsonify({'error': 'No key provided'}), 400
+        c.execute('UPDATE users SET gemini_api_key = ? WHERE id = ?', (key, uid))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'has_key': True, 'key_last4': key[-4:]})
+
+    row = c.execute('SELECT gemini_api_key FROM users WHERE id = ?', (uid,)).fetchone()
+    conn.close()
+    key = row['gemini_api_key'] if row else None
+    return jsonify({'has_key': bool(key), 'key_last4': key[-4:] if key else None})
+
+@app.route('/api/tag/mine', methods=['POST'])
+def tag_mine():
+    """A friend's own 'Tag my photos' trigger — scoped to just their library,
+    always using their own saved key (never the admin's)."""
+    uid = current_user_id()
+    if uid == 1:
+        return jsonify({'error': 'Admin tagging runs automatically after sync.'}), 400
+
+    if not get_user_gemini_key(uid):
+        return jsonify({'error': 'Add your Gemini API key in Account settings first.'}), 400
+
+    with _tag_progress_lock:
+        if _tag_progress['running']:
+            return jsonify({'error': 'Tagging already in progress'}), 400
+
+    trigger_tagging(user_id=uid)
+    return jsonify({'success': True, 'message': 'Tagging started'})
+
+@app.route('/api/tag-progress/mine')
+def tag_progress_mine():
+    """Same shape as the admin-only /api/tag-progress, but scoped so a friend
+    can poll their own 'Tag my photos' run without the admin_required gate."""
+    uid = current_user_id()
+    with _tag_progress_lock:
+        data = dict(_tag_progress)
+    pct = int(data['done'] / data['total'] * 100) if data['total'] > 0 else 0
+
+    conn = get_db()
+    c = conn.cursor()
+    counts = {}
+    for row in c.execute(
+        "SELECT tagging_status, COUNT(*) as n FROM images WHERE user_id = ? GROUP BY tagging_status", (uid,)
+    ).fetchall():
+        counts[row['tagging_status']] = row['n']
+    conn.close()
+
+    return jsonify({**data, 'pct': pct, 'status_counts': counts})
+
+@app.route('/api/billing/spend')
+def billing_spend():
+    """This month's estimated Gemini spend for the logged-in user. Only
+    meaningful for someone with a usable key (admin's shared key, or a
+    friend's own saved key) — everyone else gets a clear next step instead."""
+    uid = current_user_id()
+    if not get_user_gemini_key(uid):
+        return jsonify({
+            'error': 'no_key',
+            'message': 'Add your Gemini API key in Account settings to track your spend.'
+        }), 400
+
+    month = datetime.utcnow().strftime('%Y-%m')
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute(
+        'SELECT input_tokens, output_tokens, cost_usd FROM gemini_usage WHERE user_id = ? AND month = ?',
+        (uid, month)
+    ).fetchone()
+    conn.close()
+
+    return jsonify({
+        'month': month,
+        'input_tokens': row['input_tokens'] if row else 0,
+        'output_tokens': row['output_tokens'] if row else 0,
+        'cost_usd': round(row['cost_usd'], 4) if row else 0.0,
+    })
+
 @app.route('/api/interpret', methods=['POST'])
 def interpret_nl():
     phrase = (request.get_json() or {}).get('phrase', '').strip()
     if not phrase:
         return jsonify({'error': 'No phrase provided'}), 400
 
-    gemini_api_key = os.environ.get('GEMINI_API_KEY')
+    uid = current_user_id()
+    gemini_api_key = get_user_gemini_key(uid)
     if not gemini_api_key:
-        return jsonify({'error': 'GEMINI_API_KEY not set'}), 500
+        return jsonify({'error': 'Add your Gemini API key in Account settings to use natural-language search.'}), 400
 
     try:
         client = genai_client.Client(api_key=gemini_api_key)
@@ -1639,6 +1831,7 @@ def interpret_nl():
             model=GEMINI_MODEL,
             contents=[NL_INTERPRET_PROMPT + phrase]
         )
+        record_gemini_usage(uid, getattr(response, 'usage_metadata', None))
         raw = response.text.strip()
         if raw.startswith('```'):
             raw = raw.split('\n', 1)[1].rsplit('```', 1)[0].strip()

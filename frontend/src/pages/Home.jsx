@@ -26,6 +26,7 @@ export default function Home() {
   const [showAuto, setShowAuto] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [interpreting, setInterpreting] = useState(false);
+  const [nlError, setNlError] = useState('');
   const [images, setImages] = useState([]);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -335,6 +336,7 @@ export default function Home() {
     if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
     setInterpreting(true);
     setShowAuto(false);
+    setNlError('');
     try {
       const res = await fetch('/api/interpret', {
         method: 'POST',
@@ -342,7 +344,9 @@ export default function Home() {
         body: JSON.stringify({ phrase })
       });
       const data = await res.json();
-      if (data.tags && data.tags.length) {
+      if (!res.ok) {
+        setNlError(data.error || 'Could not interpret that phrase.');
+      } else if (data.tags && data.tags.length) {
         setNlChips(prev =>
           prev.some(n => n.phrase === phrase) ? prev : [...prev, { phrase, tags: data.tags }]
         );
@@ -350,6 +354,7 @@ export default function Home() {
       }
     } catch (e) {
       console.error('Interpret failed', e);
+      setNlError('Could not reach the server.');
     }
     setInterpreting(false);
     searchRef.current?.focus();
@@ -579,7 +584,7 @@ export default function Home() {
             <input
               ref={searchRef}
               value={searchText}
-              onChange={e => setSearchText(e.target.value)}
+              onChange={e => { setSearchText(e.target.value); if (nlError) setNlError(''); }}
               onKeyDown={handleSearchKeyDown}
               onFocus={() => { if (autocomplete.length) setShowAuto(true); }}
               placeholder="Search tags — or describe a feeling and press Enter…"
@@ -772,6 +777,12 @@ export default function Home() {
               </div>
             )}
           </div>
+
+          {nlError && (
+            <p style={{ fontSize: '12px', color: '#ffb4ab', margin: '8px 0 0' }}>
+              {nlError}
+            </p>
+          )}
         </div>
 
         {/* Autocomplete dropdown */}

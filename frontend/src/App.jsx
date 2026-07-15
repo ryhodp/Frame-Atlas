@@ -13,6 +13,7 @@ import RegisterPage from './pages/RegisterPage'
 import SetupPage from './pages/SetupPage'
 import AdminInvitesPage from './pages/AdminInvitesPage'
 import AccountPage from './pages/AccountPage'
+import ConnectGuidePage from './pages/ConnectGuidePage'
 import SettingsPage from './pages/SettingsPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import './App.css'
@@ -93,6 +94,7 @@ function Shell() {
           <Route path="/recent" element={<CollectionPage key="recent" view="recent" />} />
           <Route path="/invites" element={user.role === 'admin' ? <AdminInvitesPage /> : <Navigate to="/" replace />} />
           <Route path="/account" element={<AccountPage />} />
+          <Route path="/account/connect-guide" element={<ConnectGuidePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/register" element={<Navigate to="/" replace />} />
