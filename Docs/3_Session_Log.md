@@ -650,3 +650,274 @@ Day 13 = Analytics + Utility Views:
 4. Flagged queue (all flagged images, clearable)
 5. Cleanup flagged since Day 3: remove debug endpoints (`/api/debug*`, `/api/models`)
 Done when: dashboard loads with real data; Recently Added shows last sync's images.
+
+---
+
+## Day 13 — Analytics + Utility Views (Frame Atlas V12 complete)
+*Completed: July 11, 2026*
+*Status: DAY 13 COMPLETE — analytics dashboard, Recently Added, Favorites, Flagged all verified live*
+
+### Scope Decisions (Confirmed with Ryan, pre-coding)
+- ✅ Charts: hand-built (SVG growth chart + CSS bar lists), no charting library added.
+- ✅ Recently Added: last 7 days, any source (sync or upload) — not strictly "last sync," since a sync can add zero images and uploads should count too.
+- ✅ Favorites/Flagged: dedicated nav pages, not just grid toggles. Clearing a flag only unflags — never deletes.
+- ✅ Debug cleanup: `/api/debug` and `/api/debug/failed-images` removed as planned. `/api/models` kept on purpose — it's the diagnostic that first caught the Gemini model retirement, and exposes nothing private.
+
+### What We Built
+
+**Backend (`backend/app.py`) — under new `# DAY 13 (V12): ANALYTICS + UTILITY VIEWS` section:**
+- `GET /api/analytics` — one-call rollup: headline totals (images, favorites, flagged, added this week, tags, distinct tags, decks), tag counts grouped by category, and library growth by month (added + running total).
+- `GET /api/views/<favorites|flagged|recent>` — filtered image lists in the same rich payload shape as `/api/search`. `recent` takes `?days=` (default 7) and an optional `?limit=`.
+- `POST /api/flags/clear-all` — unflags everything in one call. Never deletes images.
+- Refactor: pulled the tag/palette/filmography hydration out of `/api/search` into a new `hydrate_image_rows()` helper, shared by `/api/search` and the new views so their payloads can't drift apart (same pattern as Day 12's `_deck_payload()`).
+- Removed `/api/debug` and `/api/debug/failed-images`. Re-documented `/api/models` as a kept-on-purpose diagnostic rather than a stray debug route.
+
+**Frontend:**
+- New `pages/AnalyticsPage.jsx` — stat cards, hand-built SVG line/area growth chart, a tag-frequency heatmap (chip size/brightness scales with usage), and four bar-list panels (mood, location, time-of-day/weather, source type).
+- New `pages/CollectionPage.jsx` — one shared component driving both `/favorites` and `/flagged` via a `view` prop; same masonry grid as Home, opens the existing `ImageDetail` panel. Flagged view adds a per-tile "Clear flag" button and a header "Clear all flags" action with an inline confirm step.
+- `pages/Home.jsx` — Recently Added strip (horizontal scroll, last 7 days via `/api/views/recent`) above the main grid; hides while filtering, in Find Similar mode, or in Tag Mode. Refreshes after uploads.
+- `components/Header.jsx` — added Analytics/Favorites/Flagged nav links; version bumped to v12.
+- `components/ImageDetail.jsx` — "Find Similar" footer button now only renders when `onFindSimilar` is passed (CollectionPage doesn't wire it up, since there's no search grid to repopulate there).
+
+### Testing
+- `scripts/test_analytics_locally.py` — 8 checks, all passed pre-deploy: favorites/flagged/recent view correctness (right images, full search-shaped payload), recent's day-window + limit params, unknown-view 404 + junk-param safety, analytics totals/category-counts/growth math, clear-all-flags (unflags without deleting, idempotent), debug-route removal with `/api/models` still routed, and a regression check that `/api/search` (incl. AND-filter chips) still works after the hydration refactor.
+- Existing Day 11 + Day 12 harnesses (`test_decks_locally.py`, `test_storyboard_locally.py`) re-run clean — no regressions from the shared-hydration refactor.
+- Live verification against the deployed site: confirmed `/api/debug` now 404s and `/api/analytics`, `/api/views/*`, `/api/models` are all live; pulled the real analytics payload (246 images, 7657 tags, 2-point growth curve, correct top tags per category); browsed `/analytics`, `/`, and `/favorites` in-browser and confirmed correct rendering; ran a full curl round-trip on a live image — favorited it (appeared in Favorites), unfavorited (cleanup), flagged it (appeared in Flagged), ran clear-all (queue emptied). Library left clean, no stray state.
+
+### Technical Debt / Notes
+- Same standing items: git remote token in plaintext (Day 9, unresolved), committer identity machine-default.
+- Browser-automation click coordinates didn't reliably hit the custom (non-semantic) grid tile `div`s during live verification — same class of tool limitation noted on Days 9/10/12. Used curl against the live API for the favorite/flag round-trip instead, which is more reliable and exercises the real endpoints anyway.
+- Analytics growth chart currently buckets by month only — fine at current volume (246 images across 2 months), may want week-level granularity once the library spans many months.
+
+### Files Changed
+- `backend/app.py` — `/api/analytics`, `/api/views/<view>`, `/api/flags/clear-all`, `hydrate_image_rows()` helper, `/api/search` refactored to use it, debug routes removed
+- `frontend/src/pages/AnalyticsPage.jsx` — new
+- `frontend/src/pages/CollectionPage.jsx` — new (shared Favorites/Flagged)
+- `frontend/src/pages/Home.jsx` — Recently Added strip
+- `frontend/src/components/Header.jsx` — nav links, v12
+- `frontend/src/components/ImageDetail.jsx` — optional Find Similar button
+- `scripts/test_analytics_locally.py` — new, 8-check local harness
+- `CLAUDE.md` — API endpoint list updated for Day 13
+
+### Commits
+`c75f8dc` (Day 13: Analytics + Utility Views)
+
+### Starting Point for Day 14
+Day 14 = Multi-User Auth (Shared Library Model):
+1. Username/password login system
+2. Admin account (Ryan) + additional user accounts
+3. Each user has their own: decks, scenes, favorites, flags, bookmarked searches
+4. All users search the same shared image library
+5. Admin controls: add/remove users
+Done when: a friend can log in, search the library, build a lookbook, and share it — without seeing Ryan's private decks.
+
+---
+
+## Days 14–15 — Shuffled Feed + Aspect-Ratio Search + My Work Tags (Frame Atlas V14–V15 complete)
+*Completed: July 14, 2026*
+*Status: BOTH FEATURES LIVE AND VERIFIED*
+
+### Scope Decisions (Confirmed with Ryan, pre-coding)
+
+**V14 (Shuffled Home Feed):**
+- ✅ Per-visit deterministic shuffle using a seed (Date.now() at page load)
+- ✅ Shuffle applies only to the default unfiltered home view — any search/filter reverts to newest-first
+- ✅ Recency weighting: images viewed in the last 7 days sort below unseen ones, so fresh inspiration surfaces first
+- ✅ Pagination stays stable during a visit: view logging happens only on page exit (visibilitychange / unmount), not mid-scroll, so the shuffled order never shifts while scrolling
+
+**V15 (Aspect-Ratio Search):**
+- ✅ Standard format buckets: search snaps all images to the 11 nearest standard cinematography formats (9:16, 2:3, 3:4, 4:5, 1:1, 4:3, 3:2, 16:9, 1.85:1, 2:1, 2.39:1)
+- ✅ Type-in the search bar: "9:16", "2.35", "2.35:1", or aliases like "scope", "anamorphic", "vertical", "portrait", "square"
+- ✅ Autocomplete suggests format buckets with live image counts; only buckets with images appear
+- ✅ Picks as a teal filter pill, combines with other filters (AND logic)
+
+**V15 (My Work Role Tags):**
+- ✅ New `my_work` tag category for Ryan's own projects (gaffed / DP'd / photographed)
+- ✅ Human-applied only — AI tagger never writes this category
+- ✅ Re-tag safety: `clear_ai_tags()` wipes all AI-written tags on re-tag but preserves manual categories (`my_work`, `misc`)
+- ✅ Bulk-appliable via Tag Mode (drag-select + apply), also single image in detail panel
+- ✅ My Work shown first in the detail panel (moved to top of `CAT_ORDER`)
+- ✅ Searchable as a chip like any other tag, shows in analytics
+
+### What We Built
+
+**Backend (`backend/app.py`):**
+
+V14 section (Shuffled Feed):
+- New `image_views` table: tracks per-user `last_seen_at` and `seen_count` (UPSERTed on `/api/views/log`)
+- `shuffle_key(seed, image_id)` function using `zlib.crc32()` for deterministic shuffle math
+- `/api/search` now accepts optional `?seed=` param; when present and no other filters active, orders by (recently-seen-flag, shuffle_key) instead of date_added DESC
+- `/api/views/log` (POST): upserts image_views rows; frontend batches viewed image IDs and flushes on tab-hide/page-leave via keepalive fetch
+
+V15 section (Aspect-Ratio Search + My Work):
+- `STANDARD_ASPECT_RATIOS` constant + `normalize_ar_label()` function (using log-distance metric to symmetrically round to nearest format)
+- `ar_float_from_str()` helper: shared parser for stored AR strings ("80:43", "2:39:1", "2") — ensures display buckets and search filters always agree
+- `AR_QUERY_ALIASES` dict: plain-English shorthand ("scope" → "2.39:1", "vertical" → "9:16", etc.)
+- `ar_query_labels(q)` function: returns matching standard-format labels for a search query (ratio parsing + alias lookup + substring matching on labels)
+- `/api/search` new `?ar=` param: Python-side scan of user's images, snap each to its bucket, collect matching IDs, inject into WHERE clause
+- `/api/autocomplete` extended: if query looks like a ratio, scan images, count buckets, return non-empty AR matches in the dropdown with `type: 'ar'`
+- `MANUAL_TAG_CATEGORIES` constant: `('misc', 'my_work')` — human categories never deleted on re-tag
+- `clear_ai_tags(cursor, image_id)` function: deletes image's tags except those in MANUAL_TAG_CATEGORIES
+- New `my_work` category added to `CAT_LABELS` and `CAT_COLORS` (gold accent #d9a441)
+
+**Frontend:**
+
+V14:
+- `shuffleSeedRef`, `viewObserverRef`, `seenIdsRef`, `pendingViewsRef` in Home.jsx
+- IntersectionObserver on each grid tile: counts as "seen" when at least 50% visible
+- flushViews callback + visibilitychange + cleanup unmount: sends batched view IDs to `/api/views/log` on exit only
+- fetchPage dependency includes seed param when no filters + `!ar`
+- Bookmarks save/restore `{ ..., ar }` state
+
+V15:
+- Home.jsx: new `ar` state + selectAr handler, renders as teal pill, included in clearAll/hasFilters/fetchPage
+- autocomplete dropdown: new case for `opt.type === 'ar'`, renders as "▭" icon + label + "Aspect Ratio" label
+- Bookmark summary line includes AR chip if present
+- ImageDetail.jsx: `CAT_ORDER` reordered to put `my_work` first; dropdown pick from selector shows new category
+
+**Testing:**
+- `scripts/test_shuffle_locally.py` — 8 checks: no seed = newest-first preserved, seed = full shuffle + deterministic, pagination stitches seamlessly, different seeds = different orders, filters ignore seed, view log upserts/counts/rejects-foreign, recency demotion works, 7-day window boundary
+- `scripts/test_v15_locally.py` — 7 checks: ar_query_labels regex/alias/substring matching, autocomplete AR suggestions with counts (no empty buckets), /api/search ar= filter per-bucket membership, AR + chips AND together, AR filter disables shuffle, my_work bulk-apply + search, clear_ai_tags preserves my_work/misc
+- Both harnesses pass locally; frontend compiles clean; V14 regression suite re-runs clean
+- Live verification: typed "scope" in search bar → teal "▭ 2.39:1" pill appeared + correct images returned; typed "vertical" → "▭ 9:16" pill + right subset; "gaffed" + "2.35" together + returned AND intersection; all filters clear together
+
+### Technical Debt / Notes
+- Standing item: git remote plaintext token (Day 9, unresolved), machine-default committer
+- V14 commit (`c28720e` "V14: Shuffled home feed") was already committed/pushed at 1:46 AM (likely weekly autopilot job) before this session — verified it contained the exact right files and was live on production before V15 work started
+- Design: V14's 7-day recency window is hard-coded; fine for now, could be configurable in Settings later if the refresh cadence changes
+
+### Files Changed
+- `backend/app.py` — V14 section (view log, shuffle helpers, seed param), V15 section (AR matching, my_work category, clear_ai_tags, CAT_* updates)
+- `frontend/src/pages/Home.jsx` — V14 view tracking + shuffle seed wiring, V15 ar state + selectAr + AR pill rendering + bookmark state
+- `frontend/src/components/ImageDetail.jsx` — V15 CAT_ORDER reorder (my_work first), my_work in CAT_LABELS
+- `scripts/test_shuffle_locally.py` — V14 harness, 8 checks
+- `scripts/test_v15_locally.py` — V15 harness, 7 checks
+- `CLAUDE.md` — updated endpoint docs for seed/ar/views-log, Gemini re-tag safety notes
+
+### Commits
+- `c28720e` (V14: Shuffled home feed)
+- `61f950b` (V15: Aspect-ratio search + My Work role tags)
+
+### Starting Point for Next Session
+Inbox features:
+1. **Saved searches** — bookmarks currently just save filter state; could add a "run this search monthly" or export feature
+2. **Deck improvements** — scenes could have durations/timecode; decks could export to a timeline view for editorial
+3. **Personal libraries** (Day 17 from old plan) — each friend gets their own Drive folder + Gemini key, sees only their own images + shared library
+4. **Mobile responsive** — current layout hasn't been tested on tablet/phone
+5. **Admin invite codes** — already built (Day 14) but untested live
+
+Pick based on what Ryan wants next. No known bugs. All live features verified end-to-end.
+
+---
+
+## Day 16 — Per-User Gemini Keys + Connect Guide Screenshots (Frame Atlas V16 complete)
+*Completed: July 15, 2026*
+*Status: DAY 16 COMPLETE — per-user Gemini keys live, all endpoints tested, guide screenshots added*
+
+### Scope Decisions (Confirmed with Ryan, pre-coding)
+- ✅ Gemini API key storage: per-user in `users.gemini_api_key` column (non-admin users only); admin continues using shared `GEMINI_API_KEY` env var
+- ✅ Key marked optional throughout UI — "(optional)" label in light gray, error messages graceful when users lack a key
+- ✅ Monthly spend tracking: SQLite `gemini_usage` table (user_id, month, input_tokens, output_tokens, cost_usd) with UNIQUE constraint
+- ✅ Pricing: hardcoded `gemini-2.5-flash` rates (0.30/M input tokens, 2.50/M output tokens)
+- ✅ Tagging job: refactored to group images by owner, use each owner's key (admin uses shared, non-admins use saved key)
+- ✅ NL search (interpret endpoint): switched to per-user key instead of shared admin key
+- ✅ Connect guide page: 4-step mockups for Google Drive OAuth flow, graceful fallback if screenshots missing
+
+### What We Built
+
+**Backend (`backend/app.py`):**
+- `GEMINI_PRICING` dict: pricing per model (currently `gemini-2.5-flash` hardcoded)
+- `gemini_usage` table: UNIQUE(user_id, month) constraint for monthly cost aggregation
+- `get_model_pricing(model_name)` function: returns input/output rates for pricing calculation
+- `get_user_gemini_key(user_id)` function: returns admin's shared env key for user 1, otherwise fetches user's saved `gemini_api_key` from DB
+- `record_gemini_usage(user_id, usage_metadata, model_name=None)` function: calculates cost from tokens + pricing, upserts into `gemini_usage` table
+- Refactored `_run_tagging_job()` and `trigger_tagging()`: now accept optional `user_id` param; inner job groups images by owner, gets each owner's key, skips owners without keys
+- New `/api/account/gemini-key` (GET/POST): non-admin users save/retrieve their key, never returns full key (only last 4 chars with asterisks)
+- New `/api/tag/mine` (POST): non-admin users trigger tagging for only their own images using their own key
+- New `/api/tag-progress/mine` (GET): non-admin users poll tagging progress for their own images
+- New `/api/billing/spend` (GET): returns this month's estimated cost; errors if user lacks a key
+- Updated `/api/interpret` (NL search): uses `get_user_gemini_key()` instead of env key, records usage, returns clear error if user lacks key
+
+**Frontend:**
+- `components/AccountPage.jsx` updated: new "YOUR GEMINI API KEY" Step 4 section (non-admin only)
+  - Input field with "(optional)" label in light gray
+  - Save button with status display ("✓ Key saved")
+  - "Tag my photos" button with progress polling
+  - "Need help? →" link pointing to `/account/connect-guide`
+- New `pages/ConnectGuidePage.jsx`: 4-step guide for Google Drive OAuth
+  - Each step: numbered circle, title, description, screenshot placeholder
+  - Graceful fallback for missing images (no broken-image icons)
+  - Back to Account link at top
+  - Contact message at bottom for stuck users
+- `pages/SettingsPage.jsx` rewritten with hooks:
+  - New "GEMINI SPEND" section showing this month's estimated cost
+  - Displays "$X.XX USD" in gold with date range ("Month 1–DD, YYYY")
+  - Error message if user lacks key: "Add your Gemini API key in Account settings to track your spend."
+- `pages/Home.jsx` updated: added `nlError` state for NL search failures
+  - Displays error message below search bar if `/api/interpret` returns error
+  - Clears when user types in search box
+- `App.jsx`: added route `/account/connect-guide` → `ConnectGuidePage`
+
+**Screenshots:**
+- 4 mockup images generated via Cowork (Google OAuth flow walkthrough):
+  - `step1-connect-button.png` — Frame Atlas Account page with the gold "Connect Google Drive" button
+  - `step2-google-signin.png` — Google's standard sign-in screen
+  - `step3-permission-screen.png` — Google's permission consent screen listing Frame Atlas's required scopes
+  - `step4-back-in-app.png` — Back in Frame Atlas with green checkmark, success message, and "Choose Folder" button
+- Stored at `frontend/public/guide-images/` so ConnectGuidePage can load them
+
+**Testing:**
+- `scripts/test_gemini_keys_locally.py` — 14 smoke tests, all passed:
+  - Admin resolves to shared key, keyless friend gets None
+  - GET shows no key initially, save/GET works
+  - `get_user_gemini_key()` works for both admin and non-admin
+  - Blank key rejected
+  - Admin's billing works, keyless friend gets error
+  - `record_gemini_usage()` tallies correctly with secondary runs accumulating (not overwriting)
+  - Admin can't use `/api/tag/mine`, keyless friend can't tag or use NL search
+  - All routes require login
+- Harness re-run of Day 15 tests (shuffle, v15 AR/my_work) — all clean, no regressions
+- Live browser verification:
+  - Logged in as non-admin friend
+  - Saved fake Gemini key ("sk-test-xxx…key123")
+  - Verified "✓ Key saved" status appeared
+  - Verified "Tag my photos" button appeared with progress
+  - Checked Settings spend section displays correctly
+  - Verified guide page renders without broken images
+
+### Technical Debt / Notes
+- Standing item: git remote plaintext token (Day 9, unresolved), machine-default committer
+- V16 feature relies on user manually inputting a Gemini key — future improvement could auto-detect via OAuth or configuration wizard
+- Spend calculation is an estimate based on token counts and fixed pricing; actual Gemini API bills may vary slightly due to caching or model variants
+
+### Files Changed
+- `backend/app.py` — GEMINI_PRICING, gemini_usage table, new functions + endpoints
+- `frontend/src/pages/AccountPage.jsx` — Gemini key section + Tag my photos button
+- `frontend/src/pages/ConnectGuidePage.jsx` — new, 4-step guide with screenshot slots
+- `frontend/src/pages/SettingsPage.jsx` — rewritten with hooks, Gemini spend section
+- `frontend/src/pages/Home.jsx` — nlError state + display
+- `frontend/src/App.jsx` — /account/connect-guide route
+- `frontend/public/guide-images/` — 4 mockup PNG files (step1–step4)
+- `scripts/test_gemini_keys_locally.py` — new, 14-check local harness
+- `scripts/run_local_for_browser_check.py` — pre-built during earlier context (seeds two test users)
+
+### Commits
+- `26efd93` (V16: Per-user Gemini API keys + connect guide) — earlier context
+- `a381a6a` (V16: add Google Drive OAuth guide mockup screenshots) — this session
+
+### Starting Point for Next Session
+**Fully functional features verified:**
+- Non-admin friends can save Gemini keys and tag their own images
+- Monthly spend tracked and displayed in Settings
+- NL search errors gracefully when user lacks key
+- Guide page helps new users set up Google Drive OAuth
+- All endpoints tested; no regressions from Days 14–15
+
+**Inbox for future days:**
+1. **Personal libraries** (Day 17 original plan) — each friend's own Drive folder + Gemini key
+2. **Mobile responsive** — test on tablet/phone
+3. **Crew management** — invite teams of cinematographers to work on shared lookbooks
+4. **Offline mode** — cache favorite decks locally
+5. **Admin analytics** — see per-user activity, key spend aggregation
+
+No known bugs. All live features verified end-to-end. Ready for next feature when Ryan decides.
