@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 
-// ── Circular progress ring — same visual as SyncManager's, kept single-phase
-// here since Stage 2a only covers Drive sync, not AI tagging yet. ──────────
+// ── Circular progress ring — same visual as SyncManager's. ─────────────────
 function ProgressRing({ pct, size = 96, stroke = 7, color }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
@@ -20,27 +19,21 @@ function ProgressRing({ pct, size = 96, stroke = 7, color }) {
   );
 }
 
-let pickerScriptPromise = null;
-function loadGooglePicker() {
-  if (window.google?.picker) return Promise.resolve();
-  if (!pickerScriptPromise) {
-    pickerScriptPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://apis.google.com/js/api.js';
-      script.onload = () => window.gapi.load('picker', { callback: resolve });
-      script.onerror = () => { pickerScriptPromise = null; reject(new Error('Failed to load Google Picker')); };
-      document.body.appendChild(script);
-    });
-  }
-  return pickerScriptPromise;
-}
-
+// V17: personal libraries connect via "share your folder with the robot
+// email, paste the folder link" — the service account reads it directly.
+// The old Google-Picker path was removed: with the narrow drive.file
+// permission, picking a folder never granted access to the files inside it,
+// so it could not have synced anyone's existing images. The Google sign-in
+// itself survives below as an optional step, still needed for the Upload
+// button (which CREATES files, which drive.file does allow).
 export default function AccountPage() {
   const { isAdmin } = useAuth();
-  const [config, setConfig] = useState(null);
-  const [signedIn, setSignedIn] = useState(null); // null = still checking
-  const [folder, setFolder] = useState(null); // {id, name} or null
-  const [pickerBusy, setPickerBusy] = useState(false);
+  const [setup, setSetup] = useState(null);        // /api/account/setup-status payload
+  const [copied, setCopied] = useState(false);
+  const [folderInput, setFolderInput] = useState('');
+  const [connecting, setConnecting] = useState(false);
+  const [connectMsg, setConnectMsg] = useState(null); // {ok, text}
+  const [signedIn, setSignedIn] = useState(null);  // Google OAuth (uploads) — null = checking
   const [syncing, setSyncing] = useState(false);
   const [syncPct, setSyncPct] = useState(0);
   const [syncMsg, setSyncMsg] = useState('');
@@ -48,25 +41,23 @@ export default function AccountPage() {
   const [error, setError] = useState('');
   const pollRef = useRef(null);
 
-  // Step 4: per-user Gemini key (non-admin only — admin rides the shared
-  // Railway key). Fully optional: skipping it just leaves synced photos
-  // untagged but still searchable by filename/filmography.
+  // Gemini key (non-admin only — admin rides the shared Railway key).
   const [geminiKey, setGeminiKey] = useState('');
-  const [keyStatus, setKeyStatus] = useState(null); // {has_key, key_last4} or null while loading
+  const [keyStatus, setKeyStatus] = useState(null);
   const [savingKey, setSavingKey] = useState(false);
   const [keyMsg, setKeyMsg] = useState('');
   const [tagging, setTagging] = useState(false);
   const [tagMsg, setTagMsg] = useState('');
   const tagPollRef = useRef(null);
 
-  useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(setConfig).catch(() => {});
-    fetch('/api/auth/status').then(r => r.json()).then(d => setSignedIn(!!d.signed_in)).catch(() => setSignedIn(false));
-    fetch('/api/sync/settings').then(r => r.json())
-      .then(d => { if (d.folder_id) setFolder({ id: d.folder_id, name: d.folder_name }); })
-      .catch(() => {});
+  const refreshSetup = () =>
+    fetch('/api/account/setup-status').then(r => r.json()).then(setSetup).catch(() => {});
 
-    // Coming back from the Google sign-in redirect
+  useEffect(() => {
+    refreshSetup();
+    fetch('/api/auth/status').then(r => r.json()).then(d => setSignedIn(!!d.signed_in)).catch(() => setSignedIn(false));
+
+    // Coming back from the Google sign-in redirect (uploads)
     const params = new URLSearchParams(window.location.search);
     if (params.get('signed_in') === '1') {
       setSignedIn(true);
@@ -81,61 +72,49 @@ export default function AccountPage() {
 
   useEffect(() => () => { clearInterval(pollRef.current); clearInterval(tagPollRef.current); }, []);
 
-  const connectGoogle = () => {
-    window.location.href = '/api/auth/google/login';
+  const copyRobotEmail = async () => {
+    if (!setup?.service_account_email) return;
+    try {
+      await navigator.clipboard.writeText(setup.service_account_email);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked — the email is visible and selectable anyway
+    }
   };
 
-  const openFolderPicker = async () => {
-    if (!config?.google_picker_api_key) {
-      setError('The folder picker isn’t set up yet — ask Ryan to finish the Google Cloud setup step.');
-      return;
-    }
-    setError('');
-    setPickerBusy(true);
+  const connectFolder = async () => {
+    const value = folderInput.trim();
+    if (!value || connecting) return;
+    setConnecting(true);
+    setConnectMsg(null);
     try {
-      await loadGooglePicker();
-      const tokenRes = await fetch('/api/drive/picker-token');
-      if (tokenRes.status === 401) {
-        setSignedIn(false);
-        setPickerBusy(false);
-        return;
+      const res = await fetch('/api/sync/connect-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: value })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setConnectMsg({ ok: false, text: data.error || 'Could not connect that folder.' });
+      } else {
+        setConnectMsg({
+          ok: true,
+          text: `Connected “${data.folder_name}”` +
+            (typeof data.image_count === 'number' ? ` — ${data.image_count} image${data.image_count === 1 ? '' : 's'} found.` : '.')
+        });
+        setFolderInput('');
+        setSyncDone(false);
+        refreshSetup();
       }
-      const { access_token } = await tokenRes.json();
-
-      const view = new window.google.picker.DocsView(window.google.picker.ViewId.FOLDERS)
-        .setSelectFolderEnabled(true)
-        .setIncludeFolders(true);
-
-      const picker = new window.google.picker.PickerBuilder()
-        .addView(view)
-        .setOAuthToken(access_token)
-        .setDeveloperKey(config.google_picker_api_key)
-        .setCallback(async (data) => {
-          if (data.action === window.google.picker.Action.PICKED) {
-            const doc = data.docs[0];
-            try {
-              await fetch('/api/sync/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ folder_id: doc.id, folder_name: doc.name })
-              });
-              setFolder({ id: doc.id, name: doc.name });
-              setSyncDone(false);
-            } catch {
-              setError('Picked a folder, but saving it failed — try again.');
-            }
-          }
-        })
-        .build();
-      picker.setVisible(true);
     } catch {
-      setError('Could not open the Google folder picker — try again in a moment.');
+      setConnectMsg({ ok: false, text: 'Could not reach the server.' });
     }
-    setPickerBusy(false);
+    setConnecting(false);
   };
 
   const startSync = async () => {
-    if (!folder || syncing) return;
+    if (!setup?.folder_connected || syncing) return;
     setError('');
     setSyncing(true);
     setSyncDone(false);
@@ -145,7 +124,7 @@ export default function AccountPage() {
       const res = await fetch('/api/sync/start', { method: 'POST' });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.message || (data.error === 'not_signed_in' ? 'Connect Google Drive first.' : data.error) || 'Could not start sync');
+        setError(data.message || data.error || 'Could not start sync');
         setSyncing(false);
         return;
       }
@@ -153,6 +132,10 @@ export default function AccountPage() {
       pollRef.current = setInterval(async () => {
         try {
           const s = await fetch('/api/sync/status').then(r => r.json());
+          if (s.yours === false) {
+            setSyncMsg('Another sync is running — yours will need a retry in a few minutes.');
+            return;
+          }
           const processed = s.processed || 0;
           const total = s.total || 0;
           setSyncPct(total > 0 ? Math.round((processed / total) * 100) : 5);
@@ -168,6 +151,7 @@ export default function AccountPage() {
             setSyncPct(100);
             setSyncMsg(`${processed} image${processed === 1 ? '' : 's'} processed`);
             if (s.errors?.length) setError(s.errors[s.errors.length - 1]);
+            refreshSetup();
           }
         } catch {}
       }, 800);
@@ -230,62 +214,95 @@ export default function AccountPage() {
     }
   };
 
+  const connectGoogle = () => {
+    window.location.href = '/api/auth/google/login';
+  };
+
+  const robotEmail = setup?.service_account_email;
+
   return (
     <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 24px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: '#efeadd' }}>
       <h1 style={{ fontSize: '28px', fontWeight: 700, margin: '0 0 6px' }}>Your Library</h1>
       <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 32px' }}>
-        Connect your own Google Drive folder to bring your photos into Frame Atlas — they're
-        private to you, separate from the shared library.
+        Bring your own Google Drive folder into Frame Atlas — your photos stay
+        private to you, separate from everyone else's.
       </p>
 
-      {/* Step 1: connect Google */}
+      {/* Step 1: share the folder with the robot email */}
       <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a' }}>
-            STEP 1 · GOOGLE DRIVE
+            STEP 1 · SHARE YOUR FOLDER
           </div>
           <Link to="/account/connect-guide" style={{ fontSize: '12px', color: '#c9a253', textDecoration: 'none' }}>
             Need help? →
           </Link>
         </div>
-        {signedIn === null ? (
-          <p style={{ fontSize: '13px', color: '#65625a' }}>Checking…</p>
-        ) : signedIn ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', color: '#7fb87f' }}>
-            <span>✓</span> Google account connected
+        <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.5 }}>
+          In Google Drive, right-click your images folder → <b style={{ color: '#efeadd' }}>Share</b> →
+          paste this email as a <b style={{ color: '#efeadd' }}>Viewer</b>:
+        </p>
+        {robotEmail ? (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+            <code style={{
+              flex: 1, background: '#0f1013', border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: '#dcbd76',
+              fontFamily: "'JetBrains Mono', monospace", overflowWrap: 'anywhere'
+            }}>
+              {robotEmail}
+            </code>
+            <button onClick={copyRobotEmail} style={secondaryBtnStyle(false)}>
+              {copied ? '✓ Copied' : 'Copy'}
+            </button>
           </div>
         ) : (
-          <button onClick={connectGoogle} style={primaryBtnStyle()}>
-            Connect Google Drive
-          </button>
+          <p style={{ fontSize: '13px', color: '#65625a', margin: 0 }}>Loading…</p>
         )}
       </div>
 
-      {/* Step 2: pick a folder */}
-      <div style={{
-        background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px',
-        opacity: signedIn ? 1 : 0.5, pointerEvents: signedIn ? 'auto' : 'none'
-      }}>
+      {/* Step 2: paste the folder link */}
+      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
         <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '10px' }}>
-          STEP 2 · CHOOSE A FOLDER
+          STEP 2 · PASTE THE FOLDER LINK
         </div>
-        {folder && (
+        {setup?.folder_connected && (
           <div style={{
             marginBottom: '12px', padding: '10px 12px', background: 'rgba(201,162,83,0.08)',
             border: '1px solid rgba(201,162,83,0.25)', borderRadius: '8px', fontSize: '13px', color: '#9c988d'
           }}>
-            Selected: <span style={{ color: '#c9a253', fontWeight: 600 }}>📁 {folder.name}</span>
+            Connected: <span style={{ color: '#c9a253', fontWeight: 600 }}>📁 {setup.folder_name}</span>
           </div>
         )}
-        <button onClick={openFolderPicker} disabled={pickerBusy} style={secondaryBtnStyle(pickerBusy)}>
-          {pickerBusy ? 'Opening…' : folder ? 'Choose a different folder' : 'Choose folder'}
-        </button>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+          <input
+            value={folderInput}
+            onChange={e => setFolderInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') connectFolder(); }}
+            placeholder={setup?.folder_connected ? 'Connect a different folder…' : 'https://drive.google.com/drive/folders/…'}
+            style={{
+              flex: 1, background: '#0f1013', border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '8px', padding: '9px 12px', fontSize: '13px', color: '#efeadd',
+              fontFamily: 'inherit', outline: 'none'
+            }}
+          />
+          <button onClick={connectFolder} disabled={!folderInput.trim() || connecting} style={primaryBtnStyle(!folderInput.trim() || connecting)}>
+            {connecting ? 'Checking…' : 'Connect'}
+          </button>
+        </div>
+        <p style={{ fontSize: '11px', color: '#65625a', margin: connectMsg ? '0 0 10px' : 0 }}>
+          Open the folder in Drive and copy the web address from the browser bar.
+        </p>
+        {connectMsg && (
+          <p style={{ fontSize: '12.5px', color: connectMsg.ok ? '#7fb87f' : '#ffb4ab', margin: 0, lineHeight: 1.5 }}>
+            {connectMsg.text}
+          </p>
+        )}
       </div>
 
       {/* Step 3: sync */}
       <div style={{
         background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px',
-        opacity: folder ? 1 : 0.5, pointerEvents: folder ? 'auto' : 'none'
+        opacity: setup?.folder_connected ? 1 : 0.5, pointerEvents: setup?.folder_connected ? 'auto' : 'none'
       }}>
         <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '14px' }}>
           STEP 3 · SYNC
@@ -302,16 +319,20 @@ export default function AccountPage() {
             </div>
           </div>
           <div style={{ flex: 1 }}>
-            <button onClick={startSync} disabled={!folder || syncing} style={{ ...primaryBtnStyle(!folder || syncing), marginBottom: '8px' }}>
+            <button onClick={startSync} disabled={!setup?.folder_connected || syncing} style={{ ...primaryBtnStyle(!setup?.folder_connected || syncing), marginBottom: '8px' }}>
               {syncing ? 'Syncing…' : syncDone ? 'Sync Again' : 'Sync Now'}
             </button>
             {syncMsg && <p style={{ fontSize: '12px', color: '#9c988d', margin: 0 }}>{syncMsg}</p>}
+            {setup?.image_cap && setup?.image_count > 0 && (
+              <p style={{ fontSize: '11px', color: '#65625a', margin: '6px 0 0' }}>
+                {setup.image_count} / {setup.image_cap} images in your library
+              </p>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Step 4: AI tagging (non-admin only — admin's tagging runs on the
-          shared Railway key automatically after sync) */}
+      {/* Step 4: AI tagging key (non-admin only) */}
       {!isAdmin && (
         <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginTop: '16px' }}>
           <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '10px' }}>
@@ -364,6 +385,28 @@ export default function AccountPage() {
         </div>
       )}
 
+      {/* Optional: Google sign-in, only needed for the Upload button */}
+      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginTop: '16px' }}>
+        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '10px' }}>
+          OPTIONAL · UPLOADS
+        </div>
+        <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 14px', lineHeight: 1.5 }}>
+          To use the ⬆ Upload button (adding single images straight from this device into your
+          Drive folder), connect your Google account. Not needed for syncing.
+        </p>
+        {signedIn === null ? (
+          <p style={{ fontSize: '13px', color: '#65625a', margin: 0 }}>Checking…</p>
+        ) : signedIn ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', color: '#7fb87f' }}>
+            <span>✓</span> Google account connected
+          </div>
+        ) : (
+          <button onClick={connectGoogle} style={secondaryBtnStyle(false)}>
+            Connect Google Drive
+          </button>
+        )}
+      </div>
+
       {error && (
         <div style={{
           marginTop: '16px', padding: '10px 12px', background: 'rgba(255,180,171,0.1)',
@@ -374,7 +417,8 @@ export default function AccountPage() {
       )}
 
       <p style={{ fontSize: '11.5px', color: '#65625a', marginTop: '24px', lineHeight: 1.5 }}>
-        Your photos are private to you; nobody else can search or see them.
+        Your photos are private to you; nobody else can search or see them. Sharing as Viewer means
+        Frame Atlas can only ever read your folder — it can't change or delete anything in your Drive.
       </p>
     </div>
   );

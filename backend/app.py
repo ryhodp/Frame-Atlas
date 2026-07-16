@@ -430,6 +430,19 @@ def init_db():
         )
     ''')
 
+    # V17: Drive files a friend deleted from their library. We can't move
+    # files in a folder we only have Viewer access to, so sync skips these
+    # instead — otherwise every deleted image would return on the next sync.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sync_exclusions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            drive_file_id TEXT NOT NULL,
+            UNIQUE(user_id, drive_file_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+
     conn.commit()
 
     try:
@@ -1056,6 +1069,41 @@ def get_drive_service():
 
 REMOVED_FOLDER_NAME = '_Removed'
 
+# V17: personal libraries. Friends share their Drive folder with the service
+# account's email and paste the folder link — no extra Google permissions,
+# no unverified-app warning screens, no 7-day token expiry.
+PERSONAL_LIBRARY_CAP = 1000  # max images per non-admin library (soft cap)
+
+def get_service_account_email():
+    """The service account's email — what friends paste into Drive's Share
+    box so Frame Atlas can read their folder."""
+    creds_json = os.environ.get('GOOGLE_DRIVE_CREDENTIALS')
+    if not creds_json:
+        return None
+    try:
+        return json.loads(creds_json).get('client_email')
+    except Exception:
+        return None
+
+def parse_drive_folder_id(text):
+    """Pull a folder ID out of whatever the user pasted — a full Drive URL
+    (https://drive.google.com/drive/folders/<id>?usp=sharing, /drive/u/0/
+    variants, ?id= form) or the bare ID itself. Returns None if nothing
+    ID-shaped is found."""
+    text = (text or '').strip()
+    if not text:
+        return None
+    m = re.search(r'/folders/([A-Za-z0-9_-]+)', text)
+    if m:
+        return m.group(1)
+    m = re.search(r'[?&]id=([A-Za-z0-9_-]+)', text)
+    if m:
+        return m.group(1)
+    # Bare ID: Drive IDs are long unbroken strings of URL-safe characters
+    if re.fullmatch(r'[A-Za-z0-9_-]{15,}', text):
+        return text
+    return None
+
 # Upload uses a separate OAuth sign-in (acting as Ryan) rather than the
 # read-only service account, since the account needs write access to create
 # files. drive.file is the narrowest scope that allows creating new files —
@@ -1442,29 +1490,46 @@ def sync_folder_worker(folder_id, user_id):
         sync_state['current_file'] = ''
         sync_state['errors'] = []
 
-        # Admin keeps syncing through the shared read-only service account
-        # (unchanged since Day 2/3). Everyone else (Day 14 Stage 2) syncs
-        # through their OWN Google connection, since the service account has
-        # no access to a friend's personal Drive folder at all.
-        if user_id == 1:
-            service = get_drive_service()
-        else:
-            service = get_user_drive_service(user_id)
-            if not service:
-                sync_state['errors'].append('Google Drive is not connected — reconnect and try again.')
-                return
+        # EVERYONE syncs through the shared service account (V17). Friends
+        # share their folder with the service account's email (same as Ryan
+        # did on Day 2) — their own Google sign-in stays drive.file-scoped,
+        # which can only see files the app itself created, so it could never
+        # read a pre-existing folder. Verified against Google's docs before
+        # abandoning the OAuth read path: picking a folder in the Google
+        # Picker grants access to the folder itself, NOT the files inside it.
+        service = get_drive_service()
         print(f"Listing images in folder {folder_id}...")
-        all_images = list_images_in_folder(service, folder_id)
+        try:
+            all_images = list_images_in_folder(service, folder_id)
+        except Exception as e:
+            msg = str(e)
+            if '404' in msg or 'notFound' in msg or '403' in msg or 'insufficient' in msg.lower():
+                sync_state['errors'].append(
+                    'Frame Atlas can\'t see that folder — make sure it\'s shared with '
+                    f'{get_service_account_email() or "the Frame Atlas robot email"} (Share → Viewer), then try again.')
+                return
+            raise
         sync_state['total'] = len(all_images)
 
         conn = get_db()
         c = conn.cursor()
         c.execute('SELECT drive_file_id FROM images WHERE user_id = ?', (user_id,))
         existing_ids = set(row[0] for row in c.fetchall())
+        library_count = len(existing_ids)
+        # Files this user deleted from their library — never re-import (V17)
+        c.execute('SELECT drive_file_id FROM sync_exclusions WHERE user_id = ?', (user_id,))
+        existing_ids |= set(row[0] for row in c.fetchall())
         conn.close()
 
         new_count = 0
         for image in all_images:
+            # Soft cap (V17): friends' thumbnails live in the shared database,
+            # so one giant folder can't balloon storage. Admin is exempt.
+            if user_id != 1 and library_count + new_count >= PERSONAL_LIBRARY_CAP:
+                sync_state['errors'].append(
+                    f'Stopped at the {PERSONAL_LIBRARY_CAP}-image limit — the rest of the '
+                    'folder wasn\'t synced. Ask Ryan if you need more room.')
+                break
             try:
                 file_id = image['id']
                 filename = image['name']
@@ -1529,13 +1594,15 @@ def sync_folder_worker(folder_id, user_id):
         sync_state['errors'].append(f"Sync failed: {str(e)}")
     finally:
         sync_state['in_progress'] = False
-        # Auto-tagging after sync uses the shared admin Gemini key (Day 5) —
-        # only fire it for the admin's own library. Stage 2b will give each
-        # user their own tag-my-photos trigger using their own key; until
-        # then a friend's newly-synced photos just sit untagged (searchable,
-        # zero cost) rather than silently spending the admin's budget.
+        # Auto-tagging after sync: admin rides the shared key (Day 5). A
+        # friend's photos auto-tag too, but ONLY if they've saved their own
+        # Gemini key (V16) — scoped to just their images, on their key, so
+        # it can never spend the admin's budget. Keyless friends' photos sit
+        # untagged (searchable by filename, zero cost) until they add one.
         if user_id == 1:
             trigger_tagging()
+        elif get_user_gemini_key(user_id):
+            trigger_tagging(user_id=user_id)
 
 # ============================================================================
 # API ROUTES
@@ -1562,7 +1629,7 @@ def retry_failed():
 @app.route('/api/config', methods=['GET'])
 def config():
     return jsonify({
-        'app_name': 'Frame Atlas', 'version': 'V5', 'gemini_model': GEMINI_MODEL,
+        'app_name': 'Frame Atlas', 'version': 'V17', 'gemini_model': GEMINI_MODEL,
         # Both safe to expose to any logged-in browser: the OAuth client id
         # is meant to be public (only the client SECRET is sensitive, and
         # that never leaves the server), and the Picker key is restricted
@@ -1626,15 +1693,84 @@ def sync_settings():
         conn.close()
         return jsonify({'success': True})
 
+@app.route('/api/sync/connect-folder', methods=['POST'])
+def connect_folder():
+    """V17: friend pastes their Drive folder link (or bare ID). We check the
+    service account can actually see it — the proof that the Share step was
+    done — then save it as their sync folder and report how many images are
+    waiting inside."""
+    user_id = session['user_id']
+    data = request.get_json(silent=True) or {}
+    folder_id = parse_drive_folder_id(data.get('folder', ''))
+    robot = get_service_account_email() or 'the Frame Atlas robot email'
+
+    if not folder_id:
+        return jsonify({'error': "That doesn't look like a Drive folder link — open the folder "
+                                 'in Google Drive and copy the address from the browser bar.'}), 400
+
+    try:
+        service = get_drive_service()
+        meta = service.files().get(fileId=folder_id, fields='id, name, mimeType').execute()
+    except Exception as e:
+        msg = str(e)
+        if '404' in msg or 'notFound' in msg or '403' in msg or 'insufficient' in msg.lower():
+            return jsonify({'error': f"Frame Atlas can't see that folder yet. In Drive: right-click "
+                                     f'the folder → Share → add {robot} as a Viewer, then try again.',
+                            'not_shared': True}), 403
+        return jsonify({'error': f'Google Drive error: {msg}'}), 500
+
+    if meta.get('mimeType') != 'application/vnd.google-apps.folder':
+        return jsonify({'error': 'That link points to a file, not a folder — paste the link '
+                                 'to the folder that holds your images.'}), 400
+
+    try:
+        image_count = len(list_images_in_folder(service, folder_id))
+    except Exception:
+        image_count = None  # folder itself is visible; count is best-effort
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id FROM sync_settings WHERE user_id = ?', (user_id,))
+    if c.fetchone():
+        c.execute('UPDATE sync_settings SET folder_id = ?, folder_name = ? WHERE user_id = ?',
+                  (folder_id, meta['name'], user_id))
+    else:
+        c.execute('INSERT INTO sync_settings (user_id, folder_id, folder_name) VALUES (?, ?, ?)',
+                  (user_id, folder_id, meta['name']))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'folder_id': folder_id, 'folder_name': meta['name'],
+                    'image_count': image_count})
+
+@app.route('/api/account/setup-status', methods=['GET'])
+def account_setup_status():
+    """V17: everything the Home-page setup checklist and Account page need in
+    one call — robot email to share with, whether a folder is connected,
+    library size, and whether a Gemini key is saved."""
+    user_id = session['user_id']
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT folder_id, folder_name, last_sync FROM sync_settings WHERE user_id = ?', (user_id,))
+    folder = c.fetchone()
+    image_count = c.execute('SELECT COUNT(*) FROM images WHERE user_id = ?', (user_id,)).fetchone()[0]
+    key_row = c.execute('SELECT gemini_api_key FROM users WHERE id = ?', (user_id,)).fetchone()
+    conn.close()
+    return jsonify({
+        'service_account_email': get_service_account_email(),
+        'folder_connected': bool(folder and folder['folder_id']),
+        'folder_name': folder['folder_name'] if folder else None,
+        'last_sync': folder['last_sync'] if folder else None,
+        'image_count': image_count,
+        'image_cap': None if user_id == 1 else PERSONAL_LIBRARY_CAP,
+        'has_gemini_key': user_id == 1 or bool(key_row and key_row['gemini_api_key']),
+    })
+
 @app.route('/api/sync/start', methods=['POST'])
 def start_sync():
     user_id = session['user_id']
 
     if sync_state['in_progress']:
         return jsonify({'error': 'Sync already in progress', 'user_id': sync_state['user_id']}), 400
-
-    if user_id != 1 and not get_user_credentials(user_id):
-        return jsonify({'error': 'not_signed_in', 'message': 'Connect Google Drive first.'}), 400
 
     conn = get_db()
     c = conn.cursor()
@@ -1654,7 +1790,14 @@ def start_sync():
 
 @app.route('/api/sync/status', methods=['GET'])
 def sync_status():
-    return jsonify(sync_state)
+    # One sync runs at a time app-wide. Only the person whose sync it is
+    # (or the admin) sees filenames/errors — another user just learns the
+    # slot is busy, not what's in someone else's Drive folder. (V17)
+    uid = session['user_id']
+    if sync_state['user_id'] in (None, uid) or uid == 1:
+        return jsonify({**sync_state, 'yours': sync_state['user_id'] in (None, uid)})
+    return jsonify({'in_progress': sync_state['in_progress'], 'yours': False,
+                    'processed': 0, 'total': 0, 'current_file': '', 'errors': []})
 
 @app.route('/api/tag-progress/stream')
 @admin_required
@@ -2941,48 +3084,58 @@ def download_image(image_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/images/<int:image_id>', methods=['DELETE'])
-@admin_required
 def delete_image(image_id):
-    """Moves the Drive file into _Removed (recoverable), then removes the image
-    and all its metadata from the library."""
+    """Admin: moves the Drive file into _Removed (recoverable), then removes
+    the image and its metadata from the library. Friends (V17): removes the
+    image from THEIR library only — their Drive file is never touched, since
+    they typically share read-only and own the file anyway."""
+    user_id = session['user_id']
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT drive_file_id, filename FROM images WHERE id = ?', (image_id,))
+    c.execute('SELECT drive_file_id, filename, user_id FROM images WHERE id = ?', (image_id,))
     row = c.fetchone()
     conn.close()
-    if not row:
+    if not row or (user_id != 1 and row['user_id'] != user_id):
         return jsonify({'error': 'Image not found'}), 404
 
-    try:
-        service = get_drive_service()
-        file_id = row['drive_file_id']
-        f = service.files().get(fileId=file_id, fields='parents').execute()
-        prev_parents = ','.join(f.get('parents', []))
-        removed_id = get_or_create_removed_folder(service, get_root_folder_id(1))
-        service.files().update(
-            fileId=file_id,
-            addParents=removed_id,
-            removeParents=prev_parents,
-            fields='id'
-        ).execute()
-    except Exception as e:
-        msg = str(e)
-        if 'insufficient' in msg.lower() or 'permission' in msg.lower() or '403' in msg:
-            return jsonify({
-                'error': ("Drive blocked the move — the service account only has Viewer "
-                          "access. In Drive: right-click the folder → Share → change the "
-                          "service account's role to Editor, then try again.")
-            }), 403
-        return jsonify({'error': f'Could not move file in Drive: {msg}'}), 500
+    if user_id == 1:
+        try:
+            service = get_drive_service()
+            file_id = row['drive_file_id']
+            f = service.files().get(fileId=file_id, fields='parents').execute()
+            prev_parents = ','.join(f.get('parents', []))
+            removed_id = get_or_create_removed_folder(service, get_root_folder_id(1))
+            service.files().update(
+                fileId=file_id,
+                addParents=removed_id,
+                removeParents=prev_parents,
+                fields='id'
+            ).execute()
+        except Exception as e:
+            msg = str(e)
+            if 'insufficient' in msg.lower() or 'permission' in msg.lower() or '403' in msg:
+                return jsonify({
+                    'error': ("Drive blocked the move — the service account only has Viewer "
+                              "access. In Drive: right-click the folder → Share → change the "
+                              "service account's role to Editor, then try again.")
+                }), 403
+            return jsonify({'error': f'Could not move file in Drive: {msg}'}), 500
 
     conn = get_db()
     c = conn.cursor()
     for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography'):
         c.execute(f'DELETE FROM {table} WHERE image_id = ?', (image_id,))
     c.execute('DELETE FROM images WHERE id = ?', (image_id,))
+    if user_id != 1:
+        # The file is still sitting in their Drive folder (we can't move it),
+        # so remember it — otherwise the next sync would re-import it.
+        c.execute('INSERT OR IGNORE INTO sync_exclusions (user_id, drive_file_id) VALUES (?, ?)',
+                  (user_id, row['drive_file_id']))
     conn.commit()
     conn.close()
-    return jsonify({'success': True, 'moved_to': REMOVED_FOLDER_NAME, 'filename': row['filename']})
+    return jsonify({'success': True,
+                    'moved_to': REMOVED_FOLDER_NAME if user_id == 1 else None,
+                    'filename': row['filename']})
 
 # ============================================================================
 # DAY 8 (V7): DUPLICATE DETECTION

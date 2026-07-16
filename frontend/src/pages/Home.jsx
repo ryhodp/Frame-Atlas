@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import ImageDetail from '../components/ImageDetail';
 import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
@@ -33,6 +34,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
   const [winW, setWinW] = useState(window.innerWidth);
+  const [setupStatus, setSetupStatus] = useState(null); // V17: empty-library checklist
 
   const [bookmarks, setBookmarks] = useState([]);
   const [showBookmarks, setShowBookmarks] = useState(false);
@@ -67,6 +69,17 @@ export default function Home() {
   const pendingViewsRef = useRef(new Set()); // queued but not yet sent to the server
 
   const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color || !!film || !!ar;
+
+  // V17: brand-new friend with an empty library → fetch what the setup
+  // checklist needs (folder connected? key saved?). Only fires in the
+  // truly-empty case, never during normal browsing or filtering.
+  useEffect(() => {
+    if (isAdmin || loading || images.length > 0 || hasFilters) return;
+    fetch('/api/account/setup-status')
+      .then(r => r.json())
+      .then(setSetupStatus)
+      .catch(() => {});
+  }, [isAdmin, loading, images.length, hasFilters]);
 
   // ── Fetch one page of results; append=true keeps existing images ───────────
   const fetchPage = useCallback(async (pageNum, append) => {
@@ -1140,8 +1153,79 @@ export default function Home() {
       {/* ── Image grid ──────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
 
+        {/* V17: setup checklist — a friend's library before their first sync */}
+        {!loading && images.length === 0 && !hasFilters && !similarTo && !isAdmin && (
+          <div style={{
+            height: '70%', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: '18px'
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#efeadd', margin: '0 0 6px' }}>
+                Welcome to Frame Atlas
+              </h2>
+              <p style={{ fontSize: '13px', color: '#9c988d', margin: 0 }}>
+                Three steps and your own reference library is live:
+              </p>
+            </div>
+            <div style={{
+              width: 'min(440px, 90%)', background: '#1a1c20',
+              border: '1px solid #44474f', borderRadius: '14px', padding: '10px 8px'
+            }}>
+              {[
+                {
+                  done: !!setupStatus?.folder_connected,
+                  label: 'Connect your Google Drive folder',
+                  sub: setupStatus?.folder_connected ? `📁 ${setupStatus.folder_name}` : 'Share it with the robot email, paste the link'
+                },
+                {
+                  done: false, // library is empty here by definition
+                  label: 'Sync your images',
+                  sub: setupStatus?.folder_connected ? 'One click — pulls everything in the folder' : 'Unlocks after step 1'
+                },
+                {
+                  done: !!setupStatus?.has_gemini_key,
+                  label: 'Add your AI key',
+                  sub: 'Optional — auto-tags photos so you can search by mood, light, color',
+                  optional: true
+                },
+              ].map((step, i) => (
+                <Link key={i} to="/account" style={{
+                  display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 14px',
+                  textDecoration: 'none', borderRadius: '10px',
+                  borderBottom: i < 2 ? '1px solid rgba(255,255,255,0.05)' : 'none'
+                }}>
+                  <div style={{
+                    width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '13px', fontWeight: 700,
+                    background: step.done ? 'rgba(127,184,127,0.15)' : 'rgba(201,162,83,0.1)',
+                    border: `1px solid ${step.done ? 'rgba(127,184,127,0.5)' : 'rgba(201,162,83,0.35)'}`,
+                    color: step.done ? '#7fb87f' : '#c9a253'
+                  }}>
+                    {step.done ? '✓' : i + 1}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13.5px', fontWeight: 600, color: step.done ? '#7fb87f' : '#efeadd' }}>
+                      {step.label}
+                      {step.optional && <span style={{ color: '#65625a', fontWeight: 400 }}> (optional)</span>}
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#65625a', marginTop: '2px' }}>{step.sub}</div>
+                  </div>
+                  <span style={{ color: '#65625a', fontSize: '14px' }}>→</span>
+                </Link>
+              ))}
+            </div>
+            <Link to="/account" style={{
+              background: '#d9a441', color: '#3d2f00', borderRadius: '8px',
+              padding: '10px 20px', fontSize: '13.5px', fontWeight: 600, textDecoration: 'none'
+            }}>
+              Set up my library
+            </Link>
+          </div>
+        )}
+
         {/* Empty state */}
-        {!loading && images.length === 0 && (
+        {!loading && images.length === 0 && (hasFilters || similarTo || isAdmin) && (
           <div style={{
             height: '60%', display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center',
