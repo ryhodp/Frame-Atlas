@@ -62,7 +62,10 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <div style={{ marginTop: '20px', fontSize: '13px', color: '#8e9099', textAlign: 'center' }}>
+      <div style={{ marginTop: '14px', fontSize: '13px', color: '#8e9099', textAlign: 'center' }}>
+        <Link to="/forgot-password" style={{ color: '#d9a441' }}>Forgot password?</Link>
+      </div>
+      <div style={{ marginTop: '10px', fontSize: '13px', color: '#8e9099', textAlign: 'center' }}>
         Have an invite code? <Link to="/register" style={{ color: '#d9a441' }}>Create an account</Link>
       </div>
     </AuthShell>

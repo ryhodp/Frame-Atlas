@@ -7,6 +7,7 @@ export default function RegisterPage() {
   const [searchParams] = useSearchParams();
   const [inviteCode, setInviteCode] = useState(searchParams.get('code') || '');
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -22,7 +23,7 @@ export default function RegisterPage() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invite_code: inviteCode.trim(), username, password })
+        body: JSON.stringify({ invite_code: inviteCode.trim(), username, email, password })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -56,6 +57,15 @@ export default function RegisterPage() {
             style={inputStyle}
           />
         </FormField>
+        <FormField label="Email">
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            style={inputStyle}
+          />
+          <div style={{ fontSize: '11px', color: '#65625a', marginTop: '5px' }}>Used only to reset your password if you forget it</div>
+        </FormField>
         <FormField label="Password">
           <input
             type="password"
@@ -70,8 +80,8 @@ export default function RegisterPage() {
 
         <button
           type="submit"
-          disabled={busy || !inviteCode.trim() || !username || password.length < 8}
-          style={submitStyle(busy || !inviteCode.trim() || !username || password.length < 8)}
+          disabled={busy || !inviteCode.trim() || !username || !email.trim() || password.length < 8}
+          style={submitStyle(busy || !inviteCode.trim() || !username || !email.trim() || password.length < 8)}
         >
           {busy ? 'Creating account…' : 'Create account'}
         </button>

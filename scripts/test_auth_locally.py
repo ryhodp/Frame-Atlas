@@ -4,27 +4,32 @@ login/logout, invite-only registration, admin-only gating, and per-user
 scoping of images/decks/favorites/flags.
 
 Same trick as the other test_*_locally.py scripts: boots a patched copy of
-the server against a throwaway database, loads a couple of REAL images from
-the live site (owned by user 1, standing in for the admin), then drives the
-whole auth flow through Flask's test client. Two SEPARATE test_client()
-instances stand in for two different people's browsers (each keeps its own
-session cookie).
+the server against a throwaway database, seeds it with SYNTHETIC images
+(generated locally with Pillow — the whole app has been login-gated since
+Day 14, so the old trick of pulling real images from the live site no
+longer works without credentials), then drives the whole auth flow through
+Flask's test client. Two SEPARATE test_client() instances stand in for two
+different people's browsers (each keeps its own session cookie).
 
 Usage (from the frame-atlas folder):
     scripts/.venv/bin/python scripts/test_auth_locally.py
 """
 
-import base64
 import importlib.util
+import io
 import os
 import sqlite3
 import tempfile
 
-import requests
-
 REPO = os.path.join(os.path.dirname(__file__), "..")
-SITE = "https://frame-atlas-production.up.railway.app"
 NUM_IMAGES = 2
+
+
+def make_jpeg(mod, color=(200, 60, 40)):
+    img = mod.Image.new("RGB", (160, 90), color)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 def main():
@@ -47,24 +52,23 @@ def main():
     mod.app.config["TESTING"] = True
     print("App imported OK.")
 
-    # Seed two real images owned by user 1 (the admin's pre-existing library).
-    data = requests.get(f"{SITE}/api/search?per={NUM_IMAGES}", timeout=120).json()
-    live = data["images"][:NUM_IMAGES]
-    assert len(live) == NUM_IMAGES, f"Expected {NUM_IMAGES} live images, got {len(live)}"
+    # Seed a couple of synthetic images owned by user 1 (the admin's
+    # pre-existing library).
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    for img in live:
-        blob = base64.b64decode(img["thumbnail"].split(",", 1)[1])
+    image_ids = []
+    for i in range(NUM_IMAGES):
+        blob = make_jpeg(mod)
         c.execute(
-            "INSERT INTO images (id, user_id, drive_file_id, filename, thumbnail_blob, caption, aspect_ratio)"
-            " VALUES (?, 1, ?, ?, ?, ?, ?)",
-            (img["id"], f"test-{img['id']}", img["filename"], blob,
-             img.get("caption"), img.get("aspect_ratio")),
+            "INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, caption, aspect_ratio)"
+            " VALUES (1, ?, ?, ?, ?, ?)",
+            (f"test-file-{i}", f"frame_{i}.jpg", blob, f"Test frame {i}", "16:9"),
         )
+        image_ids.append(c.lastrowid)
     conn.commit()
     conn.close()
-    admin_image_id = live[0]["id"]
-    print(f"Seeded {len(live)} real images owned by user 1 (admin).")
+    admin_image_id = image_ids[0]
+    print(f"Seeded {len(image_ids)} synthetic images owned by user 1 (admin).")
 
     anon = mod.app.test_client()
 
@@ -104,9 +108,11 @@ def main():
     # 6. Wrong/used-up invite codes are rejected; a good one creates a fresh,
     #    empty-library account and logs them in.
     friend = mod.app.test_client()
-    bad = friend.post("/api/auth/register", json={"invite_code": "not-a-real-code", "username": "casey", "password": "friendpass1"})
+    bad = friend.post("/api/auth/register", json={"invite_code": "not-a-real-code", "username": "casey", "email": "casey@example.com", "password": "friendpass1"})
     assert bad.status_code == 400
-    r = friend.post("/api/auth/register", json={"invite_code": code, "username": "casey", "password": "friendpass1"})
+    no_email = friend.post("/api/auth/register", json={"invite_code": code, "username": "casey", "password": "friendpass1"})
+    assert no_email.status_code == 400, "email must be required"
+    r = friend.post("/api/auth/register", json={"invite_code": code, "username": "casey", "email": "casey@example.com", "password": "friendpass1"})
     assert r.status_code == 200, r.get_json()
     friend_me = friend.get("/api/auth/me").get_json()
     assert friend_me["user"]["role"] == "user" and friend_me["user"]["username"] == "casey"
@@ -174,6 +180,29 @@ def main():
     good_login = fresh.post("/api/auth/login", json={"username": "ryan", "password": "correct-horse-1"})
     assert good_login.status_code == 200 and good_login.get_json()["user"]["role"] == "admin"
     print("14. Wrong password rejected; correct password logs the admin back in.")
+
+    # 15. Forgot/reset password: unknown email 404s; known email issues a
+    #     one-time token that actually changes the password and then dies.
+    anon2 = mod.app.test_client()
+    unknown = anon2.post("/api/auth/forgot-password", json={"email": "nobody@example.com"})
+    assert unknown.status_code == 404
+    got = anon2.post("/api/auth/forgot-password", json={"email": "casey@example.com"})
+    assert got.status_code == 200, got.get_json()
+    reset_path = got.get_json()["reset_path"]
+    token = reset_path.split("token=")[1]
+    bad_token = anon2.post("/api/auth/reset-password", json={"token": "not-a-real-token", "password": "whatever12"})
+    assert bad_token.status_code == 400
+    short_pw = anon2.post("/api/auth/reset-password", json={"token": token, "password": "short"})
+    assert short_pw.status_code == 400
+    ok = anon2.post("/api/auth/reset-password", json={"token": token, "password": "newfriendpass1"})
+    assert ok.status_code == 200, ok.get_json()
+    reused = anon2.post("/api/auth/reset-password", json={"token": token, "password": "anotherpass1"})
+    assert reused.status_code == 400, "a used reset token must not work twice"
+    old_login = anon2.post("/api/auth/login", json={"username": "casey", "password": "friendpass1"})
+    assert old_login.status_code == 401, "old password must no longer work"
+    new_login = anon2.post("/api/auth/login", json={"username": "casey", "password": "newfriendpass1"})
+    assert new_login.status_code == 200, new_login.get_json()
+    print("15. Forgot/reset password: unknown email 404s, token is single-use, and it actually changes the password.")
 
     print("\nAll auth checks passed.")
 

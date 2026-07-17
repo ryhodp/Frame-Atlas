@@ -11,7 +11,7 @@ import zlib
 import threading
 import queue as queue_module
 from array import array
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context, redirect, session
 from flask_cors import CORS
@@ -235,6 +235,18 @@ def init_db():
             drive_folder_id TEXT,
             gemini_api_key TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL,
+            used_at TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
 
@@ -638,6 +650,8 @@ PUBLIC_API_ROUTES = {
     '/api/auth/login',
     '/api/auth/register',
     '/api/auth/me',
+    '/api/auth/forgot-password',
+    '/api/auth/reset-password',
     '/api/setup',
     '/api/setup/status',
 }
@@ -775,10 +789,13 @@ def register():
     data = request.get_json(force=True) or {}
     invite_code = (data.get('invite_code') or '').strip()
     username = (data.get('username') or '').strip()
+    email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
 
-    if not invite_code or not username or len(password) < 8:
-        return jsonify({'error': 'Invite code, username, and an 8+ character password are all required'}), 400
+    if not invite_code or not username or not email or len(password) < 8:
+        return jsonify({'error': 'Invite code, username, email, and an 8+ character password are all required'}), 400
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        return jsonify({'error': 'That email address doesn\'t look right'}), 400
 
     conn = get_db()
     c = conn.cursor()
@@ -793,10 +810,13 @@ def register():
     if c.execute('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE', (username,)).fetchone():
         conn.close()
         return jsonify({'error': 'That username is taken'}), 400
+    if c.execute('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE', (email,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'An account with that email already exists'}), 400
 
     c.execute(
-        'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
-        (username, generate_password_hash(password), 'user')
+        'INSERT INTO users (username, password_hash, role, email) VALUES (?, ?, ?, ?)',
+        (username, generate_password_hash(password), 'user', email)
     )
     new_user_id = c.lastrowid
     c.execute(
@@ -809,7 +829,58 @@ def register():
     session['user_id'] = new_user_id
     session['username'] = username
     session['role'] = 'user'
-    return jsonify({'success': True, 'user': {'id': new_user_id, 'username': username, 'email': None, 'role': 'user'}})
+    return jsonify({'success': True, 'user': {'id': new_user_id, 'username': username, 'email': email, 'role': 'user'}})
+
+
+@app.route('/api/auth/forgot-password', methods=['POST'])
+def forgot_password():
+    data = request.get_json(force=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    user = c.execute('SELECT id, username FROM users WHERE email = ? COLLATE NOCASE', (email,)).fetchone()
+    if not user:
+        conn.close()
+        return jsonify({'error': 'No account uses that email address'}), 404
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=1)
+    c.execute(
+        'INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)',
+        (user['id'], token, expires_at)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True, 'username': user['username'], 'reset_path': f'/reset-password?token={token}'})
+
+
+@app.route('/api/auth/reset-password', methods=['POST'])
+def reset_password():
+    data = request.get_json(force=True) or {}
+    token = (data.get('token') or '').strip()
+    password = data.get('password') or ''
+    if not token or len(password) < 8:
+        return jsonify({'error': 'A valid reset link and an 8+ character password are required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    reset = c.execute(
+        'SELECT id, user_id, expires_at, used_at FROM password_resets WHERE token = ?', (token,)
+    ).fetchone()
+    if not reset or reset['used_at'] or datetime.utcnow() > datetime.fromisoformat(reset['expires_at']):
+        conn.close()
+        return jsonify({'error': 'This reset link is invalid or has expired. Request a new one.'}), 400
+
+    c.execute('UPDATE users SET password_hash = ? WHERE id = ?', (generate_password_hash(password), reset['user_id']))
+    c.execute('UPDATE password_resets SET used_at = CURRENT_TIMESTAMP WHERE id = ?', (reset['id'],))
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True})
 
 @app.route('/api/admin/invite-codes', methods=['GET'])
 @admin_required

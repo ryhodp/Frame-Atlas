@@ -110,7 +110,7 @@ admin = mod.app.test_client()
 admin.post("/api/setup", json={"email": "ryan@test.com", "password": "adminpass123"})
 code = admin.post("/api/admin/invite-codes").get_json()["code"]
 friend = mod.app.test_client()
-friend.post("/api/auth/register", json={"invite_code": code, "username": "casey", "password": "friendpass1"})
+friend.post("/api/auth/register", json={"invite_code": code, "username": "casey", "email": "casey@test.com", "password": "friendpass1"})
 
 port = int(os.environ.get("PORT", 8080))
 print(f"Admin login:  ryan@test.com / adminpass123")

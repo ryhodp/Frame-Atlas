@@ -10,6 +10,8 @@ import AnalyticsPage from './pages/AnalyticsPage'
 import CollectionPage from './pages/CollectionPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import SetupPage from './pages/SetupPage'
 import AdminInvitesPage from './pages/AdminInvitesPage'
 import AccountPage from './pages/AccountPage'
@@ -75,6 +77,8 @@ function Shell() {
     return (
       <Routes>
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="*" element={<LoginPage />} />
       </Routes>
     )
@@ -100,6 +104,8 @@ function Shell() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/register" element={<Navigate to="/" replace />} />
+          <Route path="/forgot-password" element={<Navigate to="/" replace />} />
+          <Route path="/reset-password" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
     </div>
