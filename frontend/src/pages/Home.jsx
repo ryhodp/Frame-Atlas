@@ -1411,25 +1411,11 @@ export default function Home() {
                     </span>
                   )}
 
-                  {/* Caption + color palette */}
+                  {/* Color palette — caption is hidden on the grid, shown only in the detail view */}
                   <div style={{
                     position: 'absolute', left: '9px', right: '9px', bottom: '9px',
                     pointerEvents: 'none'
                   }}>
-                    {img.caption && (
-                      <div style={{
-                        fontSize: '10.5px', lineHeight: '1.35',
-                        color: 'rgba(239,234,221,0.9)',
-                        overflow: 'hidden',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        textShadow: '0 1px 3px rgba(0,0,0,0.6)',
-                        marginBottom: '5px'
-                      }}>
-                        {img.caption}
-                      </div>
-                    )}
                     <div style={{ display: 'flex', gap: '3px' }}>
                       {(img.palette || []).slice(0, 5).map((hex, i) => (
                         <span key={i} style={{
