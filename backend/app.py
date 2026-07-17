@@ -533,6 +533,14 @@ def init_db():
     except Exception:
         pass
 
+    # V19: last login timestamp, powers the admin per-user analytics view.
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP")
+        conn.commit()
+        print("[migration] Added last_login_at column to users")
+    except Exception:
+        pass
+
     c.execute("""
         INSERT INTO users (id, username, password_hash)
         SELECT 1, 'ryan', ''
@@ -759,6 +767,11 @@ def login():
 
     if not row or not row['password_hash'] or not check_password_hash(row['password_hash'], password):
         return jsonify({'error': 'Invalid username or password'}), 401
+
+    conn = get_db()
+    conn.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'],))
+    conn.commit()
+    conn.close()
 
     session['user_id'] = row['id']
     session['username'] = row['username']
@@ -4207,6 +4220,62 @@ def analytics():
         'category_colors': CAT_COLORS,
         'growth': growth,
     })
+
+@app.route('/api/analytics/users')
+@admin_required
+def analytics_users():
+    """Admin-only rollup across every account — aggregate totals plus a
+    per-user breakdown (content, storage, activity). Storage is estimated
+    from thumbnail_blob size since that's the only binary data stored
+    per-image; it's an approximation, not an exact DB page count."""
+    conn = get_db()
+    c = conn.cursor()
+
+    users = c.execute('''
+        SELECT id, username, email, role, created_at, last_login_at
+        FROM users ORDER BY id ASC
+    ''').fetchall()
+
+    per_user = []
+    for u in users:
+        uid = u['id']
+        image_count = c.execute('SELECT COUNT(*) FROM images WHERE user_id = ?', (uid,)).fetchone()[0]
+        tag_count = c.execute('SELECT COUNT(*) FROM tags WHERE user_id = ?', (uid,)).fetchone()[0]
+        deck_count = c.execute('SELECT COUNT(*) FROM decks WHERE user_id = ?', (uid,)).fetchone()[0]
+        storage_bytes = c.execute(
+            'SELECT COALESCE(SUM(LENGTH(thumbnail_blob)), 0) FROM images WHERE user_id = ?', (uid,)
+        ).fetchone()[0]
+        sync_row = c.execute(
+            'SELECT folder_name, last_sync FROM sync_settings WHERE user_id = ? ORDER BY id DESC LIMIT 1', (uid,)
+        ).fetchone()
+
+        per_user.append({
+            'id': uid,
+            'name': _display_name(u),
+            'email': u['email'],
+            'role': u['role'],
+            'created_at': u['created_at'],
+            'last_login_at': u['last_login_at'],
+            'image_count': image_count,
+            'image_cap': None if uid == 1 else PERSONAL_LIBRARY_CAP,
+            'tag_count': tag_count,
+            'deck_count': deck_count,
+            'storage_bytes': storage_bytes,
+            'folder_name': sync_row['folder_name'] if sync_row else None,
+            'last_sync': sync_row['last_sync'] if sync_row else None,
+        })
+
+    aggregate = {
+        'total_users': len(users),
+        'total_images': sum(u['image_count'] for u in per_user),
+        'total_storage_bytes': sum(u['storage_bytes'] for u in per_user),
+        'active_last_7_days': c.execute(
+            "SELECT COUNT(*) FROM users WHERE last_login_at >= datetime('now', '-7 days')"
+        ).fetchone()[0],
+    }
+
+    conn.close()
+    return jsonify({'aggregate': aggregate, 'users': per_user})
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

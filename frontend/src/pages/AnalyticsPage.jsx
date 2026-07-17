@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAuth } from '../AuthContext';
 
 // ── Section wrapper — dark panel with an uppercase label ─────────────────────
 function Panel({ label, children, style }) {
@@ -218,8 +219,121 @@ function TagHeatmap({ categories, categoryLabels, maxChips = 40 }) {
   );
 }
 
+// ── Byte size formatting for the storage column ───────────────────────────────
+function formatBytes(bytes) {
+  if (!bytes) return '0 KB';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let val = bytes, i = 0;
+  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
+  return `${val.toFixed(val >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.replace(' ', 'T') + 'Z');
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ── Admin view: every account's usage, storage, and activity ─────────────────
+function AllUsersPanel() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/analytics/users')
+      .then(res => res.json())
+      .then(setData)
+      .catch(err => { console.error('User analytics load failed', err); setError(true); });
+  }, []);
+
+  if (error) {
+    return (
+      <div style={{ padding: '60px 24px', textAlign: 'center', color: '#9c988d', fontSize: '14px' }}>
+        Couldn’t load user analytics — check your connection and refresh.
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div style={{ padding: '60px 24px', textAlign: 'center', color: '#65625a', fontSize: '13px' }}>
+        Crunching the numbers…
+      </div>
+    );
+  }
+
+  const { aggregate, users } = data;
+  const th = {
+    textAlign: 'left', fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
+    color: '#65625a', padding: '0 14px 10px', whiteSpace: 'nowrap'
+  };
+  const td = { fontSize: '12.5px', color: '#c8c3b8', padding: '10px 14px', whiteSpace: 'nowrap' };
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
+        <StatCard label="Total users" value={aggregate.total_users} />
+        <StatCard label="Total images" value={aggregate.total_images} />
+        <StatCard label="Total storage" value={formatBytes(aggregate.total_storage_bytes)} />
+        <StatCard label="Active last 7 days" value={aggregate.active_last_7_days} accent="#b8cea1" />
+      </div>
+
+      <Panel label="PER-USER BREAKDOWN">
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={th}>Name</th>
+                <th style={th}>Role</th>
+                <th style={th}>Images</th>
+                <th style={th}>Tags</th>
+                <th style={th}>Decks</th>
+                <th style={th}>Storage</th>
+                <th style={th}>Drive folder</th>
+                <th style={th}>Last sync</th>
+                <th style={th}>Joined</th>
+                <th style={th}>Last login</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.id} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <td style={{ ...td, color: '#efeadd' }}>{u.name}</td>
+                  <td style={td}>
+                    <span style={{
+                      fontSize: '10.5px', padding: '2px 7px', borderRadius: '5px',
+                      background: u.role === 'admin' ? 'rgba(217,164,65,0.15)' : 'rgba(255,255,255,0.06)',
+                      color: u.role === 'admin' ? '#d9a441' : '#9c988d'
+                    }}>
+                      {u.role}
+                    </span>
+                  </td>
+                  <td style={td}>
+                    {u.image_count}{u.image_cap ? ` / ${u.image_cap}` : ''}
+                  </td>
+                  <td style={td}>{u.tag_count}</td>
+                  <td style={td}>{u.deck_count}</td>
+                  <td style={td}>{formatBytes(u.storage_bytes)}</td>
+                  <td style={{ ...td, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {u.folder_name || '—'}
+                  </td>
+                  <td style={td}>{formatDate(u.last_sync)}</td>
+                  <td style={td}>{formatDate(u.created_at)}</td>
+                  <td style={td}>{formatDate(u.last_login_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function AnalyticsPage() {
+  const { isAdmin } = useAuth();
+  const [tab, setTab] = useState('mine'); // 'mine' | 'all'
   const [data, setData] = useState(null);
   const [error, setError] = useState(false);
 
@@ -246,6 +360,46 @@ export default function AnalyticsPage() {
     );
   }
 
+  return (
+    <div style={{
+      maxWidth: '1200px', margin: '0 auto', padding: '28px 24px 60px',
+      fontFamily: "'Hanken Grotesk', system-ui, sans-serif"
+    }}>
+      <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#efeadd', margin: '0 0 4px' }}>
+        Analytics
+      </h2>
+      <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 20px' }}>
+        {tab === 'mine'
+          ? 'What’s in your library — and what your eye gravitates toward.'
+          : 'Usage across every account — content, storage, and activity.'}
+      </p>
+
+      {isAdmin && (
+        <div style={{ display: 'flex', gap: '4px', marginBottom: '20px' }}>
+          {[{ key: 'mine', label: 'My Library' }, { key: 'all', label: 'All Users' }].map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              style={{
+                background: tab === t.key ? 'rgba(217,164,65,0.15)' : 'transparent',
+                border: `1px solid ${tab === t.key ? 'rgba(217,164,65,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                color: tab === t.key ? '#d9a441' : '#9c988d',
+                borderRadius: '8px', padding: '7px 14px', fontSize: '12.5px',
+                cursor: 'pointer', fontFamily: 'inherit'
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === 'all' && isAdmin ? <AllUsersPanel /> : <MyLibraryPanels data={data} />}
+    </div>
+  );
+}
+
+function MyLibraryPanels({ data }) {
   const { totals, categories, category_labels: labels, category_colors: colors, growth } = data;
 
   // The four distributions Day 13 calls out by name
@@ -257,17 +411,7 @@ export default function AnalyticsPage() {
   ];
 
   return (
-    <div style={{
-      maxWidth: '1200px', margin: '0 auto', padding: '28px 24px 60px',
-      fontFamily: "'Hanken Grotesk', system-ui, sans-serif"
-    }}>
-      <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#efeadd', margin: '0 0 4px' }}>
-        Analytics
-      </h2>
-      <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 24px' }}>
-        What’s in your library — and what your eye gravitates toward.
-      </p>
-
+    <>
       {/* Headline stats */}
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
         <StatCard label="Images" value={totals.images} />
@@ -303,6 +447,6 @@ export default function AnalyticsPage() {
           </Panel>
         ))}
       </div>
-    </div>
+    </>
   );
 }
