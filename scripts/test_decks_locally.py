@@ -2,27 +2,33 @@
 Frame Atlas — local test for the Day 11 decks/scenes backend.
 
 Same trick as test_similar_locally.py / test_tagmode_locally.py: boots a
-patched copy of the server against a throwaway database, loads a handful
-of REAL images from the live site, then exercises the full deck/scene
-lifecycle including the move-vs-copy branching.
+patched copy of the server against a throwaway database, seeds it with a
+handful of SYNTHETIC images (generated locally with Pillow — the whole app
+has been login-gated since Day 14, so the old trick of pulling real images
+from the live site no longer works without credentials), then exercises the
+full deck/scene lifecycle including the move-vs-copy branching.
 
 Usage (from the frame-atlas folder):
     scripts/.venv/bin/python scripts/test_decks_locally.py
 """
 
-import base64
 import importlib.util
+import io
 import os
 import shutil
 import sqlite3
 import sys
 import tempfile
 
-import requests
-
 REPO = os.path.join(os.path.dirname(__file__), "..")
-SITE = "https://frame-atlas-production.up.railway.app"
 NUM_IMAGES = 5
+
+
+def make_jpeg(mod, color=(200, 60, 40)):
+    img = mod.Image.new("RGB", (160, 90), color)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 def main():
@@ -43,22 +49,20 @@ def main():
     spec.loader.exec_module(mod)
     print("App imported OK.")
 
-    data = requests.get(f"{SITE}/api/search?per={NUM_IMAGES}", timeout=120).json()
-    live = data["images"][:NUM_IMAGES]
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    for img in live:
-        blob = base64.b64decode(img["thumbnail"].split(",", 1)[1])
+    ids = []
+    for i in range(NUM_IMAGES):
+        blob = make_jpeg(mod)
         c.execute(
-            "INSERT INTO images (id, user_id, drive_file_id, filename, thumbnail_blob, caption, aspect_ratio)"
-            " VALUES (?, 1, ?, ?, ?, ?, ?)",
-            (img["id"], f"test-{img['id']}", img["filename"], blob,
-             img.get("caption"), img.get("aspect_ratio")),
+            "INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, caption, aspect_ratio)"
+            " VALUES (1, ?, ?, ?, ?, ?)",
+            (f"test-file-{i}", f"frame_{i}.jpg", blob, f"Test frame {i}", "16:9"),
         )
+        ids.append(c.lastrowid)
     conn.commit()
     conn.close()
-    ids = [img["id"] for img in live]
-    print(f"Inserted {len(ids)} real images: {ids}")
+    print(f"Inserted {len(ids)} synthetic images: {ids}")
 
     client = mod.app.test_client()
     setup_r = client.post('/api/setup', json={'email': 'test@test.com', 'password': 'testpass123'})
