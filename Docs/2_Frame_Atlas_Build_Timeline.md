@@ -206,22 +206,19 @@ Sync worker, thumbnail generation, SQLite storage, SyncManager frontend componen
 
 ---
 
-## Day 16 — Fly.io Migration *(infrastructure, no new features)*
+## Day 16 — Fly.io Migration *(CANCELLED — see note)*
 
-**Goal:** Cut Railway, move to Fly.io free tier. Save ~$60/year.
+~~**Goal:** Cut Railway, move to Fly.io free tier. Save ~$60/year.~~
 
-- Install Fly.io CLI, create new app
-- Migrate persistent volume (SQLite + thumbnails)
-- Transfer environment variables (Drive credentials, Gemini key)
-- Update any Railway-specific config
-- Confirm sync worker, cron job, and all endpoints working on Fly.io
-- Decommission Railway project
-
-**Done when:** Frame Atlas runs identically on Fly.io. Railway cancelled.
+**Cancelled July 16, 2026.** Fly.io killed its free tier for new accounts in
+October 2024 — a small always-on app there now runs ~$2–5/month, roughly the
+same as Railway. Migrating would be a day of infrastructure risk for near-zero
+savings. Staying on Railway until the real $0/month move: Day 18 (NAS), once
+hardware is ready. No Fly.io work planned before then.
 
 ---
 
-## Day 17 — Personal Libraries per User *(Optional upgrade)*
+## Day 17 — Personal Libraries per User *(COMPLETE — see Session Log)*
 
 **Goal:** Each user connects their own image source and has an isolated library.
 
@@ -231,6 +228,14 @@ Sync worker, thumbnail generation, SQLite storage, SyncManager frontend componen
 - Fully isolated images, tags, decks per user
 
 **Done when:** A friend can connect their own folder and have a completely separate library.
+
+**Shipped July 16, 2026 (V17).** Built differently than originally scoped:
+folder access goes through the shared service account (friends share their
+Drive folder with the robot email + paste the link), NOT Google OAuth — OAuth's
+`drive.file` scope was verified to only grant access to files the app itself
+creates, so it could never have read a friend's existing folder. Per-user
+Gemini keys shipped separately as V16 the day before. Full detail in the
+Session Log.
 
 ---
 

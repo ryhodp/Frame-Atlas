@@ -921,3 +921,30 @@ Pick based on what Ryan wants next. No known bugs. All live features verified en
 5. **Admin analytics** — see per-user activity, key spend aggregation
 
 No known bugs. All live features verified end-to-end. Ready for next feature when Ryan decides.
+
+---
+
+## Day 16 (cont'd) — Fly.io Cancelled, V17 Confirmed Shipped, Loose Ends Queued
+*Session: July 16, 2026*
+*Status: PLANNING/HOUSEKEEPING SESSION — no new features built here*
+
+### What Happened This Session
+- Reviewed where things stood coming off V16 (per-user Gemini keys + connect guide).
+- Confirmed V17 (Personal Libraries) had already shipped, in a parallel session — commit `e4673bc` ("V17: Personal libraries — friends sync their own Drive folder") was already on `main` at the start of this session. `CLAUDE.md` already fully documents the V17 architecture (service-account-based folder sync, per-user isolation, setup checklist). Timeline doc updated to reflect this as COMPLETE.
+- Ryan picked "Day 16 (Fly.io) + Day 17 (Personal Libraries)" as the session goal, then — once reminded Day 17 was already done — cancelled Day 16 outright: Fly.io killed its free tier for new accounts in October 2024, so a small always-on app there now costs roughly the same as Railway. The ~$60/year savings the original Day 16 plan was built around no longer exists. **Decision: stay on Railway indefinitely. The next real infrastructure move is Day 18 (NAS migration) once the Ugreen hardware is ready — no Fly.io work planned before then.**
+- Updated `/Docs/2_Frame_Atlas_Build_Timeline.md`: Day 16 marked CANCELLED with the reasoning above; Day 17 marked COMPLETE with a note that the actual build diverged from the original OAuth plan (ended up as service-account sync, because `drive.file` OAuth scope can't see a friend's pre-existing files — see [[drive-file-scope-picker-limitation]] in memory).
+
+### Background Task (Parallel Session, Started by Ryan)
+- A separate session (`task_05a44549`, "Fix test harnesses broken by Day 14 login gate") ran concurrently with this one. Cause: `scripts/test_analytics_locally.py`, `test_decks_locally.py`, `test_storyboard_locally.py` all used to seed their test data by pulling real images from the live production site over a plain unauthenticated request — since Day 14 login-gated the whole app, that request now fails, so all three harnesses had been silently broken since Day 14. Fix: all three now generate synthetic JPEG test images locally with Pillow instead of depending on the live site.
+- **Status at end of this session: changes are on disk but UNCOMMITTED.** `git diff --stat`: 3 files changed, +80/-62. Needs review + commit next session (or sooner, if Ryan wants it done now).
+
+### Loose Ends Found This Session (Not Touched)
+- `Frame Atlas.html` — untracked, 354KB, repo root, dated June 25, titled "Bundled Page." Not part of the documented file structure (the real design reference lives at `/docs/Frame_Atlas.html`). Likely a stray export — flagged for Ryan to confirm before deleting.
+- `scripts/test_auth_locally.py.bak_check` — untracked, 0 bytes, dated July 11. Empty debris file, same treatment: flagged, not deleted.
+- Standing unresolved items carried forward, unchanged this session: git remote has a plaintext GitHub token embedded (Day 9), git committer identity is still machine-default (Day 8).
+
+### Starting Point for Next Session
+1. Review and commit the login-gate test-harness fixes from `task_05a44549` if not already committed.
+2. Confirm the two stray files above are safe to delete, then remove them.
+3. Pick from the open inbox (carried from Day 16/V16): mobile responsive pass, admin per-user analytics, crew/team management for shared lookbooks, offline deck caching, a refreshed connect-guide screenshot set for the new V17 share-folder flow.
+4. Day 18 (NAS migration) stays parked until hardware is ready — no Fly.io or other infra work before then.
