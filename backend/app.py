@@ -443,6 +443,37 @@ def init_db():
         )
     ''')
 
+    # V18: view-only crew members on a deck (distinct from the anonymous,
+    # loginless /share/<token> link — a deck_members row is a real account
+    # with permanent access, tracked so the owner can see and revoke it).
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS deck_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(deck_id, user_id),
+            FOREIGN KEY (deck_id) REFERENCES decks(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+
+    # V18: activity feed for a deck (who did what, when). Only the owner can
+    # write to a deck, so user_id here is always the owner — except for the
+    # 'invited'/'joined' rows, which record the two sides of a member joining.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS deck_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            detail TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (deck_id) REFERENCES decks(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+
     conn.commit()
 
     try:
@@ -477,6 +508,16 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN email TEXT")
         conn.commit()
         print("[migration] Added email column")
+    except Exception:
+        pass
+
+    # V18: reusable "join this deck as a viewer" link, separate from the
+    # anonymous share_token — accepting it requires login and creates a
+    # deck_members row.
+    try:
+        c.execute("ALTER TABLE decks ADD COLUMN invite_token TEXT")
+        conn.commit()
+        print("[migration] Added invite_token column to decks")
     except Exception:
         pass
 
@@ -3270,14 +3311,54 @@ def _fetch_image_dict(c, image_id, owner_user_id):
 
     return build_image_dict(row, tags, palette, filmography)
 
+def _display_name(row):
+    """Best-effort human label for a user row: username, falling back to
+    email (or a generic id label) if somehow both are blank."""
+    if not row:
+        return 'Unknown'
+    return row['username'] or row['email'] or f"user {row['id']}"
+
+def _deck_access(c, deck_id, user_id):
+    """Returns (deck_row, is_owner) if this user can VIEW the deck — either
+    because they own it or because they're an invited view-only member.
+    Returns (None, False) if neither. Callers that only allow edits (rename,
+    add/remove photos, etc.) should keep using the stricter
+    `user_id = session['user_id']` owner-only check instead of this."""
+    deck_row = c.execute(
+        'SELECT id, name, created_at, share_token, invite_token, user_id FROM decks WHERE id = ?', (deck_id,)
+    ).fetchone()
+    if not deck_row:
+        return None, False
+    if deck_row['user_id'] == user_id:
+        return deck_row, True
+    is_member = c.execute(
+        'SELECT 1 FROM deck_members WHERE deck_id = ? AND user_id = ?', (deck_id, user_id)
+    ).fetchone()
+    if is_member:
+        return deck_row, False
+    return None, False
+
+def log_deck_activity(c, deck_id, action, detail=None):
+    """Appends one row to the deck's activity feed, attributed to whoever's
+    logged in right now. Only the deck owner can call the write endpoints
+    this is hooked into, so `action` almost always describes an owner edit —
+    the exception is 'invited'/'joined', which fire for the two sides of a
+    member joining."""
+    c.execute(
+        'INSERT INTO deck_activity (deck_id, user_id, action, detail) VALUES (?, ?, ?, ?)',
+        (deck_id, session['user_id'], action, detail)
+    )
+
 @app.route('/api/decks', methods=['GET'])
 def list_decks():
     conn = get_db()
     c = conn.cursor()
-    deck_rows = c.execute(
-        'SELECT id, name, created_at FROM decks WHERE user_id = ? ORDER BY created_at DESC',
-        (session['user_id'],)
-    ).fetchall()
+    deck_rows = c.execute('''
+        SELECT d.id, d.name, d.created_at, d.user_id, (d.user_id = ?) AS is_owner
+        FROM decks d
+        WHERE d.user_id = ? OR d.id IN (SELECT deck_id FROM deck_members WHERE user_id = ?)
+        ORDER BY d.created_at DESC
+    ''', (session['user_id'], session['user_id'], session['user_id'])).fetchall()
 
     decks_out = []
     for d in deck_rows:
@@ -3302,12 +3383,19 @@ def list_decks():
             if len(preview_thumbnails) >= 4:
                 break
 
+        owner_name = None
+        if not d['is_owner']:
+            owner_row = c.execute('SELECT id, username, email FROM users WHERE id = ?', (d['user_id'],)).fetchone()
+            owner_name = _display_name(owner_row)
+
         decks_out.append({
             'id': d['id'],
             'name': d['name'],
             'created_at': d['created_at'],
             'image_count': image_count,
-            'preview_thumbnails': preview_thumbnails
+            'preview_thumbnails': preview_thumbnails,
+            'is_owner': bool(d['is_owner']),
+            'owner_name': owner_name,
         })
 
     conn.close()
@@ -3350,6 +3438,7 @@ def update_deck(deck_id):
         return jsonify({'error': 'Deck not found'}), 404
 
     c.execute('UPDATE decks SET name = ? WHERE id = ?', (name, deck_id))
+    log_deck_activity(c, deck_id, 'renamed', name)
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -3364,6 +3453,8 @@ def delete_deck(deck_id):
 
     c.execute('DELETE FROM deck_images WHERE deck_id = ?', (deck_id,))
     c.execute('DELETE FROM scenes WHERE deck_id = ?', (deck_id,))
+    c.execute('DELETE FROM deck_members WHERE deck_id = ?', (deck_id,))
+    c.execute('DELETE FROM deck_activity WHERE deck_id = ?', (deck_id,))
     c.execute('DELETE FROM decks WHERE id = ?', (deck_id,))
     conn.commit()
     conn.close()
@@ -3373,17 +3464,155 @@ def delete_deck(deck_id):
 def get_deck(deck_id):
     conn = get_db()
     c = conn.cursor()
-    deck_row = c.execute(
-        'SELECT id, name, created_at, share_token, user_id FROM decks WHERE id = ? AND user_id = ?',
-        (deck_id, session['user_id'])
-    ).fetchone()
+    deck_row, is_owner = _deck_access(c, deck_id, session['user_id'])
     if not deck_row:
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
 
     payload = _deck_payload(c, deck_row)
+    payload['is_owner'] = is_owner
+    owner_row = c.execute('SELECT id, username, email FROM users WHERE id = ?', (deck_row['user_id'],)).fetchone()
+    payload['owner_name'] = _display_name(owner_row)
     conn.close()
     return jsonify(payload)
+
+@app.route('/api/decks/<int:deck_id>/members', methods=['GET'])
+def list_deck_members(deck_id):
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    rows = c.execute('''
+        SELECT u.id, u.username, u.email, dm.added_at
+        FROM deck_members dm JOIN users u ON u.id = dm.user_id
+        WHERE dm.deck_id = ? ORDER BY dm.added_at ASC
+    ''', (deck_id,)).fetchall()
+    conn.close()
+    return jsonify([
+        {'user_id': r['id'], 'name': _display_name(r), 'email': r['email'], 'added_at': r['added_at']}
+        for r in rows
+    ])
+
+@app.route('/api/decks/<int:deck_id>/invite', methods=['POST'])
+def invite_to_deck(deck_id):
+    """Adds an existing Frame Atlas user as a view-only member by email —
+    there's no outgoing email sent, this just looks up an account that
+    already exists (same as any other admin-lookup pattern in this app)."""
+    data = request.get_json(force=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'email is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    target = c.execute('SELECT id, username, email FROM users WHERE LOWER(email) = ?', (email,)).fetchone()
+    if not target:
+        conn.close()
+        return jsonify({
+            'error': 'no_account',
+            'message': "No Frame Atlas account uses that email — send them the invite link instead."
+        }), 404
+    if target['id'] == session['user_id']:
+        conn.close()
+        return jsonify({'error': 'That is your own account.'}), 400
+
+    c.execute('INSERT OR IGNORE INTO deck_members (deck_id, user_id) VALUES (?, ?)', (deck_id, target['id']))
+    log_deck_activity(c, deck_id, 'invited', _display_name(target))
+    conn.commit()
+    conn.close()
+    return jsonify({'user_id': target['id'], 'name': _display_name(target), 'email': target['email']})
+
+@app.route('/api/decks/<int:deck_id>/members/<int:user_id>', methods=['DELETE'])
+def remove_deck_member(deck_id, user_id):
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    c.execute('DELETE FROM deck_members WHERE deck_id = ? AND user_id = ?', (deck_id, user_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/decks/<int:deck_id>/invite-link', methods=['POST', 'DELETE'])
+def deck_invite_link(deck_id):
+    """A reusable "join as a viewer" link — separate from the anonymous,
+    loginless /share/<token> link. Opening this one requires being logged in
+    and turns into a permanent deck_members row (visible to the owner,
+    revocable one at a time), rather than just viewing without an account."""
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute(
+        'SELECT invite_token FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])
+    ).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    if request.method == 'DELETE':
+        c.execute('UPDATE decks SET invite_token = NULL WHERE id = ?', (deck_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'invite_token': None})
+
+    token = row['invite_token']
+    if not token:
+        token = secrets.token_urlsafe(16)
+        c.execute('UPDATE decks SET invite_token = ? WHERE id = ?', (token, deck_id))
+        conn.commit()
+    conn.close()
+    return jsonify({'invite_token': token, 'invite_path': f'/invite/{token}'})
+
+@app.route('/api/decks/invite/<token>/accept', methods=['POST'])
+def accept_deck_invite(token):
+    conn = get_db()
+    c = conn.cursor()
+    deck_row = c.execute('SELECT id, name, user_id FROM decks WHERE invite_token = ?', (token,)).fetchone()
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Invite link not found or revoked'}), 404
+
+    if deck_row['user_id'] == session['user_id']:
+        conn.close()
+        return jsonify({'deck_id': deck_row['id'], 'name': deck_row['name']})
+
+    already = c.execute(
+        'SELECT 1 FROM deck_members WHERE deck_id = ? AND user_id = ?', (deck_row['id'], session['user_id'])
+    ).fetchone()
+    c.execute('INSERT OR IGNORE INTO deck_members (deck_id, user_id) VALUES (?, ?)', (deck_row['id'], session['user_id']))
+    if not already:
+        me = c.execute('SELECT id, username, email FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+        log_deck_activity(c, deck_row['id'], 'joined', _display_name(me))
+    conn.commit()
+    conn.close()
+    return jsonify({'deck_id': deck_row['id'], 'name': deck_row['name']})
+
+@app.route('/api/decks/<int:deck_id>/activity', methods=['GET'])
+def deck_activity(deck_id):
+    conn = get_db()
+    c = conn.cursor()
+    deck_row, _is_owner = _deck_access(c, deck_id, session['user_id'])
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    rows = c.execute('''
+        SELECT da.action, da.detail, da.created_at, u.username, u.email
+        FROM deck_activity da JOIN users u ON u.id = da.user_id
+        WHERE da.deck_id = ? ORDER BY da.id DESC LIMIT 50
+    ''', (deck_id,)).fetchall()
+    conn.close()
+    return jsonify([
+        {'action': r['action'], 'detail': r['detail'], 'created_at': r['created_at'], 'actor': _display_name(r)}
+        for r in rows
+    ])
 
 def _deck_payload(c, deck_row):
     """Full deck JSON: deck info + ordered scenes + flat image list. Shared by
@@ -3448,6 +3677,7 @@ def create_scene():
     ).fetchone()[0]
     c.execute('INSERT INTO scenes (deck_id, name, sort_order) VALUES (?, ?, ?)', (deck_id, name, next_order))
     scene_id = c.lastrowid
+    log_deck_activity(c, deck_id, 'added_scene', name)
     conn.commit()
     conn.close()
 
@@ -3460,10 +3690,11 @@ def update_scene(scene_id):
 
     conn = get_db()
     c = conn.cursor()
-    if not c.execute(
-        'SELECT 1 FROM scenes s JOIN decks d ON d.id = s.deck_id WHERE s.id = ? AND d.user_id = ?',
+    scene_row = c.execute(
+        'SELECT s.deck_id FROM scenes s JOIN decks d ON d.id = s.deck_id WHERE s.id = ? AND d.user_id = ?',
         (scene_id, session['user_id'])
-    ).fetchone():
+    ).fetchone()
+    if not scene_row:
         conn.close()
         return jsonify({'error': 'Scene not found'}), 404
     if not name:
@@ -3471,6 +3702,7 @@ def update_scene(scene_id):
         return jsonify({'error': 'name is required'}), 400
 
     c.execute('UPDATE scenes SET name = ? WHERE id = ?', (name, scene_id))
+    log_deck_activity(c, scene_row['deck_id'], 'renamed_scene', name)
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -3479,15 +3711,17 @@ def update_scene(scene_id):
 def delete_scene(scene_id):
     conn = get_db()
     c = conn.cursor()
-    if not c.execute(
-        'SELECT 1 FROM scenes s JOIN decks d ON d.id = s.deck_id WHERE s.id = ? AND d.user_id = ?',
+    scene_row = c.execute(
+        'SELECT s.deck_id, s.name FROM scenes s JOIN decks d ON d.id = s.deck_id WHERE s.id = ? AND d.user_id = ?',
         (scene_id, session['user_id'])
-    ).fetchone():
+    ).fetchone()
+    if not scene_row:
         conn.close()
         return jsonify({'error': 'Scene not found'}), 404
 
     c.execute('DELETE FROM deck_images WHERE scene_id = ?', (scene_id,))
     c.execute('DELETE FROM scenes WHERE id = ?', (scene_id,))
+    log_deck_activity(c, scene_row['deck_id'], 'deleted_scene', scene_row['name'])
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -3537,6 +3771,8 @@ def add_images_to_deck(deck_id):
         next_order += 1
         added += 1
 
+    if added:
+        log_deck_activity(c, deck_id, 'added_photos', f"{added} photo{'s' if added != 1 else ''}")
     conn.commit()
     conn.close()
     return jsonify({'added': added, 'already_in_deck': already_in_deck, 'invalid_ids': invalid_ids})
@@ -3577,13 +3813,17 @@ def move_deck_image(deck_image_id):
     if target_scene_id is None:
         # Dropping into Unsorted: simple move.
         c.execute('UPDATE deck_images SET scene_id = NULL WHERE id = ?', (deck_image_id,))
+        log_deck_activity(c, row['deck_id'], 'moved_photo', 'Unsorted')
         conn.commit()
         conn.close()
         return jsonify({'action': 'moved'})
 
+    target_name = c.execute('SELECT name FROM scenes WHERE id = ?', (target_scene_id,)).fetchone()['name']
+
     if current_scene_id is None:
         # Moving out of Unsorted into a named scene: simple move.
         c.execute('UPDATE deck_images SET scene_id = ? WHERE id = ?', (target_scene_id, deck_image_id))
+        log_deck_activity(c, row['deck_id'], 'moved_photo', target_name)
         conn.commit()
         conn.close()
         return jsonify({'action': 'moved'})
@@ -3599,6 +3839,7 @@ def move_deck_image(deck_image_id):
         VALUES (?, ?, ?, ?, ?)
     ''', (row['deck_id'], target_scene_id, row['image_id'], next_order, row['storyboard_note']))
     new_deck_image_id = c.lastrowid
+    log_deck_activity(c, row['deck_id'], 'copied_photo', target_name)
     conn.commit()
     conn.close()
     return jsonify({'action': 'copied', 'new_deck_image_id': new_deck_image_id})
@@ -3607,14 +3848,16 @@ def move_deck_image(deck_image_id):
 def delete_deck_image(deck_image_id):
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('''
-        SELECT 1 FROM deck_images di JOIN decks d ON d.id = di.deck_id
+    row = c.execute('''
+        SELECT di.deck_id FROM deck_images di JOIN decks d ON d.id = di.deck_id
         WHERE di.id = ? AND d.user_id = ?
-    ''', (deck_image_id, session['user_id'])).fetchone():
+    ''', (deck_image_id, session['user_id'])).fetchone()
+    if not row:
         conn.close()
         return jsonify({'error': 'deck image not found'}), 404
 
     c.execute('DELETE FROM deck_images WHERE id = ?', (deck_image_id,))
+    log_deck_activity(c, row['deck_id'], 'removed_photo')
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -3634,14 +3877,16 @@ def set_deck_image_note(deck_image_id):
 
     conn = get_db()
     c = conn.cursor()
-    if not c.execute('''
-        SELECT 1 FROM deck_images di JOIN decks d ON d.id = di.deck_id
+    row = c.execute('''
+        SELECT di.deck_id FROM deck_images di JOIN decks d ON d.id = di.deck_id
         WHERE di.id = ? AND d.user_id = ?
-    ''', (deck_image_id, session['user_id'])).fetchone():
+    ''', (deck_image_id, session['user_id'])).fetchone()
+    if not row:
         conn.close()
         return jsonify({'error': 'deck image not found'}), 404
 
     c.execute('UPDATE deck_images SET storyboard_note = ? WHERE id = ?', (note, deck_image_id))
+    log_deck_activity(c, row['deck_id'], 'edited_note')
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'note': note})

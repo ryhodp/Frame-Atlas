@@ -216,18 +216,35 @@ function DeckCard({ deck, onOpen, onDelete }) {
         e.currentTarget.style.boxShadow = 'none';
       }}
     >
-      <button
-        onClick={e => { e.stopPropagation(); onDelete(); }}
-        title="Delete deck"
-        style={{
-          position: 'absolute', top: '10px', right: '10px',
-          background: 'rgba(0,0,0,0.5)', border: 'none',
-          color: '#ffb4ab', borderRadius: '6px',
-          width: '24px', height: '24px',
-          cursor: 'pointer', fontSize: '15px', lineHeight: 1,
-          zIndex: 2
-        }}
-      >×</button>
+      {deck.is_owner ? (
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(); }}
+          title="Delete deck"
+          style={{
+            position: 'absolute', top: '10px', right: '10px',
+            background: 'rgba(0,0,0,0.5)', border: 'none',
+            color: '#ffb4ab', borderRadius: '6px',
+            width: '24px', height: '24px',
+            cursor: 'pointer', fontSize: '15px', lineHeight: 1,
+            zIndex: 2
+          }}
+        >×</button>
+      ) : (
+        <div
+          title={`Shared by ${deck.owner_name}`}
+          style={{
+            position: 'absolute', top: '10px', right: '10px',
+            background: 'rgba(184,206,161,0.18)',
+            border: '1px solid rgba(184,206,161,0.5)',
+            color: '#b8cea1', borderRadius: '6px',
+            padding: '3px 8px',
+            fontSize: '10.5px', lineHeight: 1.4,
+            zIndex: 2, whiteSpace: 'nowrap'
+          }}
+        >
+          👁 {deck.owner_name}
+        </div>
+      )}
 
       <div style={{
         display: 'grid',

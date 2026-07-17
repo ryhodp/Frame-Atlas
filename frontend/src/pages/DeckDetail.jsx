@@ -79,6 +79,8 @@ export default function DeckDetail() {
 
   const [storyboard, setStoryboard] = useState(null); // { sceneId, title } or null
   const [shareOpen, setShareOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const loadDeck = useCallback(() => {
     setLoading(true);
@@ -231,9 +233,9 @@ export default function DeckDetail() {
         ← All Decks
       </button>
 
-      {/* Deck name — click to rename — plus Share */}
-      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-        {renamingDeck ? (
+      {/* Deck name — click to rename — plus Share/Members/Activity */}
+      <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+        {deck.is_owner && renamingDeck ? (
           <input
             autoFocus
             value={deckNameDraft}
@@ -250,11 +252,11 @@ export default function DeckDetail() {
           />
         ) : (
           <h1
-            onClick={() => { setDeckNameDraft(deck.name); setRenamingDeck(true); }}
-            title="Click to rename"
+            onClick={deck.is_owner ? () => { setDeckNameDraft(deck.name); setRenamingDeck(true); } : undefined}
+            title={deck.is_owner ? 'Click to rename' : undefined}
             style={{
               fontSize: '32px', lineHeight: '40px', fontWeight: 700,
-              color: '#e2e2e6', margin: 0, cursor: 'pointer',
+              color: '#e2e2e6', margin: 0, cursor: deck.is_owner ? 'pointer' : 'default',
               display: 'inline-block'
             }}
           >
@@ -262,52 +264,95 @@ export default function DeckDetail() {
           </h1>
         )}
 
+        {deck.is_owner ? (
+          <>
+            <button
+              onClick={() => setShareOpen(true)}
+              style={{
+                background: deck.share_token ? 'rgba(217,164,65,0.14)' : 'none',
+                border: `1px solid ${deck.share_token ? 'rgba(217,164,65,0.55)' : '#44474f'}`,
+                color: deck.share_token ? '#d9a441' : '#e2e2e6',
+                borderRadius: '8px', padding: '8px 16px',
+                cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
+                whiteSpace: 'nowrap'
+              }}
+              title={deck.share_token ? 'Public share link is active' : 'Create a read-only public share link'}
+            >
+              {deck.share_token ? '🔗 Shared' : 'Share'}
+            </button>
+            <button
+              onClick={() => setMembersOpen(true)}
+              style={{
+                background: 'none', border: '1px solid #44474f',
+                color: '#e2e2e6', borderRadius: '8px', padding: '8px 16px',
+                cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              👥 Crew
+            </button>
+          </>
+        ) : (
+          <div style={{
+            background: 'rgba(184,206,161,0.14)', border: '1px solid rgba(184,206,161,0.4)',
+            color: '#b8cea1', borderRadius: '8px', padding: '7px 14px',
+            fontSize: '12.5px', whiteSpace: 'nowrap'
+          }}>
+            👁 Shared by {deck.owner_name} · view only
+          </div>
+        )}
+
         <button
-          onClick={() => setShareOpen(true)}
+          onClick={() => setActivityOpen(true)}
           style={{
-            background: deck.share_token ? 'rgba(217,164,65,0.14)' : 'none',
-            border: `1px solid ${deck.share_token ? 'rgba(217,164,65,0.55)' : '#44474f'}`,
-            color: deck.share_token ? '#d9a441' : '#e2e2e6',
-            borderRadius: '8px', padding: '8px 16px',
+            background: 'none', border: '1px solid #44474f',
+            color: '#8e9099', borderRadius: '8px', padding: '8px 16px',
             cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
             whiteSpace: 'nowrap'
           }}
-          title={deck.share_token ? 'Share link is active' : 'Create a read-only share link'}
         >
-          {deck.share_token ? '🔗 Shared' : 'Share'}
+          🕘 Activity
         </button>
       </div>
 
+      {!deck.is_owner && (
+        <div style={{ fontSize: '12.5px', color: '#8e9099', marginBottom: '18px' }}>
+          You can look through this lookbook, but only {deck.owner_name} can edit it.
+        </div>
+      )}
+
       {/* + New Scene */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '28px' }}>
-        <input
-          value={newSceneName}
-          onChange={e => setNewSceneName(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') createScene(); }}
-          placeholder="New scene name…"
-          style={{
-            background: '#1a1c20', color: '#e2e2e6',
-            border: '1px solid #44474f',
-            borderRadius: '8px', padding: '9px 12px',
-            fontSize: '14px', fontFamily: 'inherit', outline: 'none',
-            width: '220px'
-          }}
-        />
-        <button
-          onClick={createScene}
-          disabled={!newSceneName.trim() || creatingScene}
-          style={{
-            background: newSceneName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
-            color: newSceneName.trim() ? '#3d2f00' : '#8e9099',
-            border: 'none', borderRadius: '8px',
-            padding: '9px 16px', fontSize: '14px', fontWeight: 500,
-            cursor: newSceneName.trim() ? 'pointer' : 'default',
-            fontFamily: 'inherit', whiteSpace: 'nowrap'
-          }}
-        >
-          {creatingScene ? 'Creating…' : '+ New Scene'}
-        </button>
-      </div>
+      {deck.is_owner && (
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '28px' }}>
+          <input
+            value={newSceneName}
+            onChange={e => setNewSceneName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') createScene(); }}
+            placeholder="New scene name…"
+            style={{
+              background: '#1a1c20', color: '#e2e2e6',
+              border: '1px solid #44474f',
+              borderRadius: '8px', padding: '9px 12px',
+              fontSize: '14px', fontFamily: 'inherit', outline: 'none',
+              width: '220px'
+            }}
+          />
+          <button
+            onClick={createScene}
+            disabled={!newSceneName.trim() || creatingScene}
+            style={{
+              background: newSceneName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
+              color: newSceneName.trim() ? '#3d2f00' : '#8e9099',
+              border: 'none', borderRadius: '8px',
+              padding: '9px 16px', fontSize: '14px', fontWeight: 500,
+              cursor: newSceneName.trim() ? 'pointer' : 'default',
+              fontFamily: 'inherit', whiteSpace: 'nowrap'
+            }}
+          >
+            {creatingScene ? 'Creating…' : '+ New Scene'}
+          </button>
+        </div>
+      )}
 
       {/* Unsorted — always shown, always a valid drop target */}
       <SceneSection
@@ -317,11 +362,12 @@ export default function DeckDetail() {
         collapsedState={collapsed}
         toggleCollapsed={toggleCollapsed}
         isDragOver={dragOverKey === 'unsorted'}
-        onDragEnter={() => setDragOverKey('unsorted')}
-        onDragLeave={() => setDragOverKey(prev => (prev === 'unsorted' ? null : prev))}
-        onDrop={e => { setDragOverKey(null); handleDrop(null, e); }}
-        onRemoveImage={removeDeckImage}
-        onStoryboard={() => setStoryboard({ sceneId: null, title: 'Unsorted' })}
+        onDragEnter={deck.is_owner ? () => setDragOverKey('unsorted') : undefined}
+        onDragLeave={deck.is_owner ? () => setDragOverKey(prev => (prev === 'unsorted' ? null : prev)) : undefined}
+        onDrop={deck.is_owner ? e => { setDragOverKey(null); handleDrop(null, e); } : undefined}
+        onRemoveImage={deck.is_owner ? removeDeckImage : undefined}
+        onStoryboard={deck.is_owner ? () => setStoryboard({ sceneId: null, title: 'Unsorted' }) : undefined}
+        canEdit={deck.is_owner}
       />
 
       {/* One section per scene, in sort_order */}
@@ -336,12 +382,13 @@ export default function DeckDetail() {
             collapsedState={collapsed}
             toggleCollapsed={toggleCollapsed}
             isDragOver={dragOverKey === key}
-            onDragEnter={() => setDragOverKey(key)}
-            onDragLeave={() => setDragOverKey(prev => (prev === key ? null : prev))}
-            onDrop={e => { setDragOverKey(null); handleDrop(scene.id, e); }}
-            onRemoveImage={removeDeckImage}
-            onStoryboard={() => setStoryboard({ sceneId: scene.id, title: scene.name })}
-            editable
+            onDragEnter={deck.is_owner ? () => setDragOverKey(key) : undefined}
+            onDragLeave={deck.is_owner ? () => setDragOverKey(prev => (prev === key ? null : prev)) : undefined}
+            onDrop={deck.is_owner ? e => { setDragOverKey(null); handleDrop(scene.id, e); } : undefined}
+            onRemoveImage={deck.is_owner ? removeDeckImage : undefined}
+            onStoryboard={deck.is_owner ? () => setStoryboard({ sceneId: scene.id, title: scene.name }) : undefined}
+            canEdit={deck.is_owner}
+            editable={deck.is_owner}
             onRename={(name) => renameScene(scene.id, name)}
             onDelete={() => setSceneToDelete(scene)}
           />
@@ -377,6 +424,388 @@ export default function DeckDetail() {
           onClose={() => setShareOpen(false)}
         />
       )}
+
+      {membersOpen && (
+        <MembersModal
+          deckId={Number(id)}
+          onClose={() => setMembersOpen(false)}
+        />
+      )}
+
+      {activityOpen && (
+        <ActivityPanel
+          deckId={Number(id)}
+          onClose={() => setActivityOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Crew (members) modal — invite by email, invite link, current member list ──
+function MembersModal({ deckId, onClose }) {
+  const [members, setMembers] = useState(null);
+  const [inviteToken, setInviteToken] = useState(null);
+  const [email, setEmail] = useState('');
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState('');
+  const [linkWorking, setLinkWorking] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmRevokeLink, setConfirmRevokeLink] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState(null); // member object or null
+  const [busy, setBusy] = useState(false);
+
+  const loadMembers = () => {
+    fetch(`/api/decks/${deckId}/members`)
+      .then(res => res.json())
+      .then(data => setMembers(Array.isArray(data) ? data : []))
+      .catch(err => console.error('Failed to load members', err));
+  };
+
+  useEffect(() => { loadMembers(); }, [deckId]);
+
+  const sendInvite = async () => {
+    const value = email.trim();
+    if (!value || inviting) return;
+    setInviting(true);
+    setInviteError('');
+    setInviteSuccess('');
+    try {
+      const res = await fetch(`/api/decks/${deckId}/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: value })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setInviteError(data.message || data.error || 'Could not invite that email.');
+      } else {
+        setInviteSuccess(`${data.name} can now view this deck.`);
+        setEmail('');
+        loadMembers();
+      }
+    } catch (e) {
+      console.error('Invite failed', e);
+      setInviteError('Something went wrong — try again.');
+    }
+    setInviting(false);
+  };
+
+  const createLink = async () => {
+    setLinkWorking(true);
+    try {
+      const res = await fetch(`/api/decks/${deckId}/invite-link`, { method: 'POST' });
+      const data = await res.json();
+      if (data.invite_token) setInviteToken(data.invite_token);
+    } catch (e) {
+      console.error('Create invite link failed', e);
+    }
+    setLinkWorking(false);
+  };
+
+  const revokeLink = async () => {
+    setLinkWorking(true);
+    try {
+      await fetch(`/api/decks/${deckId}/invite-link`, { method: 'DELETE' });
+      setInviteToken(null);
+      setConfirmRevokeLink(false);
+    } catch (e) {
+      console.error('Revoke invite link failed', e);
+    }
+    setLinkWorking(false);
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/invite/${inviteToken}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard API unavailable — the visible URL text is the fallback.
+    }
+  };
+
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
+    setBusy(true);
+    try {
+      await fetch(`/api/decks/${deckId}/members/${removeTarget.user_id}`, { method: 'DELETE' });
+      loadMembers();
+    } catch (e) {
+      console.error('Remove member failed', e);
+    }
+    setBusy(false);
+    setRemoveTarget(null);
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#2a2c31',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: '12px',
+          padding: '20px 22px',
+          width: '460px', maxWidth: 'calc(100vw - 48px)',
+          maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
+          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+        }}
+      >
+        <div style={{ fontSize: '15px', fontWeight: 600, color: '#e2e2e6', marginBottom: '6px' }}>
+          Crew on this deck
+        </div>
+        <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5, marginBottom: '16px' }}>
+          Crew members can view scenes, frame order, and notes — signed in, view-only.
+          They can't edit anything.
+        </div>
+
+        {/* Invite by email */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+          <input
+            value={email}
+            onChange={e => { setEmail(e.target.value); setInviteError(''); setInviteSuccess(''); }}
+            onKeyDown={e => { if (e.key === 'Enter') sendInvite(); }}
+            placeholder="friend@email.com"
+            style={{
+              flex: 1, background: '#111317', color: '#e2e2e6',
+              border: '1px solid #44474f', borderRadius: '8px',
+              padding: '9px 10px', fontSize: '13px', fontFamily: 'inherit',
+              outline: 'none'
+            }}
+          />
+          <button
+            onClick={sendInvite}
+            disabled={!email.trim() || inviting}
+            style={{
+              background: email.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
+              color: email.trim() ? '#3d2f00' : '#8e9099',
+              border: 'none', borderRadius: '8px',
+              padding: '9px 16px', fontSize: '13px', fontWeight: 600,
+              cursor: email.trim() ? 'pointer' : 'default',
+              fontFamily: 'inherit', whiteSpace: 'nowrap'
+            }}
+          >
+            {inviting ? 'Inviting…' : 'Invite'}
+          </button>
+        </div>
+        {inviteError && (
+          <div style={{ fontSize: '12px', color: '#ffb4ab', marginBottom: '10px' }}>{inviteError}</div>
+        )}
+        {inviteSuccess && (
+          <div style={{ fontSize: '12px', color: '#b8cea1', marginBottom: '10px' }}>{inviteSuccess}</div>
+        )}
+
+        <div style={{ fontSize: '12px', color: '#8e9099', margin: '14px 0 8px' }}>
+          Or share an invite link — they'll join automatically once signed in:
+        </div>
+
+        {!inviteToken ? (
+          <button
+            onClick={createLink}
+            disabled={linkWorking}
+            style={{
+              background: 'none', border: '1px solid #44474f',
+              color: '#e2e2e6', borderRadius: '8px', padding: '8px 14px',
+              fontSize: '12.5px', cursor: 'pointer', fontFamily: 'inherit',
+              opacity: linkWorking ? 0.6 : 1
+            }}
+          >
+            {linkWorking ? 'Creating…' : 'Get Invite Link'}
+          </button>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+              <input
+                readOnly
+                value={`${window.location.origin}/invite/${inviteToken}`}
+                onFocus={e => e.target.select()}
+                style={{
+                  flex: 1, background: '#111317', color: '#e2e2e6',
+                  border: '1px solid #44474f', borderRadius: '8px',
+                  padding: '9px 10px', fontSize: '11.5px', fontFamily: 'inherit',
+                  outline: 'none'
+                }}
+              />
+              <button
+                onClick={copyLink}
+                style={{
+                  background: copied ? 'rgba(184,206,161,0.18)' : '#d9a441',
+                  color: copied ? '#b8cea1' : '#3d2f00',
+                  border: copied ? '1px solid rgba(184,206,161,0.6)' : 'none',
+                  borderRadius: '8px', padding: '9px 14px',
+                  fontSize: '12.5px', fontWeight: 600, cursor: 'pointer',
+                  fontFamily: 'inherit', whiteSpace: 'nowrap'
+                }}
+              >
+                {copied ? 'Copied ✓' : 'Copy'}
+              </button>
+            </div>
+            {confirmRevokeLink ? (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', color: '#ffb4ab' }}>Link stops working for everyone.</span>
+                <div style={{ flex: 1 }} />
+                <button
+                  onClick={() => setConfirmRevokeLink(false)}
+                  disabled={linkWorking}
+                  style={{
+                    background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#9c988d', borderRadius: '6px', padding: '6px 12px',
+                    cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
+                  }}
+                >
+                  Keep
+                </button>
+                <button
+                  onClick={revokeLink}
+                  disabled={linkWorking}
+                  style={{
+                    background: 'rgba(255,180,171,0.18)', border: '1px solid rgba(255,180,171,0.6)',
+                    color: '#ffb4ab', borderRadius: '6px', padding: '6px 12px',
+                    cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
+                  }}
+                >
+                  {linkWorking ? 'Revoking…' : 'Revoke'}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmRevokeLink(true)}
+                style={{
+                  background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+                  color: '#ffb4ab', borderRadius: '6px', padding: '5px 10px',
+                  cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
+                }}
+              >
+                Revoke Link…
+              </button>
+            )}
+          </>
+        )}
+
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '18px 0 12px' }} />
+
+        <div style={{ fontSize: '12px', color: '#8e9099', marginBottom: '10px' }}>
+          {members === null ? 'Loading…' : members.length === 0 ? 'No crew yet.' : `${members.length} crew member${members.length === 1 ? '' : 's'}`}
+        </div>
+
+        {members && members.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {members.map(m => (
+              <div
+                key={m.user_id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  background: '#1a1c20', border: '1px solid #35373d',
+                  borderRadius: '8px', padding: '8px 10px'
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '13px', color: '#e2e2e6' }}>{m.name}</div>
+                  {m.email && <div style={{ fontSize: '11px', color: '#8e9099' }}>{m.email}</div>}
+                </div>
+                <button
+                  onClick={() => setRemoveTarget(m)}
+                  style={{
+                    background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+                    color: '#ffb4ab', borderRadius: '6px', padding: '5px 10px',
+                    cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {removeTarget && (
+        <ConfirmModal
+          text={<>Remove <strong>{removeTarget.name}</strong> from this deck? They'll lose access immediately.</>}
+          confirmLabel="Remove"
+          danger
+          busy={busy}
+          onConfirm={confirmRemove}
+          onCancel={() => !busy && setRemoveTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Activity feed — recent changes, visible to owner + crew ─────────────────
+const ACTIVITY_TEXT = {
+  invited: (a) => `${a.actor} invited ${a.detail}`,
+  joined: (a) => `${a.actor} joined via invite link`,
+  renamed: (a) => `${a.actor} renamed the deck to "${a.detail}"`,
+  added_scene: (a) => `${a.actor} created scene "${a.detail}"`,
+  renamed_scene: (a) => `${a.actor} renamed a scene to "${a.detail}"`,
+  deleted_scene: (a) => `${a.actor} deleted scene "${a.detail}"`,
+  added_photos: (a) => `${a.actor} added ${a.detail}`,
+  moved_photo: (a) => `${a.actor} moved a photo to ${a.detail}`,
+  copied_photo: (a) => `${a.actor} copied a photo to ${a.detail}`,
+  removed_photo: (a) => `${a.actor} removed a photo`,
+  edited_note: (a) => `${a.actor} edited a note`,
+};
+
+function ActivityPanel({ deckId, onClose }) {
+  const [activity, setActivity] = useState(null);
+
+  useEffect(() => {
+    fetch(`/api/decks/${deckId}/activity`)
+      .then(res => res.json())
+      .then(data => setActivity(Array.isArray(data) ? data : []))
+      .catch(err => console.error('Failed to load activity', err));
+  }, [deckId]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#2a2c31',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: '12px',
+          padding: '20px 22px',
+          width: '420px', maxWidth: 'calc(100vw - 48px)',
+          maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
+          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+        }}
+      >
+        <div style={{ fontSize: '15px', fontWeight: 600, color: '#e2e2e6', marginBottom: '14px' }}>
+          Recent activity
+        </div>
+
+        {activity === null ? (
+          <div style={{ fontSize: '12.5px', color: '#8e9099' }}>Loading…</div>
+        ) : activity.length === 0 ? (
+          <div style={{ fontSize: '12.5px', color: '#8e9099' }}>Nothing yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {activity.map((a, i) => (
+              <div key={i} style={{ fontSize: '12.5px', color: '#c4c6d0', lineHeight: 1.5 }}>
+                <div>{(ACTIVITY_TEXT[a.action] || (() => `${a.actor} did something`))(a)}</div>
+                <div style={{ fontSize: '10.5px', color: '#6b6d75' }}>{a.created_at}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -547,7 +976,7 @@ function ShareModal({ deckId, shareToken, onTokenChange, onClose }) {
 function SceneSection({
   sceneKey, title, images, collapsedState, toggleCollapsed,
   isDragOver, onDragEnter, onDragLeave, onDrop,
-  onRemoveImage, onStoryboard, editable, onRename, onDelete
+  onRemoveImage, onStoryboard, editable, onRename, onDelete, canEdit
 }) {
   const isCollapsed = !!collapsedState[sceneKey];
   const [renaming, setRenaming] = useState(false);
@@ -625,7 +1054,7 @@ function SceneSection({
 
         <div style={{ flex: 1 }} />
 
-        {images.length > 0 && (
+        {canEdit && images.length > 0 && (
           <button
             onClick={onStoryboard}
             title="Open storyboard — sequence frames and add notes"
@@ -663,7 +1092,7 @@ function SceneSection({
             padding: '14px', textAlign: 'center',
             border: '1px dashed #44474f', borderRadius: '8px'
           }}>
-            Drag photos here
+            {canEdit ? 'Drag photos here' : 'No photos here yet'}
           </div>
         ) : (
           <div style={{
@@ -672,7 +1101,12 @@ function SceneSection({
             gap: '8px'
           }}>
             {images.map(img => (
-              <DeckTile key={img.deck_image_id} img={img} onRemove={() => onRemoveImage(img.deck_image_id)} />
+              <DeckTile
+                key={img.deck_image_id}
+                img={img}
+                canEdit={canEdit}
+                onRemove={canEdit ? () => onRemoveImage(img.deck_image_id) : undefined}
+              />
             ))}
           </div>
         )
@@ -681,18 +1115,18 @@ function SceneSection({
   );
 }
 
-function DeckTile({ img, onRemove }) {
+function DeckTile({ img, onRemove, canEdit }) {
   return (
     <div
-      draggable
-      onDragStart={e => e.dataTransfer.setData('text/plain', String(img.deck_image_id))}
+      draggable={!!canEdit}
+      onDragStart={canEdit ? e => e.dataTransfer.setData('text/plain', String(img.deck_image_id)) : undefined}
       style={{
         position: 'relative',
         aspectRatio: '1',
         borderRadius: '8px',
         overflow: 'hidden',
         background: '#111317',
-        cursor: 'grab'
+        cursor: canEdit ? 'grab' : 'default'
       }}
     >
       {img.thumbnail && (
@@ -702,17 +1136,19 @@ function DeckTile({ img, onRemove }) {
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
       )}
-      <button
-        onClick={() => onRemove()}
-        title="Remove from this section"
-        style={{
-          position: 'absolute', top: '4px', right: '4px',
-          background: 'rgba(0,0,0,0.55)', border: 'none',
-          color: '#ffb4ab', borderRadius: '5px',
-          width: '20px', height: '20px', lineHeight: 1,
-          cursor: 'pointer', fontSize: '13px'
-        }}
-      >×</button>
+      {canEdit && (
+        <button
+          onClick={() => onRemove()}
+          title="Remove from this section"
+          style={{
+            position: 'absolute', top: '4px', right: '4px',
+            background: 'rgba(0,0,0,0.55)', border: 'none',
+            color: '#ffb4ab', borderRadius: '5px',
+            width: '20px', height: '20px', lineHeight: 1,
+            cursor: 'pointer', fontSize: '13px'
+          }}
+        >×</button>
+      )}
     </div>
   );
 }

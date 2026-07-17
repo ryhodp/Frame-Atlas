@@ -15,6 +15,7 @@ import AdminInvitesPage from './pages/AdminInvitesPage'
 import AccountPage from './pages/AccountPage'
 import ConnectGuidePage from './pages/ConnectGuidePage'
 import SettingsPage from './pages/SettingsPage'
+import InviteAcceptPage from './pages/InviteAcceptPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import './App.css'
 
@@ -88,6 +89,7 @@ function Shell() {
           <Route path="/sync" element={user.role === 'admin' ? <SyncManager /> : <Navigate to="/" replace />} />
           <Route path="/decks" element={<DecksPage />} />
           <Route path="/decks/:id" element={<DeckDetail />} />
+          <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/favorites" element={<CollectionPage key="favorites" view="favorites" />} />
           <Route path="/flagged" element={<CollectionPage key="flagged" view="flagged" />} />
