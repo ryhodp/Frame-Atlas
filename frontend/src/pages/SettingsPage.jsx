@@ -13,6 +13,8 @@ export default function SettingsPage() {
   const { user, isAdmin } = useAuth()
   const [spend, setSpend] = useState(null)     // {cost_usd, ...} or null while loading
   const [spendError, setSpendError] = useState('')
+  const [googleStatus, setGoogleStatus] = useState(null) // null = loading, true = connected, false = not connected
+  const [disconnecting, setDisconnecting] = useState(false)
 
   useEffect(() => {
     fetch('/api/billing/spend')
@@ -22,7 +24,29 @@ export default function SettingsPage() {
         setSpend(data)
       })
       .catch(() => setSpendError('Could not reach the server.'))
+
+    fetch('/api/auth/status')
+      .then(r => r.json())
+      .then(data => setGoogleStatus(!!data.signed_in))
+      .catch(() => setGoogleStatus(false))
   }, [])
+
+  const handleGoogleConnect = () => {
+    window.location.href = '/api/auth/google/login'
+  }
+
+  const handleGoogleDisconnect = async () => {
+    setDisconnecting(true)
+    try {
+      const res = await fetch('/api/auth/google/disconnect', { method: 'POST' })
+      if (res.ok) {
+        setGoogleStatus(false)
+      }
+    } catch (e) {
+      console.error('Failed to disconnect Google', e)
+    }
+    setDisconnecting(false)
+  }
 
   return (
     <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 24px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: '#efeadd' }}>
@@ -40,6 +64,60 @@ export default function SettingsPage() {
         <Row label="Email" value={user?.email || '—'} />
         <Row label="Role" value={isAdmin ? 'Admin' : 'Member'} />
       </div>
+
+      {isAdmin && (
+        <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+            GOOGLE CONNECTION
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+            <div>
+              <span style={{ fontSize: '13px', color: '#9c988d' }}>Upload token</span>
+              <p style={{ fontSize: '11.5px', color: '#65625a', margin: '4px 0 0' }}>
+                For uploading photos directly to Drive
+              </p>
+            </div>
+            {googleStatus === null ? (
+              <span style={{ fontSize: '12px', color: '#65625a' }}>Checking…</span>
+            ) : googleStatus ? (
+              <button
+                onClick={handleGoogleDisconnect}
+                disabled={disconnecting}
+                style={{
+                  background: 'rgba(255,180,171,0.12)',
+                  border: '1px solid rgba(255,180,171,0.3)',
+                  color: '#ffb4ab',
+                  borderRadius: '6px',
+                  padding: '7px 14px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  opacity: disconnecting ? 0.6 : 1
+                }}
+              >
+                {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+            ) : (
+              <button
+                onClick={handleGoogleConnect}
+                style={{
+                  background: 'rgba(184,206,161,0.18)',
+                  border: '1px solid rgba(184,206,161,0.5)',
+                  color: '#b8cea1',
+                  borderRadius: '6px',
+                  padding: '7px 14px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit'
+                }}
+              >
+                Connect
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px' }}>
         <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>

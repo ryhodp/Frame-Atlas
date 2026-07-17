@@ -33,12 +33,20 @@ export default function UploadButton({ onUploaded }) {
         method: 'POST',
         body: formData
       });
+      const data = await res.json();
+
       if (res.status === 401) {
+        // Google auth failed — show the backend error message
+        setResults(prev => [...prev, ...files.map(f => ({
+          filename: f.name,
+          status: 'error',
+          message: data.message || 'Sign in with Google first.'
+        }))]);
         setSignedIn(false);
         setUploading(false);
         return;
       }
-      const data = await res.json();
+
       setResults(prev => {
         const byName = new Map(prev.map(r => [r.filename, r]));
         (data.results || []).forEach(r => byName.set(r.filename, r));
@@ -51,9 +59,11 @@ export default function UploadButton({ onUploaded }) {
       if ((data.results || []).some(r => r.status === 'uploaded')) {
         onUploaded?.();
       }
-    } catch {
+    } catch (e) {
       setResults(prev => [...prev, ...files.map(f => ({
-        filename: f.name, status: 'error', message: 'Upload failed — check your connection.'
+        filename: f.name,
+        status: 'error',
+        message: 'Upload failed — check your connection and try again.'
       }))]);
     }
     setUploading(false);

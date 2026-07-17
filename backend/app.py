@@ -2721,15 +2721,35 @@ def google_callback():
     conn.close()
     return redirect('/?signed_in=1')
 
+@app.route('/api/auth/google/disconnect', methods=['POST'])
+def google_disconnect():
+    """Clear the user's Google OAuth token. Re-authenticates on next upload attempt."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('UPDATE users SET google_oauth_token = NULL WHERE id = ?', (session['user_id'],))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
 @app.route('/api/upload', methods=['POST'])
 @admin_required
 def upload_images():
     # Uploads always go into the shared admin library (Stage 1 decision,
     # unchanged by Stage 2) — always user 1's own Google connection/folder,
     # regardless of who's calling (only admin can reach this route anyway).
-    service = get_user_drive_service(1)
+    try:
+        service = get_user_drive_service(1)
+    except Exception as e:
+        return jsonify({
+            'error': 'google_auth_failed',
+            'message': 'Your Google authentication token is invalid or expired. Please disconnect and reconnect in Settings.'
+        }), 401
+
     if not service:
-        return jsonify({'error': 'not_signed_in', 'message': 'Sign in with Google first.'}), 401
+        return jsonify({
+            'error': 'not_signed_in',
+            'message': 'Sign in with Google first. Click the Connect button in Settings.'
+        }), 401
 
     force = request.args.get('force', '').lower() == 'true'
     files = request.files.getlist('files')
