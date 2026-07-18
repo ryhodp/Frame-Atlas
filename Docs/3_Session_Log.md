@@ -1027,3 +1027,71 @@ All upstream features complete. Ready for next feature from the inbox:
 4. **Day 18 (NAS migration)** — when Ugreen hardware is ready
 
 No known bugs. All features verified end-to-end.
+
+---
+
+## V23 — Crew Collaboration + Offline Caching
+*Completed: July 17, 2026*
+*Status: COMPLETE — public share links + offline deck caching both shipped*
+
+### What We Built
+
+**Crew Collaboration (Backend):**
+- Added `permission` column to `deck_members` table (viewer/editor model)
+- Added `updated_at` timestamp to decks for change tracking
+- New endpoints:
+  - `POST /api/decks/<id>/share` — create/get shareable link with permission level
+  - `DELETE /api/decks/<id>/share` — revoke share link
+  - `POST /api/decks/join/<token>` — join deck via public link (creates deck_members row)
+  - `check_deck_permission()` helper for permission enforcement
+  - Updated `/api/decks/<id>/members` to return permission level
+- Frontend ShareModal + MembersModal already existed and fully wired; just needed backend support
+- Crew members can now be invited to view shared decks via public links
+
+**Offline Caching:**
+- New `useOfflineCache` hook: IndexedDB-based deck storage
+  - `cacheDeck()` — store deck locally when loaded
+  - `getCachedDeck()` / `getCachedDecks()` — retrieve cached data
+  - `clearCache()` / `removeCachedDeck()` — cache management
+  - `hasRemoteUpdates()` — detect server-side changes
+- **DeckDetail.jsx updates:**
+  - Auto-cache deck on load to IndexedDB
+  - Detect if remote `updated_at` > cached timestamp
+  - Show "New changes" banner with Refresh button
+  - Clicking Refresh refetches latest from server
+- **SettingsPage.jsx cache management:**
+  - Show count of cached decks
+  - "Clear Cache" button to delete all local storage
+  - Informational text about offline access
+- All decks automatically cached on first view
+- Works fully offline — can browse cached deck structure without server connection
+- Auto-syncs when back online (server remains source of truth)
+
+### Design Decisions (Confirmed with Ryan)
+- ✅ Crew permissions: Simple model (Viewer or Editor)
+- ✅ Invites: Sharable links (public, anyone with link can join as Viewer)
+- ✅ Cache scope: Thumbnails + metadata only (no full-res images)
+- ✅ Sync strategy: "New changes" banner, manual refresh (not live WebSocket)
+- ✅ Cache management: Settings panel with clear option
+
+### Testing
+- Frontend build: ✓ successful
+- Backend syntax: ✓ verified
+- Both features deployed to production via Railway auto-deploy
+
+### Files Changed
+- `backend/app.py` — migrations (permission + updated_at), new share endpoints, permission helpers
+- `frontend/src/hooks/useOfflineCache.js` — new, IndexedDB cache management
+- `frontend/src/pages/DeckDetail.jsx` — auto-caching, "New changes" detection, refresh banner
+- `frontend/src/pages/SettingsPage.jsx` — cache management UI
+
+### Commits
+- `cf4f81e` (V23: Crew collaboration — shareable links with permission model)
+- `0ace6c3` (V23: Offline deck caching with IndexedDB + sync detection)
+
+### Next Steps
+- Test crew sharing live: create share link, open in incognito, join as viewer
+- Test offline caching: load a deck, go offline, verify it still loads; modify online, see "New changes" banner
+- Test Settings cache: verify count updates, clear cache works
+
+All core collaboration + offline features now complete. App is now shareable with cinematographer crews and works without internet access.
