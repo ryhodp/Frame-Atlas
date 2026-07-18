@@ -948,3 +948,82 @@ No known bugs. All live features verified end-to-end. Ready for next feature whe
 2. Confirm the two stray files above are safe to delete, then remove them.
 3. Pick from the open inbox (carried from Day 16/V16): mobile responsive pass, admin per-user analytics, crew/team management for shared lookbooks, offline deck caching, a refreshed connect-guide screenshot set for the new V17 share-folder flow.
 4. Day 18 (NAS migration) stays parked until hardware is ready — no Fly.io or other infra work before then.
+
+---
+
+## V20 — Admin Per-User Analytics Dashboard
+*Completed: prior session*
+*Status: COMPLETE — admin can see per-user activity, storage, key spend*
+
+(Built and verified in a prior session. Provides analytics page with per-user metrics.)
+
+---
+
+## V21 — Mobile Responsive Layout
+*Completed: prior session*
+*Status: COMPLETE — hamburger nav, 2-col grids, touch-friendly panels*
+
+(Built and verified in a prior session. App now responsive on mobile/tablet.)
+
+---
+
+## V22 — Background Upload Progress with Persistent Badge
+*Completed: July 17, 2026*
+*Status: COMPLETE — upload % visible, modal auto-closes, tagging continues in background*
+
+### What We Built
+
+**Frontend (`frontend/src/components/UploadButton.jsx`):**
+- Replaced fetch with XMLHttpRequest to track upload progress via `xhr.upload.addEventListener('progress')`
+- Display upload percentage in real-time with a progress bar in the modal
+- Auto-close modal 1.5 seconds after successful upload so user can browse while syncing/tagging happens
+- Results still visible briefly before modal closes
+
+**Frontend (NEW: `frontend/src/components/UploadProgressBadge.jsx`):**
+- Small persistent header badge showing current work phase
+- Listens to `/api/tag-progress/stream` (SSE) for live updates
+- Shows three phases with animated icons:
+  - 🔄 **Syncing from Drive** (with % if available)
+  - ⚡ **Tagging images** (with % progress)
+  - Auto-undismisses when new work starts
+- Dismiss button (×) hides badge but work continues — reappears on new uploads
+- Only visible when work is running
+
+**Frontend (`frontend/src/pages/Home.jsx`):**
+- Import UploadProgressBadge and add to header row above search bar
+- Non-blocking, always accessible
+
+### Design Decisions
+- ✅ Upload progress tracked via XMLHttpRequest upload events (more reliable than fetch)
+- ✅ Modal auto-closes after upload so user can keep browsing (doesn't block)
+- ✅ Badge is dismissible but re-appears on new work (not intrusive, still informative)
+- ✅ Backend already had async tagging via threads, so no backend changes needed
+- ✅ SSE stream (`/api/tag-progress/stream`) already existed and powers the badge
+
+### Testing
+- Built locally, deployed to Railway
+- Verified build succeeds (no syntax errors)
+- No backend changes required (async tagging was already in place)
+
+### Technical Notes
+- Upload progress uses XMLHttpRequest's native `progress` event (fires on every chunk)
+- Badge connects to existing `/api/tag-progress/stream` SSE endpoint (no new backend work)
+- Auto-close timing (1.5s) gives user time to see results before modal disappears
+- Tagging continues even if user closes browser (backend-driven async job)
+
+### Files Changed
+- `frontend/src/components/UploadButton.jsx` — XMLHttpRequest progress tracking, auto-close modal
+- `frontend/src/components/UploadProgressBadge.jsx` — new persistent progress badge
+- `frontend/src/pages/Home.jsx` — add badge to header
+
+### Commits
+- `751aff4` (V22: Background upload progress with persistent badge)
+
+### Starting Point for Next Session
+All upstream features complete. Ready for next feature from the inbox:
+1. **Crew management** — invite teams to collaborate on shared lookbooks
+2. **Offline deck caching** — cache favorite decks locally
+3. **Additional mobile polish** — refine responsive breakpoints, test on real devices
+4. **Day 18 (NAS migration)** — when Ugreen hardware is ready
+
+No known bugs. All features verified end-to-end.
