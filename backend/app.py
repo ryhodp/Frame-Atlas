@@ -3312,7 +3312,7 @@ def delete_image(image_id):
 
     conn = get_db()
     c = conn.cursor()
-    for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography'):
+    for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography', 'user_favorites', 'user_flags', 'image_views'):
         c.execute(f'DELETE FROM {table} WHERE image_id = ?', (image_id,))
     c.execute('DELETE FROM images WHERE id = ?', (image_id,))
     if user_id != 1:
