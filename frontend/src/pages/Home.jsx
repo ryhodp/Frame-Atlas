@@ -1338,7 +1338,7 @@ export default function Home() {
                     position: 'relative',
                     width: '100%',
                     aspectRatio: `${img.ar_float || 1.78}`,
-                    background: '#141318',
+                    background: '#2a2a2e',
                     borderRadius: '6px',
                     overflow: 'hidden',
                     cursor: 'pointer',
