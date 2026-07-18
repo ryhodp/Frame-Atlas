@@ -69,6 +69,7 @@ CAT_COLORS = {
     'subject_camera_relationship': '#a78bfa', 'genre_aesthetic': '#f43f5e',
     'era_decade': '#fb923c', 'camera_format': '#22d3ee',
     'performance_emotion': '#e879f9',
+    'subjects': '#f472b6',
     'my_work': '#d9a441',
 }
 CAT_LABELS = {
@@ -80,6 +81,7 @@ CAT_LABELS = {
     'subject_camera_relationship': 'Camera Rel.', 'genre_aesthetic': 'Genre',
     'era_decade': 'Era', 'camera_format': 'Format',
     'performance_emotion': 'Emotion',
+    'subjects': 'Objects',
     'my_work': 'My Work',
 }
 
@@ -142,7 +144,8 @@ Return exactly this structure:
     "performance_emotion": [],
     "genre_aesthetic": [],
     "era_decade": [],
-    "camera_format": []
+    "camera_format": [],
+    "subjects": []
   },
   "filmography": {
     "title": null,
@@ -177,6 +180,7 @@ performance_emotion: joy, grief, fear, rage, longing, neutral, shock, tenderness
 genre_aesthetic: horror, western, sci-fi, romance, documentary, thriller, noir, drama, comedy, action
 era_decade: period-piece, 70s, 80s, 90s, contemporary, futuristic
 camera_format: 35mm-film, 16mm-film, anamorphic, spherical, digital, arri, red, sony, blackmagic
+subjects: man, woman, child, couple, wedding, hand, hands, body, face, animal, dog, cat, horse, bird, building, house, car, door, window, street, bridge, fire, water, mirror, glass, weapon, crowd, performance
 
 For filmography: only fill in if this is clearly a recognizable film still. Otherwise leave null.
 Return ONLY the JSON. No other text."""
@@ -199,6 +203,7 @@ performance_emotion: joy, grief, fear, rage, longing, neutral, shock, tenderness
 genre_aesthetic: horror, western, sci-fi, romance, documentary, thriller, noir, drama, comedy, action
 era_decade: period-piece, 70s, 80s, 90s, contemporary, futuristic
 camera_format: 35mm-film, 16mm-film, anamorphic, spherical, digital, arri, red, sony, blackmagic
+subjects: man, woman, child, couple, wedding, hand, hands, body, face, animal, dog, cat, horse, bird, building, house, car, door, window, street, bridge, fire, water, mirror, glass, weapon, crowd, performance
 
 Pick the 2-5 tags that best capture the FEELING and VISUAL QUALITIES of the phrase.
 Return ONLY a JSON array of tag strings, e.g. ["lonely","low-key","night"]. No markdown, no explanation.

@@ -10,6 +10,7 @@ const CAT_LABELS = {
   'subject_camera_relationship': 'Camera Rel.', 'genre_aesthetic': 'Genre',
   'era_decade': 'Era', 'camera_format': 'Format',
   'performance_emotion': 'Emotion',
+  'subjects': 'Objects',
   'my_work': 'My Work',
 };
 
@@ -20,7 +21,7 @@ const CAT_ORDER = [
   'mood', 'lighting_quality', 'lighting_color_temperature', 'color_palette',
   'shot_type', 'framing_composition', 'location_type', 'time_of_day_weather',
   'source_type', 'subject_count', 'subject_camera_relationship', 'performance_emotion',
-  'genre_aesthetic', 'era_decade', 'camera_format'
+  'genre_aesthetic', 'era_decade', 'camera_format', 'subjects'
 ];
 
 export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSearchFilm, onFindSimilar }) {
