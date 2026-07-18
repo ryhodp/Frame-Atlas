@@ -155,7 +155,8 @@ Return exactly this structure:
   }
 }
 
-ONLY use tags from these allowed lists.
+For cinematography tags, ONLY use tags from these allowed lists.
+For subjects, identify any visible objects, people, animals, or elements in the frame — be specific and comprehensive (subjects are open-ended, not restricted to a list).
 
 BE GENEROUS. This is a searchable reference library for a working cinematographer —
 more tags means more discoverability. Include every tag that plausibly applies, not
@@ -180,7 +181,7 @@ performance_emotion: joy, grief, fear, rage, longing, neutral, shock, tenderness
 genre_aesthetic: horror, western, sci-fi, romance, documentary, thriller, noir, drama, comedy, action
 era_decade: period-piece, 70s, 80s, 90s, contemporary, futuristic
 camera_format: 35mm-film, 16mm-film, anamorphic, spherical, digital, arri, red, sony, blackmagic
-subjects: man, woman, child, couple, wedding, hand, hands, body, face, animal, dog, cat, horse, bird, building, house, car, door, window, street, bridge, fire, water, mirror, glass, weapon, crowd, performance
+subjects: any objects, people, animals, or elements visible in the frame (e.g. man, woman, child, dog, cat, fish, horse, mountain, building, tree, water, fire, etc.)
 
 For filmography: only fill in if this is clearly a recognizable film still. Otherwise leave null.
 Return ONLY the JSON. No other text."""
