@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { SIDEBAR_WIDTH } from './Sidebar';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 // ── Confirm step — small inline modal, dark panel look ────────────────────────
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -340,26 +341,29 @@ export default function TagModeBar({
   };
 
   const canApply = tagName.trim().length > 0;
+  const isMobile = useIsMobile();
 
   return (
     <>
       <div
         data-tagmode-area
         style={{
-          position: 'fixed', left: `${SIDEBAR_WIDTH}px`, right: 0, bottom: 0,
+          position: 'fixed', left: isMobile ? 0 : `${SIDEBAR_WIDTH}px`, right: 0, bottom: 0,
           zIndex: 900,
           background: '#1a1c20',
           borderTop: '1px solid #44474f',
           boxShadow: '0 -12px 32px rgba(0,0,0,0.45)',
-          maxHeight: '46vh',
+          maxHeight: isMobile ? '80vh' : '46vh',
           overflowY: 'auto'
         }}
       >
         {/* Top row — selection controls, always visible */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: '10px',
-          padding: '12px 20px',
-          borderBottom: count > 0 ? '1px solid #2a2c31' : 'none'
+          padding: isMobile ? '12px 14px' : '12px 20px',
+          borderBottom: count > 0 ? '1px solid #2a2c31' : 'none',
+          flexWrap: isMobile ? 'wrap' : 'nowrap',
+          rowGap: '8px'
         }}>
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: '6px',
@@ -389,7 +393,7 @@ export default function TagModeBar({
         {count > 0 && (
           <div style={{
             display: 'flex', flexWrap: 'wrap', gap: '20px',
-            padding: '16px 20px'
+            padding: isMobile ? '16px 14px' : '16px 20px'
           }}>
             {/* Apply tag panel */}
             <div style={{ minWidth: '280px', flex: '1 1 280px' }} data-tagmode-area>

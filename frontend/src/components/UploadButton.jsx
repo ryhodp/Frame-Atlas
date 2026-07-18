@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export default function UploadButton({ onUploaded }) {
+  const isMobile = useIsMobile();
   const [signedIn, setSignedIn] = useState(null); // null = still checking
   const [panelOpen, setPanelOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -122,7 +124,7 @@ export default function UploadButton({ onUploaded }) {
         onClick={handleClick}
         title={signedIn === false ? 'Sign in with Google to upload' : 'Upload photos'}
         style={{
-          height: '46px', width: '46px',
+          height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
           background: '#18181b',
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '10px',

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const CAT_LABELS = {
   'mood': 'Mood', 'lighting_quality': 'Lighting',
@@ -23,6 +24,7 @@ const CAT_ORDER = [
 ];
 
 export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSearchFilm, onFindSimilar }) {
+  const isMobile = useIsMobile();
   const [fullImage, setFullImage] = useState(null);
   const [fullError, setFullError] = useState(false);
 
@@ -212,11 +214,12 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         }}
       />
 
-      {/* Side panel */}
+      {/* Side panel — full-width on mobile since there's no room for a 360px+
+          fixed pane beside the grid */}
       <div
         style={{
           position: 'fixed', right: 0, top: 0, bottom: 0,
-          width: 'clamp(360px, 45%, 600px)',
+          width: isMobile ? '100vw' : 'clamp(360px, 45%, 600px)',
           background: '#0a0a0b',
           borderLeft: '1px solid rgba(255,255,255,0.065)',
           zIndex: 1000,
@@ -658,7 +661,9 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         <div style={{
           padding: '12px 20px',
           borderTop: '1px solid rgba(255,255,255,0.065)',
-          display: 'flex', gap: '8px', alignItems: 'center'
+          display: 'flex', gap: '8px', alignItems: 'center',
+          flexWrap: isMobile ? 'wrap' : 'nowrap',
+          rowGap: '8px'
         }}>
           <button
             onClick={toggleFavorite}

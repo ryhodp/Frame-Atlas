@@ -1,6 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar'
+import MobileHeader from './components/MobileHeader'
+import { useIsMobile } from './hooks/useIsMobile'
 import Home from './pages/Home'
 import SyncManager from './components/SyncManager'
 import DecksPage from './pages/DecksPage'
@@ -30,6 +32,12 @@ function Shell() {
   const [backendHealthy, setBackendHealthy] = useState(false)
   const [needsSetup, setNeedsSetup] = useState(null) // null = still checking
   const { user, loading: authLoading, refresh } = useAuth()
+  const isMobile = useIsMobile()
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  // Route changes (including ones not triggered via a Sidebar link, e.g.
+  // browser back/forward) should always leave the drawer closed.
+  useEffect(() => { setMobileNavOpen(false) }, [location.pathname])
 
   useEffect(() => {
     fetch('/api/health')
@@ -85,9 +93,14 @@ function Shell() {
   }
 
   return (
-    <div style={{ display: 'flex', background: '#0a0a0b', color: '#efeadd' }}>
-      <Sidebar />
-      <div style={{ flex: 1, minWidth: 0, height: '100vh', overflowY: 'auto' }}>
+    <div style={{
+      display: 'flex', flexDirection: isMobile ? 'column' : 'row',
+      background: '#0a0a0b', color: '#efeadd',
+      height: '100vh', overflow: 'hidden',
+    }}>
+      {isMobile && <MobileHeader onMenuClick={() => setMobileNavOpen(true)} />}
+      <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/sync" element={user.role === 'admin' ? <SyncManager /> : <Navigate to="/" replace />} />

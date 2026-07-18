@@ -5,6 +5,7 @@ import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
 import TagModeBar from '../components/TagModeBar';
 import { useAuth } from '../AuthContext';
+import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
 
 const PRESET_SWATCHES = [
   '#D9A441', '#E08840', '#B33A3A', '#C75B8B',
@@ -17,6 +18,7 @@ const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP' };
 
 export default function Home() {
   const { isAdmin } = useAuth();
+  const isMobile = useIsMobile();
   const [chips, setChips] = useState([]);
   const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
   const [color, setColor] = useState(null);           // active hex or null
@@ -546,9 +548,22 @@ export default function Home() {
   // Every image keeps its full aspect ratio — nothing is cropped.
   // Placement is greedy in order, so appending a page never reshuffles
   // images that are already on screen. colWidth is the density slider's
-  // target column width — smaller means more, denser columns.
-  const [colWidth, setColWidth] = useState(320);
-  const colCount = Math.max(2, Math.min(7, Math.floor((winW - 280) / colWidth)));
+  // target column width — smaller means more, denser columns. The initial
+  // default is picked from the screen width so phones start at ~2 columns
+  // and tablets at ~3, without touching how the slider itself works —
+  // once mounted colWidth is fully manual again, same as desktop today.
+  const [colWidth, setColWidth] = useState(() => {
+    const w = window.innerWidth;
+    const offset = w < MOBILE_BREAKPOINT ? 24 : 280;
+    const contentW = w - offset;
+    if (w < MOBILE_BREAKPOINT) return Math.max(140, contentW / 2);
+    if (w < 1100) return Math.max(160, contentW / 3);
+    return 320;
+  });
+  // Sidebar only reserves real width on tablet/desktop — on mobile it's an
+  // overlay drawer, so the grid gets the full window width to itself.
+  const sidebarOffset = isMobile ? 24 : 280;
+  const colCount = Math.max(2, Math.min(7, Math.floor((winW - sidebarOffset) / colWidth)));
   const columns = (() => {
     const cols = Array.from({ length: colCount }, () => ({ items: [], h: 0 }));
     for (const img of images) {
@@ -573,16 +588,17 @@ export default function Home() {
       <div
         data-search-area
         style={{
-          padding: '16px 20px',
+          padding: isMobile ? '12px 14px' : '16px 20px',
           borderBottom: '1px solid rgba(255,255,255,0.065)',
           position: 'relative',
           zIndex: 40
         }}
       >
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: isMobile ? '6px' : '8px', alignItems: 'center' }}>
           {/* Input */}
           <div style={{
             flex: 1,
+            minWidth: 0,
             display: 'flex', alignItems: 'center', gap: '12px',
             background: '#18181b',
             border: '1px solid rgba(255,255,255,0.12)',
@@ -634,7 +650,7 @@ export default function Home() {
                 onClick={toggleTagMode}
                 title="Tag Mode — bulk-select images and bulk-edit their tags"
                 style={{
-                  height: '46px', width: '46px',
+                  height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
                   background: tagMode ? 'rgba(184,206,161,0.14)' : '#18181b',
                   border: `1px solid ${tagMode ? 'rgba(184,206,161,0.6)' : 'rgba(255,255,255,0.12)'}`,
                   borderRadius: '10px',
@@ -650,7 +666,7 @@ export default function Home() {
                 onClick={() => setShowDuplicates(true)}
                 title="Find duplicate images"
                 style={{
-                  height: '46px', width: '46px',
+                  height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
                   background: '#18181b',
                   border: '1px solid rgba(255,255,255,0.12)',
                   borderRadius: '10px',
@@ -665,12 +681,12 @@ export default function Home() {
           )}
 
           {/* Bookmark button + dropdown */}
-          <div data-bookmark-area style={{ position: 'relative' }}>
+          <div data-bookmark-area style={{ position: 'relative', flexShrink: 0 }}>
             <button
               onClick={() => setShowBookmarks(v => !v)}
               title="Saved searches"
               style={{
-                height: '46px', width: '46px',
+                height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px',
                 background: '#18181b',
                 border: `1px solid ${showBookmarks ? 'rgba(201,162,83,0.5)' : 'rgba(255,255,255,0.12)'}`,
                 borderRadius: '10px',
@@ -870,7 +886,7 @@ export default function Home() {
 
         {/* Color swatch strip */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: '7px', marginTop: '12px'
+          display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '7px', marginTop: '12px'
         }}>
           <span style={{
             fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em',
@@ -1094,9 +1110,9 @@ export default function Home() {
 
       {/* ── Result count bar ────────────────────────────────────────────────── */}
       <div style={{
-        padding: '10px 20px',
+        padding: isMobile ? '10px 14px' : '10px 20px',
         borderBottom: '1px solid rgba(255,255,255,0.065)',
-        display: 'flex', alignItems: 'center', gap: '12px'
+        display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', rowGap: '8px'
       }}>
         <span style={{
           fontFamily: "'JetBrains Mono', monospace",
@@ -1136,7 +1152,7 @@ export default function Home() {
           </svg>
           <input
             type="range"
-            min={220}
+            min={140}
             max={420}
             step={10}
             value={colWidth}

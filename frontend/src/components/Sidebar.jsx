@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 // Minimal line icons, matching the app's existing inline-SVG convention
 // (no icon library dependency) — kept intentionally simple/geometric.
@@ -44,10 +45,13 @@ const NON_ADMIN_NAV_LINKS = [
 
 export const SIDEBAR_WIDTH = 236
 
-function Sidebar() {
+// mobileOpen/onClose only matter when isMobile is true — desktop ignores them
+// and renders as the fixed in-flow column it always has.
+function Sidebar({ mobileOpen = false, onClose }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, isAdmin, logout } = useAuth()
+  const isMobile = useIsMobile()
   const roleLinks = isAdmin ? ADMIN_NAV_LINKS : NON_ADMIN_NAV_LINKS
   const NAV_LINKS = [...BASE_NAV_LINKS, ...roleLinks, { to: '/settings', label: 'Settings', icon: 'settings' }]
 
@@ -56,100 +60,135 @@ function Sidebar() {
     navigate('/')
   }
 
+  const handleLinkClick = () => {
+    if (isMobile) onClose?.()
+  }
+
   return (
-    <nav
-      style={{
-        width: `${SIDEBAR_WIDTH}px`,
-        flexShrink: 0,
-        height: '100vh',
-        position: 'sticky',
-        top: 0,
-        background: '#111114',
-        borderRight: '1px solid rgba(255,255,255,0.08)',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '20px 14px',
-        boxSizing: 'border-box',
-      }}
-    >
-      {/* Logo */}
-      <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', padding: '0 8px', marginBottom: '28px' }}>
-        <div style={{
-          width: '26px', height: '26px', borderRadius: '6px',
-          border: '1.5px solid #d9a441', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#d9a441', fontSize: '13px', fontWeight: 700, flexShrink: 0,
-        }}>F</div>
-        <span style={{
-          fontFamily: "'Hanken Grotesk', sans-serif", fontSize: '14px', fontWeight: 600,
-          letterSpacing: '2.6px', color: '#efeadd',
-        }}>
-          FRAME ATLAS
-        </span>
-      </Link>
-
-      {/* Nav links */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-        {NAV_LINKS.map(link => {
-          const isActive = location.pathname === link.to
-            || (link.to === '/decks' && location.pathname.startsWith('/decks'))
-          return (
-            <Link
-              key={link.to}
-              to={link.to}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '11px',
-                padding: '9px 10px', borderRadius: '8px',
-                fontSize: '13.5px', fontWeight: 500,
-                color: isActive ? '#efeadd' : '#8e9099',
-                background: isActive ? 'rgba(217,164,65,0.12)' : 'transparent',
-                textDecoration: 'none', transition: 'background 120ms ease, color 120ms ease',
-              }}
-              onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#c4c6d0' } }}
-              onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#8e9099' } }}
-            >
-              <span style={{ color: isActive ? '#d9a441' : 'inherit', display: 'flex', flexShrink: 0 }}>
-                <Icon name={link.icon} />
-              </span>
-              {link.label}
-            </Link>
-          )
-        })}
-      </div>
-
-      <div style={{ flex: 1 }} />
-
-      {/* Account footer */}
-      {user && (
-        <div style={{
-          borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '14px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '14px 8px 4px',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
-            <div style={{
-              width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
-              background: 'rgba(217,164,65,0.16)', border: '1px solid rgba(217,164,65,0.4)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '10.5px', fontWeight: 600, color: '#d9a441',
-            }}>
-              {user.username?.slice(0, 2).toUpperCase()}
-            </div>
-            <span style={{ fontSize: '12.5px', color: '#9c988d', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.username}
-            </span>
-          </div>
-          <button
-            onClick={handleLogout}
-            title="Log out"
-            style={{
-              background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: '#65625a',
-              borderRadius: '6px', padding: '5px 9px', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
-            }}
-          >
-            Log out
-          </button>
-        </div>
+    <>
+      {/* Backdrop — mobile only, closes the drawer on tap outside it */}
+      {isMobile && mobileOpen && (
+        <div
+          onClick={onClose}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+            zIndex: 200,
+          }}
+        />
       )}
-    </nav>
+
+      <nav
+        style={isMobile ? {
+          width: `${SIDEBAR_WIDTH}px`,
+          maxWidth: '82vw',
+          height: '100vh',
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          background: '#111114',
+          borderRight: '1px solid rgba(255,255,255,0.08)',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '20px 14px',
+          boxSizing: 'border-box',
+          zIndex: 201,
+          transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform 200ms ease',
+          overflowY: 'auto',
+        } : {
+          width: `${SIDEBAR_WIDTH}px`,
+          flexShrink: 0,
+          height: '100vh',
+          position: 'sticky',
+          top: 0,
+          background: '#111114',
+          borderRight: '1px solid rgba(255,255,255,0.08)',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '20px 14px',
+          boxSizing: 'border-box',
+        }}
+      >
+        {/* Logo */}
+        <Link to="/" onClick={handleLinkClick} style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', padding: '0 8px', marginBottom: '28px' }}>
+          <div style={{
+            width: '26px', height: '26px', borderRadius: '6px',
+            border: '1.5px solid #d9a441', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#d9a441', fontSize: '13px', fontWeight: 700, flexShrink: 0,
+          }}>F</div>
+          <span style={{
+            fontFamily: "'Hanken Grotesk', sans-serif", fontSize: '14px', fontWeight: 600,
+            letterSpacing: '2.6px', color: '#efeadd',
+          }}>
+            FRAME ATLAS
+          </span>
+        </Link>
+
+        {/* Nav links */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          {NAV_LINKS.map(link => {
+            const isActive = location.pathname === link.to
+              || (link.to === '/decks' && location.pathname.startsWith('/decks'))
+            return (
+              <Link
+                key={link.to}
+                to={link.to}
+                onClick={handleLinkClick}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '11px',
+                  padding: '9px 10px', borderRadius: '8px',
+                  fontSize: '13.5px', fontWeight: 500,
+                  color: isActive ? '#efeadd' : '#8e9099',
+                  background: isActive ? 'rgba(217,164,65,0.12)' : 'transparent',
+                  textDecoration: 'none', transition: 'background 120ms ease, color 120ms ease',
+                }}
+                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#c4c6d0' } }}
+                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#8e9099' } }}
+              >
+                <span style={{ color: isActive ? '#d9a441' : 'inherit', display: 'flex', flexShrink: 0 }}>
+                  <Icon name={link.icon} />
+                </span>
+                {link.label}
+              </Link>
+            )
+          })}
+        </div>
+
+        <div style={{ flex: 1 }} />
+
+        {/* Account footer */}
+        {user && (
+          <div style={{
+            borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '14px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '14px 8px 4px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
+              <div style={{
+                width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
+                background: 'rgba(217,164,65,0.16)', border: '1px solid rgba(217,164,65,0.4)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '10.5px', fontWeight: 600, color: '#d9a441',
+              }}>
+                {user.username?.slice(0, 2).toUpperCase()}
+              </div>
+              <span style={{ fontSize: '12.5px', color: '#9c988d', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user.username}
+              </span>
+            </div>
+            <button
+              onClick={handleLogout}
+              title="Log out"
+              style={{
+                background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: '#65625a',
+                borderRadius: '6px', padding: '5px 9px', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+              }}
+            >
+              Log out
+            </button>
+          </div>
+        )}
+      </nav>
+    </>
   )
 }
 

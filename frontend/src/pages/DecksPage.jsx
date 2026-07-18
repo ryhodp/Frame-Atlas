@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -64,6 +65,7 @@ export default function DecksPage() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null); // deck object or null
   const [busy, setBusy] = useState(false);
+  const isMobile = useIsMobile();
 
   const navigate = useNavigate();
 
@@ -113,14 +115,14 @@ export default function DecksPage() {
   };
 
   return (
-    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px' }}>
+    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: isMobile ? '20px 16px' : '32px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: '16px' }}>
-        <h1 style={{ fontSize: '32px', lineHeight: '40px', fontWeight: 700, color: '#e2e2e6', margin: 0 }}>
+        <h1 style={{ fontSize: isMobile ? '24px' : '32px', lineHeight: isMobile ? '30px' : '40px', fontWeight: 700, color: '#e2e2e6', margin: 0 }}>
           Decks
         </h1>
 
         {/* + New Deck — inline name input + create button */}
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div style={{ display: 'flex', gap: '6px', width: isMobile ? '100%' : 'auto' }}>
           <input
             value={newDeckName}
             onChange={e => setNewDeckName(e.target.value)}
@@ -131,7 +133,9 @@ export default function DecksPage() {
               border: '1px solid #44474f',
               borderRadius: '8px', padding: '9px 12px',
               fontSize: '14px', fontFamily: 'inherit', outline: 'none',
-              width: '220px'
+              width: isMobile ? undefined : '220px',
+              flex: isMobile ? 1 : 'none',
+              minWidth: 0
             }}
           />
           <button
@@ -143,7 +147,7 @@ export default function DecksPage() {
               border: 'none', borderRadius: '8px',
               padding: '9px 16px', fontSize: '14px', fontWeight: 500,
               cursor: newDeckName.trim() ? 'pointer' : 'default',
-              fontFamily: 'inherit', whiteSpace: 'nowrap'
+              fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0
             }}
           >
             {creating ? 'Creating…' : '+ New Deck'}
@@ -164,8 +168,8 @@ export default function DecksPage() {
       ) : (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-          gap: '20px'
+          gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(260px, 1fr))',
+          gap: isMobile ? '12px' : '20px'
         }}>
           {decks.map(deck => (
             <DeckCard
