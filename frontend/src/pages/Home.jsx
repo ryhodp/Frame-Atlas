@@ -1338,9 +1338,7 @@ export default function Home() {
                     position: 'relative',
                     width: '100%',
                     aspectRatio: `${img.ar_float || 1.78}`,
-                    background: img.palette?.[0]
-                      ? `linear-gradient(135deg, ${img.palette[0]}, ${img.palette[1] || img.palette[0]})`
-                      : '#141318',
+                    background: '#141318',
                     borderRadius: '6px',
                     overflow: 'hidden',
                     cursor: 'pointer',
@@ -1379,20 +1377,12 @@ export default function Home() {
                     pointerEvents: 'none'
                   }} />
 
-                  {/* Aspect ratio label — normalized to standard formats */}
-                  <span style={{
-                    position: 'absolute', top: '7px', left: '7px',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: '8px', color: 'rgba(239,234,221,0.5)',
-                    background: 'rgba(0,0,0,0.4)',
-                    padding: '2px 5px', borderRadius: '3px'
-                  }}>
-                    {img.ar_label || img.aspect_ratio}
-                  </span>
-
                   {/* Quick-favorite star — always visible (gold) once favorited; otherwise
                       a translucent gray star that only shows up on hover (opacity toggled
                       imperatively above, same pattern as the tile's own scale-on-hover).
+                      On mobile there's no hover, so it stays dimly visible instead of hidden —
+                      otherwise it'd be undiscoverable on touch. Hit area is enlarged on mobile
+                      to meet a comfortable tap-target size without growing the visible glyph.
                       Hidden entirely in Tag Mode so it doesn't fight tile-selection clicks. */}
                   {!tagMode && (
                     <button
@@ -1400,12 +1390,12 @@ export default function Home() {
                       onClick={(e) => toggleFavorite(img, e)}
                       title={img.is_favorite ? 'Unfavorite' : 'Favorite'}
                       style={{
-                        position: 'absolute', top: '4px', right: '5px',
+                        position: 'absolute', top: '0px', right: '0px',
                         background: 'none', border: 'none', cursor: 'pointer',
-                        padding: '4px', lineHeight: 1, zIndex: 2,
+                        padding: isMobile ? '11px' : '4px', lineHeight: 1, zIndex: 2,
                         fontSize: img.is_favorite ? '13px' : '14px',
                         color: img.is_favorite ? '#dcbd76' : 'rgba(239,234,221,0.65)',
-                        opacity: img.is_favorite ? 1 : 0,
+                        opacity: img.is_favorite ? 1 : (isMobile ? 0.55 : 0),
                         transition: 'opacity 120ms ease',
                         filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
                       }}
@@ -1438,21 +1428,6 @@ export default function Home() {
                       {Math.round(img.similarity * 100)}%
                     </span>
                   )}
-
-                  {/* Color palette — caption is hidden on the grid, shown only in the detail view */}
-                  <div style={{
-                    position: 'absolute', left: '9px', right: '9px', bottom: '9px',
-                    pointerEvents: 'none'
-                  }}>
-                    <div style={{ display: 'flex', gap: '3px' }}>
-                      {(img.palette || []).slice(0, 5).map((hex, i) => (
-                        <span key={i} style={{
-                          width: '14px', height: '4px',
-                          borderRadius: '1px', background: hex
-                        }} />
-                      ))}
-                    </div>
-                  </div>
 
                   {/* Tag Mode selection checkmark — top-right, offset clear of star/flag */}
                   {isSelected && (

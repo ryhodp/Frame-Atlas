@@ -197,7 +197,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const footBtn = (color) => ({
     background: 'none',
     border: `1px solid ${color}4d`,
-    color, borderRadius: '6px', padding: '7px 14px',
+    color, borderRadius: '6px',
+    padding: isMobile ? '11px 14px' : '7px 14px',
     cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
   });
 
@@ -239,7 +240,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             onClick={onClose}
             style={{
               background: 'none', border: 'none', color: '#65625a',
-              cursor: 'pointer', fontSize: '20px', lineHeight: 1, flexShrink: 0
+              cursor: 'pointer', fontSize: '20px', lineHeight: 1, flexShrink: 0,
+              padding: isMobile ? '11px' : '0', margin: isMobile ? '-11px' : 0
             }}
           >×</button>
         </div>
