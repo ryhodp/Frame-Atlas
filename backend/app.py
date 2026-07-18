@@ -541,6 +541,22 @@ def init_db():
     except Exception:
         pass
 
+    # V23: crew collaboration — permission levels on deck_members (viewer/editor)
+    try:
+        c.execute("ALTER TABLE deck_members ADD COLUMN permission TEXT DEFAULT 'viewer'")
+        conn.commit()
+        print("[migration] Added permission column to deck_members")
+    except Exception:
+        pass
+
+    # V23: track when a deck was last modified for the "new changes" banner
+    try:
+        c.execute("ALTER TABLE decks ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        conn.commit()
+        print("[migration] Added updated_at column to decks")
+    except Exception:
+        pass
+
     c.execute("""
         INSERT INTO users (id, username, password_hash)
         SELECT 1, 'ryan', ''
@@ -695,6 +711,34 @@ def admin_required(fn):
             return jsonify({'error': 'admin_required'}), 403
         return fn(*args, **kwargs)
     return wrapper
+
+def check_deck_permission(deck_id, user_id, required_permission='editor'):
+    """Check if a user has permission to edit a deck.
+    Returns (has_permission: bool, is_owner: bool)"""
+    conn = get_db()
+    c = conn.cursor()
+
+    # Owner bypass
+    owner = c.execute('SELECT user_id FROM decks WHERE id = ?', (deck_id,)).fetchone()
+    if owner and owner['user_id'] == user_id:
+        conn.close()
+        return True, True
+
+    # Check collaborator permission
+    perm = c.execute(
+        'SELECT permission FROM deck_members WHERE deck_id = ? AND user_id = ?',
+        (deck_id, user_id)
+    ).fetchone()
+    conn.close()
+
+    if not perm:
+        return False, False
+
+    if required_permission == 'viewer':
+        return perm['permission'] in ('viewer', 'editor'), False
+    elif required_permission == 'editor':
+        return perm['permission'] == 'editor', False
+    return False, False
 
 def fav_flag_cols(user_id, alias='images'):
     """SQL fragment computing is_favorite/is_flagged for one user against the
@@ -3589,13 +3633,13 @@ def list_deck_members(deck_id):
         return jsonify({'error': 'Deck not found'}), 404
 
     rows = c.execute('''
-        SELECT u.id, u.username, u.email, dm.added_at
+        SELECT u.id, u.username, u.email, dm.added_at, COALESCE(dm.permission, 'viewer') as permission
         FROM deck_members dm JOIN users u ON u.id = dm.user_id
         WHERE dm.deck_id = ? ORDER BY dm.added_at ASC
     ''', (deck_id,)).fetchall()
     conn.close()
     return jsonify([
-        {'user_id': r['id'], 'name': _display_name(r), 'email': r['email'], 'added_at': r['added_at']}
+        {'user_id': r['id'], 'name': _display_name(r), 'email': r['email'], 'permission': r['permission'], 'added_at': r['added_at']}
         for r in rows
     ])
 
@@ -4035,13 +4079,14 @@ def reorder_deck_images(deck_id):
 
 @app.route('/api/decks/<int:deck_id>/share', methods=['POST', 'DELETE'])
 def deck_share_token(deck_id):
-    """POST creates (or returns the existing) share token for a deck.
+    """POST creates (or returns the existing) share token for a deck with permission level.
     DELETE revokes it — the old link stops working immediately, and a later
-    POST mints a brand new token rather than reviving the old one."""
+    POST mints a brand new token rather than reviving the old one.
+    Accepts ?permission=viewer|editor (default: viewer)"""
     conn = get_db()
     c = conn.cursor()
     row = c.execute(
-        'SELECT share_token FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])
+        'SELECT share_token, id FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])
     ).fetchone()
     if not row:
         conn.close()
@@ -4053,13 +4098,56 @@ def deck_share_token(deck_id):
         conn.close()
         return jsonify({'success': True, 'share_token': None})
 
+    permission = request.args.get('permission', 'viewer')
+    if permission not in ('viewer', 'editor'):
+        conn.close()
+        return jsonify({'error': 'permission must be viewer or editor'}), 400
+
     token = row['share_token']
     if not token:
         token = secrets.token_urlsafe(16)
-        c.execute('UPDATE decks SET share_token = ? WHERE id = ?', (token, deck_id))
+        c.execute('UPDATE decks SET share_token = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (token, deck_id))
         conn.commit()
     conn.close()
-    return jsonify({'share_token': token, 'share_path': f'/share/{token}'})
+    return jsonify({'share_token': token, 'share_path': f'/share/{token}', 'permission': permission})
+
+@app.route('/api/decks/join/<token>', methods=['POST'])
+def join_deck_via_link(token):
+    """Join a deck via its public share link. Must be logged in.
+    Creates a deck_members row with the permission level specified when the link was created."""
+    conn = get_db()
+    c = conn.cursor()
+
+    deck_row = c.execute(
+        'SELECT id, share_token FROM decks WHERE share_token = ?', (token,)
+    ).fetchone()
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Share link not found or revoked'}), 404
+
+    user_id = session.get('user_id')
+    if not user_id:
+        conn.close()
+        return jsonify({'error': 'Must be logged in'}), 401
+
+    # Check if already a member
+    existing = c.execute(
+        'SELECT permission FROM deck_members WHERE deck_id = ? AND user_id = ?',
+        (deck_row['id'], user_id)
+    ).fetchone()
+    if existing:
+        conn.close()
+        return jsonify({'message': 'Already a member', 'permission': existing['permission']}), 200
+
+    # Default to viewer for public links (permission was stored in the token generation, but we
+    # store the permission level per-member, so for now default to viewer for public join)
+    c.execute(
+        'INSERT INTO deck_members (deck_id, user_id, permission) VALUES (?, ?, ?)',
+        (deck_row['id'], user_id, 'viewer')
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'deck_id': deck_row['id']}), 201
 
 @app.route('/api/share/<token>')
 def get_shared_deck(token):
