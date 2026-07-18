@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import StoryboardView from '../components/StoryboardView';
+import { useOfflineCache } from '../hooks/useOfflineCache';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -82,17 +83,37 @@ export default function DeckDetail() {
   const [membersOpen, setMembersOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
 
-  const loadDeck = useCallback(() => {
+  // Offline caching
+  const cache = useOfflineCache();
+  const [remoteUpdates, setRemoteUpdates] = useState(false); // "New changes" banner
+  const [isCached, setIsCached] = useState(false); // Is this deck in the offline cache?
+
+  const loadDeck = useCallback(async () => {
     setLoading(true);
-    fetch(`/api/decks/${id}`)
-      .then(res => res.json())
-      .then(data => {
-        setDeck(data);
-        setDeckNameDraft(data.name || '');
-      })
-      .catch(err => console.error('Failed to load deck', err))
-      .finally(() => setLoading(false));
-  }, [id]);
+    try {
+      const res = await fetch(`/api/decks/${id}`);
+      const data = await res.json();
+      setDeck(data);
+      setDeckNameDraft(data.name || '');
+
+      // Offline caching: cache the deck and check for remote updates
+      if (cache.ready) {
+        cache.cacheDeck(data);
+        const cached = await cache.getCachedDeck(parseInt(id));
+        if (cached) {
+          setIsCached(true);
+          // Check if remote has newer updates than what we cached
+          if (cache.hasRemoteUpdates(cached, data.updated_at)) {
+            setRemoteUpdates(true);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load deck', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [id, cache]);
 
   useEffect(() => { loadDeck(); }, [loadDeck]);
 
@@ -232,6 +253,29 @@ export default function DeckDetail() {
       >
         ← All Decks
       </button>
+
+      {/* "New changes" banner for offline cache */}
+      {remoteUpdates && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '12px',
+          background: 'rgba(217,164,65,0.12)', border: '1px solid rgba(217,164,65,0.35)',
+          borderRadius: '8px', padding: '12px 14px', marginBottom: '16px'
+        }}>
+          <span style={{ fontSize: '12px', color: '#dcbd76', flex: 1 }}>
+            ✓ This deck has been updated — refresh to see the latest changes
+          </span>
+          <button
+            onClick={() => { setRemoteUpdates(false); loadDeck(); }}
+            style={{
+              background: '#d9a441', color: '#3d2f00', border: 'none',
+              borderRadius: '6px', padding: '6px 12px', fontSize: '12px',
+              fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0
+            }}
+          >
+            Refresh
+          </button>
+        </div>
+      )}
 
       {/* Deck name — click to rename — plus Share/Members/Activity */}
       <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>

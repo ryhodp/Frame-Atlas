@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
+import { useOfflineCache } from '../hooks/useOfflineCache'
 
 function formatSpendPeriod() {
   const now = new Date()
@@ -15,6 +16,9 @@ export default function SettingsPage() {
   const [spendError, setSpendError] = useState('')
   const [googleStatus, setGoogleStatus] = useState(null) // null = loading, true = connected, false = not connected
   const [disconnecting, setDisconnecting] = useState(false)
+  const cache = useOfflineCache()
+  const [cachedDecks, setCachedDecks] = useState([])
+  const [clearing, setClearing] = useState(false)
 
   useEffect(() => {
     fetch('/api/billing/spend')
@@ -30,6 +34,19 @@ export default function SettingsPage() {
       .then(data => setGoogleStatus(!!data.signed_in))
       .catch(() => setGoogleStatus(false))
   }, [])
+
+  useEffect(() => {
+    if (cache.ready) {
+      cache.getCachedDecks().then(setCachedDecks)
+    }
+  }, [cache, cache.ready])
+
+  const handleClearCache = async () => {
+    setClearing(true)
+    await cache.clearCache()
+    setCachedDecks([])
+    setClearing(false)
+  }
 
   const handleGoogleConnect = () => {
     window.location.href = '/api/auth/google/login'
@@ -119,7 +136,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px' }}>
+      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
         <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
           GEMINI SPEND
         </div>
@@ -145,6 +162,41 @@ export default function SettingsPage() {
         ) : (
           <p style={{ fontSize: '13px', color: '#65625a', margin: 0 }}>Loading…</p>
         )}
+      </div>
+
+      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px' }}>
+        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+          OFFLINE CACHE
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 8px' }}>
+            Cached decks: <span style={{ color: '#efeadd', fontWeight: 600 }}>{cachedDecks.length}</span>
+          </p>
+          <p style={{ fontSize: '12px', color: '#65625a', margin: 0, lineHeight: 1.5 }}>
+            {cachedDecks.length === 0
+              ? 'No decks cached yet. Open a deck to cache it for offline viewing.'
+              : `${cachedDecks.length} deck${cachedDecks.length !== 1 ? 's' : ''} stored locally. When offline, you can still view cached decks.`}
+          </p>
+        </div>
+
+        <button
+          onClick={handleClearCache}
+          disabled={clearing || cachedDecks.length === 0}
+          style={{
+            background: cachedDecks.length > 0 ? 'rgba(255,180,171,0.12)' : 'rgba(255,180,171,0.06)',
+            border: '1px solid rgba(255,180,171,0.3)',
+            color: cachedDecks.length > 0 ? '#ffb4ab' : '#8e7f77',
+            borderRadius: '6px',
+            padding: '7px 14px',
+            fontSize: '12px',
+            cursor: cachedDecks.length > 0 ? 'pointer' : 'default',
+            fontFamily: 'inherit',
+            opacity: clearing ? 0.6 : 1
+          }}
+        >
+          {clearing ? 'Clearing…' : 'Clear Cache'}
+        </button>
       </div>
     </div>
   )
