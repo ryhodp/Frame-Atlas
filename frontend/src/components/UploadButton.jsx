@@ -7,6 +7,7 @@ export default function UploadButton({ onUploaded }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0); // 0-100
   const [results, setResults] = useState([]); // array of {filename, status, ...}
   const [pendingFiles, setPendingFiles] = useState({}); // filename -> File, for "upload anyway"
   const fileInputRef = useRef(null);
@@ -28,47 +29,84 @@ export default function UploadButton({ onUploaded }) {
   const doUpload = async (files, force) => {
     if (!files.length) return;
     setUploading(true);
+    setUploadProgress(0);
     const formData = new FormData();
     files.forEach(f => formData.append('files', f));
-    try {
-      const res = await fetch(`/api/upload${force ? '?force=true' : ''}`, {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
 
-      if (res.status === 401) {
-        // Google auth failed — show the backend error message
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+
+      // Track upload progress
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          setUploadProgress(pct);
+        }
+      });
+
+      xhr.addEventListener('load', async () => {
+        try {
+          const data = JSON.parse(xhr.responseText);
+
+          if (xhr.status === 401) {
+            // Google auth failed — show the backend error message
+            setResults(prev => [...prev, ...files.map(f => ({
+              filename: f.name,
+              status: 'error',
+              message: data.message || 'Sign in with Google first.'
+            }))]);
+            setSignedIn(false);
+            setUploading(false);
+            setUploadProgress(0);
+            resolve();
+            return;
+          }
+
+          setResults(prev => {
+            const byName = new Map(prev.map(r => [r.filename, r]));
+            (data.results || []).forEach(r => byName.set(r.filename, r));
+            return Array.from(byName.values());
+          });
+          const nextPending = { ...pendingFiles };
+          files.forEach(f => { nextPending[f.name] = f; });
+          setPendingFiles(nextPending);
+
+          if ((data.results || []).some(r => r.status === 'uploaded')) {
+            onUploaded?.();
+            // Auto-close the panel 1.5 seconds after successful upload
+            // so the user can see the results briefly, then the badge takes over
+            setTimeout(() => {
+              setPanelOpen(false);
+              setResults([]);
+              setUploadProgress(0);
+            }, 1500);
+          }
+        } catch (e) {
+          console.error('Upload parse error:', e);
+          setResults(prev => [...prev, ...files.map(f => ({
+            filename: f.name,
+            status: 'error',
+            message: 'Upload failed — check your connection and try again.'
+          }))]);
+        }
+        setUploading(false);
+        resolve();
+      });
+
+      xhr.addEventListener('error', () => {
         setResults(prev => [...prev, ...files.map(f => ({
           filename: f.name,
           status: 'error',
-          message: data.message || 'Sign in with Google first.'
+          message: 'Upload failed — check your connection and try again.'
         }))]);
-        setSignedIn(false);
         setUploading(false);
-        return;
-      }
-
-      setResults(prev => {
-        const byName = new Map(prev.map(r => [r.filename, r]));
-        (data.results || []).forEach(r => byName.set(r.filename, r));
-        return Array.from(byName.values());
+        setUploadProgress(0);
+        resolve();
       });
-      const nextPending = { ...pendingFiles };
-      files.forEach(f => { nextPending[f.name] = f; });
-      setPendingFiles(nextPending);
 
-      if ((data.results || []).some(r => r.status === 'uploaded')) {
-        onUploaded?.();
-      }
-    } catch (e) {
-      setResults(prev => [...prev, ...files.map(f => ({
-        filename: f.name,
-        status: 'error',
-        message: 'Upload failed — check your connection and try again.'
-      }))]);
-    }
-    setUploading(false);
+      xhr.open('POST', `/api/upload${force ? '?force=true' : ''}`);
+      xhr.send(formData);
+    });
   };
 
   const handleClick = () => {
@@ -78,6 +116,7 @@ export default function UploadButton({ onUploaded }) {
       return;
     }
     setResults([]);
+    setUploadProgress(0);
     setPanelOpen(true);
   };
 
@@ -108,6 +147,7 @@ export default function UploadButton({ onUploaded }) {
     if (uploading) return;
     setPanelOpen(false);
     setResults([]);
+    setUploadProgress(0);
   };
 
   return (
@@ -180,11 +220,25 @@ export default function UploadButton({ onUploaded }) {
               }}
             >
               {uploading ? (
-                <span style={{
-                  display: 'inline-block', width: '16px', height: '16px',
-                  border: '2px solid rgba(201,162,83,0.25)', borderTopColor: '#c9a253',
-                  borderRadius: '50%', animation: 'spin 0.7s linear infinite'
-                }} />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                  <span style={{
+                    display: 'inline-block', width: '16px', height: '16px',
+                    border: '2px solid rgba(201,162,83,0.25)', borderTopColor: '#c9a253',
+                    borderRadius: '50%', animation: 'spin 0.7s linear infinite'
+                  }} />
+                  <div style={{ fontSize: '13px', color: '#efeadd' }}>
+                    Uploading… {uploadProgress}%
+                  </div>
+                  <div style={{
+                    width: '200px', height: '4px', background: 'rgba(201,162,83,0.1)',
+                    borderRadius: '2px', overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      width: `${uploadProgress}%`, height: '100%', background: '#c9a253',
+                      transition: 'width 100ms linear'
+                    }} />
+                  </div>
+                </div>
               ) : (
                 <>
                   <div style={{ fontSize: '24px', marginBottom: '8px', color: '#9c988d' }}>⬆</div>
@@ -213,7 +267,7 @@ export default function UploadButton({ onUploaded }) {
 
                       {r.status === 'uploaded' && (
                         <div style={{ fontSize: '11px', color: '#7fb87f', marginTop: '3px' }}>
-                          ✓ Uploaded — tagging now
+                          ✓ Uploaded — tagging will start shortly
                         </div>
                       )}
                       {r.status === 'error' && (

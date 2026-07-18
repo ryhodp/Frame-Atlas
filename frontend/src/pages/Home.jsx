@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import ImageDetail from '../components/ImageDetail';
 import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
+import UploadProgressBadge from '../components/UploadProgressBadge';
 import TagModeBar from '../components/TagModeBar';
 import { useAuth } from '../AuthContext';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
@@ -583,6 +584,17 @@ export default function Home() {
       color: '#efeadd',
       fontFamily: "'Hanken Grotesk', system-ui, sans-serif"
     }}>
+
+      {/* ── Upload Progress Badge ───────────────────────────────────────────── */}
+      <div style={{
+        padding: isMobile ? '10px 14px' : '12px 20px',
+        borderBottom: '1px solid rgba(255,255,255,0.065)',
+        minHeight: '24px',
+        display: 'flex',
+        alignItems: 'center'
+      }}>
+        <UploadProgressBadge />
+      </div>
 
       {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <div
