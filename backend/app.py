@@ -17,7 +17,7 @@ from flask import Flask, jsonify, request, send_file, send_from_directory, Respo
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
-from PIL import Image
+from PIL import Image, ImageOps
 import google.auth.transport.requests
 from google.oauth2.service_account import Credentials
 from google.oauth2.credentials import Credentials as UserCredentials
@@ -3331,6 +3331,185 @@ def delete_image(image_id):
     return jsonify({'success': True,
                     'moved_to': REMOVED_FOLDER_NAME if user_id == 1 else None,
                     'filename': row['filename']})
+
+# ============================================================================
+# V18: CROP — replace an image with a cropped version of itself
+# ============================================================================
+
+def download_drive_file(service, file_id):
+    """Download a Drive file's raw bytes through the service account."""
+    req = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, req)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return fh.getvalue()
+
+# How each format gets re-saved after cropping. Pillow can't reuse the source
+# file's exact compression settings on a cropped copy, so JPEG quality 95 with
+# no chroma subsampling is the closest thing to "original quality" — visually
+# indistinguishable from the source.
+CROP_SAVE_FORMATS = {
+    'image/jpeg': ('JPEG', {'quality': 95, 'subsampling': 0, 'optimize': True}),
+    'image/png': ('PNG', {'optimize': True}),
+    'image/webp': ('WEBP', {'quality': 95, 'method': 6}),
+    'image/gif': ('GIF', {}),
+}
+
+@app.route('/api/images/<int:image_id>/crop', methods=['POST'])
+def crop_image(image_id):
+    """Replace an image with a cropped version of itself (V18).
+
+    The browser sends the crop box as percentages of the image (0-100), so
+    the same box means the same thing at any resolution. The original Drive
+    file moves to _Removed (recoverable), a new file with the same name takes
+    its place, and the database row is updated in place — which is what lets
+    every tag, caption, favorite, deck membership, and filmography entry
+    carry over without re-running Gemini.
+
+    Owner-or-admin, mirroring delete. Friends need the service account
+    upgraded to Editor on their folder (Viewer can read but not write).
+    Every stage fails loudly with a stage-specific message so a failed crop
+    can simply be retried.
+    """
+    user_id = session['user_id']
+    data = request.get_json(silent=True) or {}
+    box = data.get('box') or {}
+    try:
+        x_pct = float(box['x'])
+        y_pct = float(box['y'])
+        w_pct = float(box['w'])
+        h_pct = float(box['h'])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'error': 'Crop box must include numeric x, y, w, h percentages.'}), 400
+
+    x_pct = min(max(x_pct, 0.0), 100.0)
+    y_pct = min(max(y_pct, 0.0), 100.0)
+    w_pct = min(max(w_pct, 0.0), 100.0 - x_pct)
+    h_pct = min(max(h_pct, 0.0), 100.0 - y_pct)
+    if w_pct < 1 or h_pct < 1:
+        return jsonify({'error': 'Crop box is too small — it must cover at least 1% of the image.'}), 400
+    if w_pct >= 99.5 and h_pct >= 99.5:
+        return jsonify({'error': 'Crop box covers the whole image — nothing to crop.'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT drive_file_id, filename, user_id FROM images WHERE id = ?', (image_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row or (user_id != 1 and row['user_id'] != user_id):
+        return jsonify({'error': 'Image not found'}), 404
+
+    old_file_id = row['drive_file_id']
+    owner_id = row['user_id']
+
+    try:
+        service = get_drive_service()
+    except Exception as e:
+        return jsonify({'error': f'Could not connect to Google Drive: {e}'}), 500
+
+    # 1. Download the original + note which folder it lives in
+    try:
+        original_bytes = download_drive_file(service, old_file_id)
+        meta = service.files().get(fileId=old_file_id, fields='parents, mimeType').execute()
+    except Exception as e:
+        return jsonify({'error': f'Could not download the original from Drive: {e}'}), 500
+
+    # 2. Crop in memory
+    try:
+        img = Image.open(io.BytesIO(original_bytes))
+        # Phones often store rotation as a metadata note (EXIF) instead of
+        # rotating the pixels. Browsers honor the note, so the crop box the
+        # user drew is relative to the upright image — apply the note here
+        # too, or the box would land on a sideways image.
+        img = ImageOps.exif_transpose(img)
+        w_px, h_px = img.width, img.height
+        left = max(0, round(w_px * x_pct / 100.0))
+        top = max(0, round(h_px * y_pct / 100.0))
+        right = min(w_px, round(w_px * (x_pct + w_pct) / 100.0))
+        bottom = min(h_px, round(h_px * (y_pct + h_pct) / 100.0))
+        if right - left < 8 or bottom - top < 8:
+            return jsonify({'error': 'Crop box is too small to produce a usable image.'}), 400
+        cropped = img.crop((left, top, right, bottom))
+
+        mime = meta.get('mimeType') or 'image/jpeg'
+        fmt, save_kwargs = CROP_SAVE_FORMATS.get(mime, CROP_SAVE_FORMATS['image/jpeg'])
+        if fmt == 'JPEG' and cropped.mode != 'RGB':
+            cropped = cropped.convert('RGB')
+        out = io.BytesIO()
+        cropped.save(out, format=fmt, **save_kwargs)
+        cropped_bytes = out.getvalue()
+    except Exception as e:
+        return jsonify({'error': f'Cropping failed: {e}'}), 500
+
+    # 3. Upload the cropped copy next to the original — same folder, same name
+    try:
+        media = MediaIoBaseUpload(io.BytesIO(cropped_bytes), mimetype=mime)
+        new_file = service.files().create(
+            body={'name': row['filename'], 'parents': meta.get('parents', [])},
+            media_body=media, fields='id, md5Checksum'
+        ).execute()
+    except Exception as e:
+        msg = str(e)
+        if 'insufficient' in msg.lower() or 'permission' in msg.lower() or '403' in msg:
+            return jsonify({
+                'error': ("Drive blocked the upload — the service account only has Viewer "
+                          "access to this folder. In Drive: right-click the folder → Share → "
+                          "change the service account's role to Editor, then try again.")
+            }), 403
+        return jsonify({'error': f'Could not upload the cropped image to Drive: {msg}'}), 500
+
+    # 4. Move the original into _Removed (recoverable, same as delete). If
+    #    this fails, undo the upload so Drive isn't left holding two copies.
+    try:
+        removed_id = get_or_create_removed_folder(service, get_root_folder_id(owner_id))
+        service.files().update(
+            fileId=old_file_id,
+            addParents=removed_id,
+            removeParents=','.join(meta.get('parents', [])),
+            fields='id'
+        ).execute()
+    except Exception as e:
+        try:
+            service.files().delete(fileId=new_file['id']).execute()
+        except Exception:
+            pass
+        return jsonify({'error': f'Could not move the original to {REMOVED_FOLDER_NAME}: {e}'}), 500
+
+    # 5. Update the database row in place — the id stays the same, so tags,
+    #    colors ownership, decks, favorites, and filmography all still point
+    #    at this image. Only the derived, now-stale data gets recomputed.
+    thumbnail = generate_thumbnail(cropped_bytes)
+    if not thumbnail:
+        return jsonify({
+            'error': ('The crop succeeded in Drive but the new thumbnail could not be '
+                      'generated. Run a sync to reconcile the library.')
+        }), 500
+    aspect_ratio = get_image_aspect_ratio(cropped_bytes)
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        UPDATE images SET drive_file_id = ?, thumbnail_blob = ?, aspect_ratio = ?,
+                          md5_checksum = ?, phash = ?
+        WHERE id = ?
+    ''', (new_file['id'], thumbnail, aspect_ratio, new_file.get('md5Checksum'),
+          compute_phash(thumbnail), image_id))
+    conn.commit()
+    conn.close()
+
+    hexes = extract_palette(thumbnail)
+    if hexes:
+        save_palette(image_id, owner_id, hexes)
+
+    return jsonify({
+        'success': True,
+        'image_id': image_id,
+        'thumbnail': f"data:image/jpeg;base64,{base64.b64encode(thumbnail).decode('utf-8')}",
+        'aspect_ratio': aspect_ratio,
+        'width': cropped.width,
+        'height': cropped.height,
+    })
 
 # ============================================================================
 # DAY 8 (V7): DUPLICATE DETECTION
