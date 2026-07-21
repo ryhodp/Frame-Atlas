@@ -496,7 +496,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1200,
-      background: '#0a0a0b', color: '#efeadd',
+      background: '#4a4a52', color: '#efeadd',
       display: 'flex', flexDirection: 'column',
       fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
       animation: 'fadeIn 0.15s ease',
