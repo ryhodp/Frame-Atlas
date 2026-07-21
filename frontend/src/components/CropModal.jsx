@@ -496,7 +496,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1200,
-      background: '#4a4a52', color: '#efeadd',
+      background: '#0a0a0b', color: '#efeadd',
       display: 'flex', flexDirection: 'column',
       fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
       animation: 'fadeIn 0.15s ease',
@@ -595,7 +595,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           <div style={{
             flex: 1, display: 'flex', minHeight: 0,
             flexDirection: isMobile ? 'column' : 'row',
-            gap: '1px', background: 'rgba(255,255,255,0.065)',
+            gap: '1px', background: '#4a4a52',
           }}>
             {/* Original + handles */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0a0a0b', minWidth: 0, minHeight: 0 }}>
