@@ -598,7 +598,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             gap: '1px', background: '#4a4a52',
           }}>
             {/* Original + handles */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0a0a0b', minWidth: 0, minHeight: 0 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#4a4a52', minWidth: 0, minHeight: 0 }}>
               <div style={panelLabel()}>
                 ORIGINAL — DRAG HANDLES TO ADJUST
               </div>
@@ -674,7 +674,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             </div>
 
             {/* Cropped result */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0a0a0b', minWidth: 0, minHeight: 0 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#4a4a52', minWidth: 0, minHeight: 0 }}>
               <div style={{ ...panelLabel(), color: '#d9a441', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 CROPPED RESULT
                 {item?.status === 'ready' && !item.isFallback && confStyle && (
