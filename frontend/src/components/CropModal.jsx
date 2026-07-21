@@ -92,9 +92,18 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   const previewCanvasRef = useRef(null);
 
   // ── Lazy loading: current + next PREFETCH_AHEAD ────────────────────────────
-  const loadItem = useCallback(async (idx) => {
+  // Both the prefetch effect below and "Approve all remaining" can ask to
+  // load the same item — the prefetch effect fires it eagerly and doesn't
+  // wait, while approve-all needs to know the item is actually ready before
+  // deciding it. Stashing the in-flight promise on the item lets a second
+  // caller await the SAME load instead of re-checking a status flag that
+  // might still read "loading" the instant it's asked.
+  const loadItem = useCallback((idx) => {
     const item = itemsRef.current[idx];
-    if (!item || item.status !== 'pending') return;
+    if (!item) return Promise.resolve();
+    if (item.loadPromise) return item.loadPromise;
+    if (item.status !== 'pending') return Promise.resolve();
+    item.loadPromise = (async () => {
     item.status = 'loading';
     item.error = null;
     force();
@@ -108,8 +117,15 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       const blob = await res.blob();
       item.url = URL.createObjectURL(blob);
       const img = new Image();
-      img.src = item.url;
-      await img.decode();
+      // onload/onerror, not img.decode() — decode() is known to hang under
+      // some browser conditions (backgrounded tabs, some automation
+      // contexts) with no rejection ever firing. CropStudio's own loadImage()
+      // already used this exact pattern; no reason to have deviated from it.
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Could not decode this image.'));
+        img.src = item.url;
+      });
       item.imgEl = img;
       let result = null;
       try {
@@ -130,6 +146,8 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       item.error = e.message || 'Could not load this image.';
     }
     force();
+    })();
+    return item.loadPromise;
   }, [force]);
 
   useEffect(() => {
@@ -221,7 +239,11 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       const item = list[i];
       if (item.decided) continue;
       setDetectAllProgress({ done: i - current + 1, total: list.length - current, filename: item.fa.filename });
-      if (item.status === 'pending') await loadItem(i);
+      // Always await, even if the prefetch effect already kicked this same
+      // load off — loadItem hands back the SAME in-flight promise rather
+      // than a fresh one, so this can't race ahead of a load that's already
+      // running and mistake "still loading" for "failed."
+      await loadItem(i);
       // A brief yield keeps the progress text painting between detections
       await new Promise(r => setTimeout(r, 0));
       item.decided = item.status === 'ready' ? 'approved' : 'skipped';
@@ -637,7 +659,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                   <PanelNotice text={item.error}>
                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
                       <button
-                        onClick={() => { item.status = 'pending'; loadItem(current); }}
+                        onClick={() => { item.status = 'pending'; item.loadPromise = null; loadItem(current); }}
                         style={ghostBtn('#dcbd76', 'rgba(201,162,83,0.35)')}
                       >
                         Retry
