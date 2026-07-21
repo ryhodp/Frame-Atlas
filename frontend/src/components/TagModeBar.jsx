@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SIDEBAR_WIDTH } from './Sidebar';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useAuth } from '../AuthContext';
 
 // ── Confirm step — small inline modal, dark panel look ────────────────────────
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -65,7 +66,12 @@ export default function TagModeBar({
   setSelectedIds,
   onExit,
   onBulkChanged, // (patchedIds, patchFn) — let Home.jsx update local image state
+  onCrop,        // V18: open the crop review modal for the current selection
 }) {
+  // V18: Select Mode is open to everyone now (friends crop their own images
+  // and add to their decks); the tag/filmography panels stay admin-only
+  // because their backend endpoints are.
+  const { isAdmin } = useAuth();
   const [categories, setCategories] = useState([]);
   const [summary, setSummary] = useState({ total: 0, tags: [] });
   const [suggestions, setSuggestions] = useState([]);
@@ -383,10 +389,25 @@ export default function TagModeBar({
             Clear selection
           </button>
 
+          {count > 0 && onCrop && (
+            <button
+              onClick={onCrop}
+              title="Auto-detect and remove letterbox bars / screenshot chrome from the selected images"
+              style={{
+                background: 'rgba(217,164,65,0.14)',
+                border: '1px solid rgba(217,164,65,0.5)',
+                color: '#d9a441', borderRadius: '8px', padding: '7px 14px',
+                cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit'
+              }}
+            >
+              ✂ Crop {count}
+            </button>
+          )}
+
           <div style={{ flex: 1 }} />
 
           <button onClick={onExit} style={ghostBtn('#ffb4ab', 'rgba(255,180,171,0.35)')}>
-            Exit Tag Mode
+            Exit Select Mode
           </button>
         </div>
 
@@ -395,6 +416,7 @@ export default function TagModeBar({
             display: 'flex', flexWrap: 'wrap', gap: '20px',
             padding: isMobile ? '16px 14px' : '16px 20px'
           }}>
+            {isAdmin && <>
             {/* Apply tag panel */}
             <div style={{ minWidth: '280px', flex: '1 1 280px' }} data-tagmode-area>
               <div style={sectionLabel()}>APPLY TAG</div>
@@ -597,6 +619,7 @@ export default function TagModeBar({
                 </div>
               </div>
             )}
+            </>}
 
             {/* Add to Deck panel */}
             <div style={{ minWidth: '220px', flex: '0 1 220px', position: 'relative' }} data-tagmode-area>

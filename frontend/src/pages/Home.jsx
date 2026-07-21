@@ -5,6 +5,7 @@ import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
 import UploadProgressBadge from '../components/UploadProgressBadge';
 import TagModeBar from '../components/TagModeBar';
+import CropModal from '../components/CropModal';
 import { useAuth } from '../AuthContext';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
 
@@ -48,9 +49,12 @@ export default function Home() {
   const [similarTo, setSimilarTo] = useState(null); // {id, filename} or null
   const [similarNotice, setSimilarNotice] = useState(null); // dismissible banner text
 
-  // ── Tag Mode: bulk-select images and bulk-edit their tags ───────────────────
+  // ── Select Mode (was "Tag Mode"): bulk-select images to tag, crop, or deck ──
   const [tagMode, setTagMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+
+  // ── V18: crop review modal — array of images to crop, or null ──────────────
+  const [cropImages, setCropImages] = useState(null);
   const [dragRect, setDragRect] = useState(null); // {left, top, width, height} in viewport coords, or null
   const tileRefs = useRef(new Map()); // image id -> tile DOM node
   const dragStateRef = useRef(null); // { startX, startY, dragging, baseSelected }
@@ -652,27 +656,28 @@ export default function Home() {
             )}
           </div>
 
-          {/* Upload, Tag Mode, and Duplicate review all edit the shared library
-              directly — admin-only until per-user libraries exist (Day 17). */}
+          {/* V18: Select Mode is for everyone — friends bulk-crop their own
+              images and add to decks; the bar's tag panels stay admin-only. */}
+          <button
+            onClick={toggleTagMode}
+            title="Select Mode — bulk-select images to crop, tag, or add to a deck"
+            style={{
+              height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
+              background: tagMode ? 'rgba(184,206,161,0.14)' : '#18181b',
+              border: `1px solid ${tagMode ? 'rgba(184,206,161,0.6)' : 'rgba(255,255,255,0.12)'}`,
+              borderRadius: '10px',
+              cursor: 'pointer',
+              color: tagMode ? '#b8cea1' : '#9c988d',
+              fontSize: '16px'
+            }}
+          >
+            ✓
+          </button>
+
+          {/* Upload and Duplicate review still edit the admin's own library */}
           {isAdmin && (
             <>
               <UploadButton onUploaded={() => fetchPage(0, false)} />
-
-              <button
-                onClick={toggleTagMode}
-                title="Tag Mode — bulk-select images and bulk-edit their tags"
-                style={{
-                  height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
-                  background: tagMode ? 'rgba(184,206,161,0.14)' : '#18181b',
-                  border: `1px solid ${tagMode ? 'rgba(184,206,161,0.6)' : 'rgba(255,255,255,0.12)'}`,
-                  borderRadius: '10px',
-                  cursor: 'pointer',
-                  color: tagMode ? '#b8cea1' : '#9c988d',
-                  fontSize: '16px'
-                }}
-              >
-                ✓
-              </button>
 
               <button
                 onClick={() => setShowDuplicates(true)}
@@ -1493,6 +1498,16 @@ export default function Home() {
             setSelectedImage(null); // close panel so the filtered grid is visible
           }}
           onFindSimilar={handleFindSimilar}
+          onCrop={(img) => setCropImages([img])}
+        />
+      )}
+
+      {/* V18: crop review modal — auto-detects letterbox/chrome, applies on approve */}
+      {cropImages && (
+        <CropModal
+          images={cropImages}
+          onClose={() => setCropImages(null)}
+          onImageCropped={(id, patch) => handleImageUpdated(id, patch)}
         />
       )}
 
@@ -1512,6 +1527,10 @@ export default function Home() {
           setSelectedIds={setSelectedIds}
           onExit={toggleTagMode}
           onBulkChanged={handleBulkTagsChanged}
+          onCrop={() => {
+            const sel = images.filter(i => selectedIds.has(i.id));
+            if (sel.length) setCropImages(sel);
+          }}
         />
       )}
 

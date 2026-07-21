@@ -24,7 +24,7 @@ const CAT_ORDER = [
   'genre_aesthetic', 'era_decade', 'camera_format', 'subjects'
 ];
 
-export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSearchFilm, onFindSimilar }) {
+export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSearchFilm, onFindSimilar, onCrop }) {
   const isMobile = useIsMobile();
   const [fullImage, setFullImage] = useState(null);
   const [fullError, setFullError] = useState(false);
@@ -71,7 +71,10 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
       .catch(() => setFullError(true));
 
     return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [image?.id]);
+    // Re-fetch on aspect_ratio change too, not just id: a crop (V18) replaces
+    // the Drive file in place, same image id, so id alone won't tell this
+    // effect the full-res bytes it already fetched are now stale.
+  }, [image?.id, image?.aspect_ratio]);
 
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
@@ -695,6 +698,15 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               style={footBtn('#a99bf7')}
             >
               ≈ Find Similar
+            </button>
+          )}
+          {onCrop && (
+            <button
+              onClick={() => onCrop(image)}
+              title="Auto-detect and remove letterbox bars / screenshot chrome"
+              style={footBtn('#d9a441')}
+            >
+              ✂ Crop
             </button>
           )}
 
