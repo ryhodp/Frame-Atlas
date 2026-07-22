@@ -365,110 +365,102 @@ function detectNavBar(data, W, H) {
 // ── PURE BLACK BAR DETECTION ──
 // Detects actual black bars (letterbox/pillarbox), including ones with small
 // bright UI icons/text overlaid on them (close button, bookmark, like/comment
-// counts). The signal is ROW UNIFORMITY, not raw darkness: a real bar is one
-// flat background color across nearly the whole row width, with icons/text
-// as a small minority of pixels riding on top of it. Real dark photo content
-// (night sky, silhouettes, shadow, foliage) is never this flat — it's
-// gradients, texture, and edges — so no single color dominates a row the way
-// a flat bar's background does, even when the photo is very dark overall.
+// counts). The primary signal is FLATNESS: a real bar is essentially dead
+// flat — a whole line whose pixels barely vary from each other (std ~0–3) —
+// AND dark. Real dark photo content (a shadowed wall, night sky, silhouettes)
+// is NEVER dead flat: even when it looks black to the eye it carries a
+// gradient, grain, or faint texture, so its per-line std runs ~10–30. That
+// flatness gap is what separates a true bar from dark photo, and it's the one
+// signal that holds up on Ryan's low-key cinematic frames where darkness and
+// color-dominance alone both fail.
 //
-// v1 of this used raw per-pixel darkness (any dark, low-saturation pixel
-// counts) with only ~50% of the row needing to qualify. That was so loose it
-// treated large swaths of real dark photo content as "bar" — confirmed on a
-// real source image where it left only a small bright decorative element as
-// the "surviving" content and marked the rest of the actual photo as chrome.
-// Row-mode-color matching (same technique as detectNavBar below) fixes this:
-// requiring one dominant color to cover most of the row's WIDTH is what real
-// dark photo texture essentially never does, but a bar-with-icons still does.
+// Earlier versions keyed on raw pixel darkness (v1) and then on row-mode-color
+// coverage (v2). Both mistook a dark, fairly-uniform wall in the TOP of a real
+// photo for a bar and cropped straight through the actual content (confirmed
+// on a real source frame: the crop's top edge cut through the middle of the
+// photo, chopping off a lit window and the subject's head). A dark wall can be
+// dark and even color-dominant, but it is not dead flat — so std catches what
+// those missed.
 //
-// level (from the Redetect button) tightens the darkness/coverage
-// requirements each press, so pressing Redetect after a bad result actually
-// changes the outcome — same escalation pattern as the rest of this file —
-// instead of silently re-running the identical check.
+// To ignore small bright UI glyphs sitting on a bar (which would otherwise
+// spike the std of an otherwise-flat line), std is measured on a TRIMMED line:
+// the brightest ~12% of pixels are dropped before computing spread, so a few
+// bright icon pixels can't disqualify a genuine flat bar, but a textured wall
+// (whose variation is spread across ALL its pixels, not a few bright outliers)
+// still fails.
+//
+// level (from the Redetect button) tightens BOTH thresholds each press — the
+// bar must be darker and flatter to still count — so pressing Redetect after
+// an over-crop actually shrinks the detected bar and reveals more real content,
+// instead of silently re-running the identical check. Wide, monotonic sweep so
+// repeated presses visibly move the boundary.
 function detectPureBlackBars(data, W, H, level = 0) {
-  const DARK_LUMA_THRESH = Math.max(15, 35 - level * 4);      // bar background must be this dark
-  const MATCH_FRAC_THRESH = Math.min(0.95, 0.75 + level * 0.04); // dominant color must cover this much of the row/col
-  const MIN_BAR_HEIGHT = 6;       // minimum consecutive rows to count as a bar (not noise)
-  const EDGE_SCAN_DEPTH = 0.40;   // scan up to 40% from each edge
-  const GAP_TOLERANCE = 4;        // rows allowed to briefly fail (a taller icon/text row) before the bar is considered ended
+  const DARK_LUMA_THRESH = Math.max(8, 18 - level * 2.0);   // bar must be near-black (18 → 8)
+  const FLAT_STD_THRESH  = Math.max(1.5, 4.5 - level * 0.5); // bar must be near dead-flat (4.5 → 1.5)
+  const MIN_BAR_SIZE = 6;         // minimum consecutive lines to count as a bar (not noise)
+  const EDGE_SCAN_DEPTH = 0.45;   // scan up to 45% from each edge
+  const GAP_TOLERANCE = 4;        // lines allowed to briefly fail (a taller icon/text line) before the bar is considered ended
+  const TRIM_FRAC = 0.12;         // drop this fraction of brightest pixels before measuring spread (ignores UI glyphs)
 
-  // Quantized mode color of a row (16 levels/channel — enough to group real
-  // bar-background pixels together while still separating icon/text pixels
-  // sitting on top of them) and what fraction of the row it covers.
-  function rowModeColor(y) {
-    const buckets = new Map();
-    for (let x = 0; x < W; x++) {
-      const i = (y*W+x)*4;
-      const key = (data[i]>>4)*256 + (data[i+1]>>4)*16 + (data[i+2]>>4);
-      buckets.set(key, (buckets.get(key)||0) + 1);
-    }
-    let bestKey = -1, bestCount = -1;
-    for (const [k, c] of buckets) if (c > bestCount) { bestCount = c; bestKey = k; }
-    const r = Math.floor(bestKey/256)*16 + 8, g = Math.floor((bestKey%256)/16)*16 + 8, b = (bestKey%16)*16 + 8;
-    return { lum: 0.299*r + 0.587*g + 0.114*b, frac: bestCount / W };
+  // Mean luminance of a line and its TRIMMED std (spread after removing the
+  // brightest TRIM_FRAC of pixels). Trimming lets a flat bar keep a low std
+  // even with a few bright icon/text pixels on it, while a textured dark wall
+  // — whose variation is spread across the whole line, not a few outliers —
+  // still reads as high-std and is correctly rejected.
+  function lineStats(read, n) {
+    const lums = new Float32Array(n);
+    let sum = 0;
+    for (let j = 0; j < n; j++) { const l = read(j); lums[j] = l; sum += l; }
+    const mean = sum / n;
+    const sorted = Float32Array.from(lums).sort();
+    const keep = Math.max(1, Math.floor(n * (1 - TRIM_FRAC)));
+    let tSum = 0;
+    for (let j = 0; j < keep; j++) tSum += sorted[j];
+    const tMean = tSum / keep;
+    let v = 0;
+    for (let j = 0; j < keep; j++) { const d = sorted[j] - tMean; v += d * d; }
+    return { mean, std: Math.sqrt(v / keep) };
   }
-  function colModeColor(x) {
-    const buckets = new Map();
-    for (let y = 0; y < H; y++) {
-      const i = (y*W+x)*4;
-      const key = (data[i]>>4)*256 + (data[i+1]>>4)*16 + (data[i+2]>>4);
-      buckets.set(key, (buckets.get(key)||0) + 1);
-    }
-    let bestKey = -1, bestCount = -1;
-    for (const [k, c] of buckets) if (c > bestCount) { bestCount = c; bestKey = k; }
-    const r = Math.floor(bestKey/256)*16 + 8, g = Math.floor((bestKey%256)/16)*16 + 8, b = (bestKey%16)*16 + 8;
-    return { lum: 0.299*r + 0.587*g + 0.114*b, frac: bestCount / H };
-  }
+  const rowStats = y => lineStats(x => 0.299*data[(y*W+x)*4] + 0.587*data[(y*W+x)*4+1] + 0.114*data[(y*W+x)*4+2], W);
+  const colStats = x => lineStats(y => 0.299*data[(y*W+x)*4] + 0.587*data[(y*W+x)*4+1] + 0.114*data[(y*W+x)*4+2], H);
 
-  function scanEdge(size, maxScan, modeColorFn) {
-    let barEnd = -1;
-    for (let i = 0; i < Math.min(maxScan, size); i++) {
-      const { lum, frac } = modeColorFn(i);
-      const isBar = lum < DARK_LUMA_THRESH && frac > MATCH_FRAC_THRESH;
-      if (isBar) {
-        barEnd = i;
-      } else if (barEnd >= 0) {
+  function isBarLine(s) { return s.mean < DARK_LUMA_THRESH && s.std < FLAT_STD_THRESH; }
+
+  // Walk inward from one edge, extending the bar across flat-dark lines and
+  // bridging tiny gaps (a taller text line inside the bar), stopping once a
+  // sustained run of non-bar lines confirms real content has started.
+  function scanEdge(size, maxScan, statsFn, reverse) {
+    let last = reverse ? size : -1;
+    const start = reverse ? size - 1 : 0;
+    const step = reverse ? -1 : 1;
+    const limit = reverse ? Math.max(0, size - maxScan) : Math.min(maxScan, size);
+    for (let i = start; reverse ? i >= limit : i < limit; i += step) {
+      if (isBarLine(statsFn(i))) {
+        last = i;
+      } else if (reverse ? last < size : last >= 0) {
         let gapFails = 0;
-        for (let k = i; k < Math.min(i + GAP_TOLERANCE, size); k++) {
-          const s = modeColorFn(k);
-          if (!(s.lum < DARK_LUMA_THRESH && s.frac > MATCH_FRAC_THRESH)) gapFails++;
+        for (let g = 1; g <= GAP_TOLERANCE; g++) {
+          const k = i + step * (g - 1);
+          if (k < 0 || k >= size || !isBarLine(statsFn(k))) gapFails++;
         }
-        if (gapFails >= GAP_TOLERANCE) break; // gap is real content, bar ended
+        if (gapFails >= GAP_TOLERANCE) break; // sustained real content — bar ended
       }
     }
-    return barEnd;
-  }
-  function scanEdgeReverse(size, maxScan, modeColorFn) {
-    let barStart = size;
-    for (let i = size - 1; i >= Math.max(0, size - maxScan); i--) {
-      const { lum, frac } = modeColorFn(i);
-      const isBar = lum < DARK_LUMA_THRESH && frac > MATCH_FRAC_THRESH;
-      if (isBar) {
-        barStart = i;
-      } else if (barStart < size) {
-        let gapFails = 0;
-        for (let k = i; k > Math.max(i - GAP_TOLERANCE, -1); k--) {
-          const s = modeColorFn(k);
-          if (!(s.lum < DARK_LUMA_THRESH && s.frac > MATCH_FRAC_THRESH)) gapFails++;
-        }
-        if (gapFails >= GAP_TOLERANCE) break;
-      }
-    }
-    return barStart;
+    return last;
   }
 
   const result = {};
   const maxScanH = Math.floor(H * EDGE_SCAN_DEPTH);
-  const topBarEnd = scanEdge(H, maxScanH, rowModeColor);
-  if (topBarEnd >= 0 && topBarEnd + 1 >= MIN_BAR_HEIGHT) result.topY = topBarEnd + 1;
-  const bottomBarStart = scanEdgeReverse(H, maxScanH, rowModeColor);
-  if (bottomBarStart < H && H - bottomBarStart >= MIN_BAR_HEIGHT) result.bottomY = bottomBarStart;
+  const topBarEnd = scanEdge(H, maxScanH, rowStats, false);
+  if (topBarEnd >= 0 && topBarEnd + 1 >= MIN_BAR_SIZE) result.topY = topBarEnd + 1;
+  const bottomBarStart = scanEdge(H, maxScanH, rowStats, true);
+  if (bottomBarStart < H && H - bottomBarStart >= MIN_BAR_SIZE) result.bottomY = bottomBarStart;
 
   const maxScanW = Math.floor(W * EDGE_SCAN_DEPTH);
-  const leftBarEnd = scanEdge(W, maxScanW, colModeColor);
-  if (leftBarEnd >= 0 && leftBarEnd + 1 >= MIN_BAR_HEIGHT) result.leftX = leftBarEnd + 1;
-  const rightBarStart = scanEdgeReverse(W, maxScanW, colModeColor);
-  if (rightBarStart < W && W - rightBarStart >= MIN_BAR_HEIGHT) result.rightX = rightBarStart;
+  const leftBarEnd = scanEdge(W, maxScanW, colStats, false);
+  if (leftBarEnd >= 0 && leftBarEnd + 1 >= MIN_BAR_SIZE) result.leftX = leftBarEnd + 1;
+  const rightBarStart = scanEdge(W, maxScanW, colStats, true);
+  if (rightBarStart < W && W - rightBarStart >= MIN_BAR_SIZE) result.rightX = rightBarStart;
 
   return result;
 }
