@@ -363,118 +363,112 @@ function detectNavBar(data, W, H) {
 }
 
 // ── PURE BLACK BAR DETECTION ──
-// Detects actual black bars (letterbox/pillarbox) by looking for regions where
-// ALL pixels are pure or near-pure black: low luminance AND minimal RGB variation.
-// This catches bars that would otherwise be mistaken for legitimate dark content
-// (shadows, night sky, dark machinery) which CAN vary slightly in tone.
-// Returns { topY, bottomY, leftX, rightX } edges of detected bars, or empty object.
-function detectPureBlackBars(data, W, H) {
-  const COLOR_VAR_THRESH = 50;    // R/G/B must be within 50 of each other (very permissive)
-  const PURE_BLACK_LUMA = 90;     // luminance threshold for "dark" (0-90 range, catches most dark bars)
+// Detects actual black bars (letterbox/pillarbox), including ones with small
+// bright UI icons/text overlaid on them (close button, bookmark, like/comment
+// counts). The signal is ROW UNIFORMITY, not raw darkness: a real bar is one
+// flat background color across nearly the whole row width, with icons/text
+// as a small minority of pixels riding on top of it. Real dark photo content
+// (night sky, silhouettes, shadow, foliage) is never this flat — it's
+// gradients, texture, and edges — so no single color dominates a row the way
+// a flat bar's background does, even when the photo is very dark overall.
+//
+// v1 of this used raw per-pixel darkness (any dark, low-saturation pixel
+// counts) with only ~50% of the row needing to qualify. That was so loose it
+// treated large swaths of real dark photo content as "bar" — confirmed on a
+// real source image where it left only a small bright decorative element as
+// the "surviving" content and marked the rest of the actual photo as chrome.
+// Row-mode-color matching (same technique as detectNavBar below) fixes this:
+// requiring one dominant color to cover most of the row's WIDTH is what real
+// dark photo texture essentially never does, but a bar-with-icons still does.
+//
+// level (from the Redetect button) tightens the darkness/coverage
+// requirements each press, so pressing Redetect after a bad result actually
+// changes the outcome — same escalation pattern as the rest of this file —
+// instead of silently re-running the identical check.
+function detectPureBlackBars(data, W, H, level = 0) {
+  const DARK_LUMA_THRESH = Math.max(15, 35 - level * 4);      // bar background must be this dark
+  const MATCH_FRAC_THRESH = Math.min(0.95, 0.75 + level * 0.04); // dominant color must cover this much of the row/col
   const MIN_BAR_HEIGHT = 6;       // minimum consecutive rows to count as a bar (not noise)
   const EDGE_SCAN_DEPTH = 0.40;   // scan up to 40% from each edge
+  const GAP_TOLERANCE = 4;        // rows allowed to briefly fail (a taller icon/text row) before the bar is considered ended
 
-  function isPixelPureBlack(i) {
-    const r = data[i];
-    const g = data[i+1];
-    const b = data[i+2];
-    const lum = 0.299*r + 0.587*g + 0.114*b;
-    const colorVar = Math.max(r, g, b) - Math.min(r, g, b);
-    return lum < PURE_BLACK_LUMA && colorVar < COLOR_VAR_THRESH;
-  }
-
-  // Count pure-black pixels per row
-  const pureBlackFraction = new Float32Array(H);
-  for (let y = 0; y < H; y++) {
-    let blackCount = 0;
+  // Quantized mode color of a row (16 levels/channel — enough to group real
+  // bar-background pixels together while still separating icon/text pixels
+  // sitting on top of them) and what fraction of the row it covers.
+  function rowModeColor(y) {
+    const buckets = new Map();
     for (let x = 0; x < W; x++) {
-      if (isPixelPureBlack((y*W+x)*4)) blackCount++;
+      const i = (y*W+x)*4;
+      const key = (data[i]>>4)*256 + (data[i+1]>>4)*16 + (data[i+2]>>4);
+      buckets.set(key, (buckets.get(key)||0) + 1);
     }
-    pureBlackFraction[y] = blackCount / W;
+    let bestKey = -1, bestCount = -1;
+    for (const [k, c] of buckets) if (c > bestCount) { bestCount = c; bestKey = k; }
+    const r = Math.floor(bestKey/256)*16 + 8, g = Math.floor((bestKey%256)/16)*16 + 8, b = (bestKey%16)*16 + 8;
+    return { lum: 0.299*r + 0.587*g + 0.114*b, frac: bestCount / W };
   }
-
-  // Scan from edges inward, finding contiguous regions of >50% dark-ish
-  const PURITY_THRESH = 0.50;
-  const maxScanH = Math.floor(H * EDGE_SCAN_DEPTH);
-  const result = {};
-
-  // Scan from top
-  let topBarEnd = -1;
-  for (let y = 0; y < Math.min(maxScanH, H); y++) {
-    if (pureBlackFraction[y] > PURITY_THRESH) {
-      topBarEnd = y;
-    } else if (topBarEnd >= 0) {
-      // Allow small gaps (compression artifacts, faint text)
-      let consecutiveNonBlack = 0;
-      for (let k = y; k < Math.min(y + 3, H); k++) {
-        if (pureBlackFraction[k] <= PURITY_THRESH) consecutiveNonBlack++;
-      }
-      if (consecutiveNonBlack >= 3) break; // gap is too large, bar ended
-    }
-  }
-  if (topBarEnd >= 0 && topBarEnd + 1 >= MIN_BAR_HEIGHT) {
-    result.topY = topBarEnd + 1;
-  }
-
-  // Scan from bottom
-  let bottomBarStart = H;
-  for (let y = H-1; y >= Math.max(0, H - maxScanH); y--) {
-    if (pureBlackFraction[y] > PURITY_THRESH) {
-      bottomBarStart = y;
-    } else if (bottomBarStart < H) {
-      let consecutiveNonBlack = 0;
-      for (let k = y; k > Math.max(y - 3, -1); k--) {
-        if (pureBlackFraction[k] <= PURITY_THRESH) consecutiveNonBlack++;
-      }
-      if (consecutiveNonBlack >= 3) break;
-    }
-  }
-  if (bottomBarStart < H && H - bottomBarStart >= MIN_BAR_HEIGHT) {
-    result.bottomY = bottomBarStart;
-  }
-
-  // Same logic for columns (left/right bars)
-  const maxScanW = Math.floor(W * EDGE_SCAN_DEPTH);
-  const pureBlackFractionCol = new Float32Array(W);
-  for (let x = 0; x < W; x++) {
-    let blackCount = 0;
+  function colModeColor(x) {
+    const buckets = new Map();
     for (let y = 0; y < H; y++) {
-      if (isPixelPureBlack((y*W+x)*4)) blackCount++;
+      const i = (y*W+x)*4;
+      const key = (data[i]>>4)*256 + (data[i+1]>>4)*16 + (data[i+2]>>4);
+      buckets.set(key, (buckets.get(key)||0) + 1);
     }
-    pureBlackFractionCol[x] = blackCount / H;
+    let bestKey = -1, bestCount = -1;
+    for (const [k, c] of buckets) if (c > bestCount) { bestCount = c; bestKey = k; }
+    const r = Math.floor(bestKey/256)*16 + 8, g = Math.floor((bestKey%256)/16)*16 + 8, b = (bestKey%16)*16 + 8;
+    return { lum: 0.299*r + 0.587*g + 0.114*b, frac: bestCount / H };
   }
 
-  let leftBarEnd = -1;
-  for (let x = 0; x < Math.min(maxScanW, W); x++) {
-    if (pureBlackFractionCol[x] > PURITY_THRESH) {
-      leftBarEnd = x;
-    } else if (leftBarEnd >= 0) {
-      let consecutiveNonBlack = 0;
-      for (let k = x; k < Math.min(x + 3, W); k++) {
-        if (pureBlackFractionCol[k] <= PURITY_THRESH) consecutiveNonBlack++;
+  function scanEdge(size, maxScan, modeColorFn) {
+    let barEnd = -1;
+    for (let i = 0; i < Math.min(maxScan, size); i++) {
+      const { lum, frac } = modeColorFn(i);
+      const isBar = lum < DARK_LUMA_THRESH && frac > MATCH_FRAC_THRESH;
+      if (isBar) {
+        barEnd = i;
+      } else if (barEnd >= 0) {
+        let gapFails = 0;
+        for (let k = i; k < Math.min(i + GAP_TOLERANCE, size); k++) {
+          const s = modeColorFn(k);
+          if (!(s.lum < DARK_LUMA_THRESH && s.frac > MATCH_FRAC_THRESH)) gapFails++;
+        }
+        if (gapFails >= GAP_TOLERANCE) break; // gap is real content, bar ended
       }
-      if (consecutiveNonBlack >= 3) break;
     }
+    return barEnd;
   }
-  if (leftBarEnd >= 0 && leftBarEnd + 1 >= MIN_BAR_HEIGHT) {
-    result.leftX = leftBarEnd + 1;
+  function scanEdgeReverse(size, maxScan, modeColorFn) {
+    let barStart = size;
+    for (let i = size - 1; i >= Math.max(0, size - maxScan); i--) {
+      const { lum, frac } = modeColorFn(i);
+      const isBar = lum < DARK_LUMA_THRESH && frac > MATCH_FRAC_THRESH;
+      if (isBar) {
+        barStart = i;
+      } else if (barStart < size) {
+        let gapFails = 0;
+        for (let k = i; k > Math.max(i - GAP_TOLERANCE, -1); k--) {
+          const s = modeColorFn(k);
+          if (!(s.lum < DARK_LUMA_THRESH && s.frac > MATCH_FRAC_THRESH)) gapFails++;
+        }
+        if (gapFails >= GAP_TOLERANCE) break;
+      }
+    }
+    return barStart;
   }
 
-  let rightBarStart = W;
-  for (let x = W-1; x >= Math.max(0, W - maxScanW); x--) {
-    if (pureBlackFractionCol[x] > PURITY_THRESH) {
-      rightBarStart = x;
-    } else if (rightBarStart < W) {
-      let consecutiveNonBlack = 0;
-      for (let k = x; k > Math.max(x - 3, -1); k--) {
-        if (pureBlackFractionCol[k] <= PURITY_THRESH) consecutiveNonBlack++;
-      }
-      if (consecutiveNonBlack >= 3) break;
-    }
-  }
-  if (rightBarStart < W && W - rightBarStart >= MIN_BAR_HEIGHT) {
-    result.rightX = rightBarStart;
-  }
+  const result = {};
+  const maxScanH = Math.floor(H * EDGE_SCAN_DEPTH);
+  const topBarEnd = scanEdge(H, maxScanH, rowModeColor);
+  if (topBarEnd >= 0 && topBarEnd + 1 >= MIN_BAR_HEIGHT) result.topY = topBarEnd + 1;
+  const bottomBarStart = scanEdgeReverse(H, maxScanH, rowModeColor);
+  if (bottomBarStart < H && H - bottomBarStart >= MIN_BAR_HEIGHT) result.bottomY = bottomBarStart;
+
+  const maxScanW = Math.floor(W * EDGE_SCAN_DEPTH);
+  const leftBarEnd = scanEdge(W, maxScanW, colModeColor);
+  if (leftBarEnd >= 0 && leftBarEnd + 1 >= MIN_BAR_HEIGHT) result.leftX = leftBarEnd + 1;
+  const rightBarStart = scanEdgeReverse(W, maxScanW, colModeColor);
+  if (rightBarStart < W && W - rightBarStart >= MIN_BAR_HEIGHT) result.rightX = rightBarStart;
 
   return result;
 }
@@ -678,7 +672,7 @@ function detectCrop(img, level = 0) {
   // Detect pure-black bars (letterbox/pillarbox) BEFORE the main chrome logic.
   // These are high-confidence chrome regions and should be marked immediately
   // so they don't get confused with legitimate dark image content.
-  const pureBlackBars = detectPureBlackBars(data, W, H);
+  const pureBlackBars = detectPureBlackBars(data, W, H, level);
 
   const isActualChrome = new Uint8Array(H);
   // Mark rows from detected pure-black bars as chrome immediately
