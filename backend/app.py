@@ -25,6 +25,7 @@ from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from googleapiclient.errors import HttpError
 from google import genai as genai_client
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -3346,6 +3347,19 @@ def download_drive_file(service, file_id):
         _, done = downloader.next_chunk()
     return fh.getvalue()
 
+def drive_error_reason(e):
+    """Google's machine-readable error reason (e.g. 'storageQuotaExceeded',
+    'insufficientFilePermissions') from an HttpError, so callers don't have
+    to guess what went wrong from the message text."""
+    if isinstance(e, HttpError):
+        try:
+            errors = json.loads(e.content).get('error', {}).get('errors') or []
+            if errors:
+                return errors[0].get('reason')
+        except Exception:
+            pass
+    return None
+
 # How each format gets re-saved after cropping. Pillow can't reuse the source
 # file's exact compression settings on a cropped copy, so JPEG quality 95 with
 # no chroma subsampling is the closest thing to "original quality" — visually
@@ -3362,11 +3376,21 @@ def crop_image(image_id):
     """Replace an image with a cropped version of itself (V18).
 
     The browser sends the crop box as percentages of the image (0-100), so
-    the same box means the same thing at any resolution. The original Drive
-    file moves to _Removed (recoverable), a new file with the same name takes
-    its place, and the database row is updated in place — which is what lets
-    every tag, caption, favorite, deck membership, and filmography entry
-    carry over without re-running Gemini.
+    the same box means the same thing at any resolution. The cropped bytes
+    overwrite the ORIGINAL Drive file's content in place (same file id, same
+    name, same folder) and the database row is updated alongside it — which
+    is what lets every tag, caption, favorite, deck membership, and
+    filmography entry carry over without re-running Gemini.
+
+    This has to be a content update on the existing file, not a new file:
+    service accounts have zero storage quota on a personal (non-Workspace)
+    Drive, so any operation that creates a brand-new file object — files.create,
+    or files.copy of a file the caller doesn't own — fails with
+    'storageQuotaExceeded' even when the account has Editor access. Updating
+    an existing file's content doesn't create a new object, so it isn't
+    subject to that limit. The tradeoff (accepted deliberately): unlike
+    delete, a crop has no _Removed undo — the pre-crop bytes aren't kept
+    anywhere once this succeeds.
 
     Owner-or-admin, mirroring delete. Friends need the service account
     upgraded to Editor on their folder (Viewer can read but not write).
@@ -3409,10 +3433,10 @@ def crop_image(image_id):
     except Exception as e:
         return jsonify({'error': f'Could not connect to Google Drive: {e}'}), 500
 
-    # 1. Download the original + note which folder it lives in
+    # 1. Download the original
     try:
         original_bytes = download_drive_file(service, old_file_id)
-        meta = service.files().get(fileId=old_file_id, fields='parents, mimeType').execute()
+        meta = service.files().get(fileId=old_file_id, fields='mimeType').execute()
     except Exception as e:
         return jsonify({'error': f'Could not download the original from Drive: {e}'}), 500
 
@@ -3443,43 +3467,41 @@ def crop_image(image_id):
     except Exception as e:
         return jsonify({'error': f'Cropping failed: {e}'}), 500
 
-    # 3. Upload the cropped copy next to the original — same folder, same name
+    # 3. Overwrite the ORIGINAL file's content in place — same file id, same
+    #    name, same folder. This must be files().update(), not files().create():
+    #    a service account has zero storage quota on a personal Drive, so any
+    #    call that creates a new file object (create, or copy of a file it
+    #    doesn't own) fails with storageQuotaExceeded even with Editor access.
+    #    Updating an existing file's content isn't a new object, so it's fine.
     try:
         media = MediaIoBaseUpload(io.BytesIO(cropped_bytes), mimetype=mime)
-        new_file = service.files().create(
-            body={'name': row['filename'], 'parents': meta.get('parents', [])},
-            media_body=media, fields='id, md5Checksum'
+        updated_file = service.files().update(
+            fileId=old_file_id, media_body=media, fields='id, md5Checksum'
         ).execute()
     except Exception as e:
+        reason = drive_error_reason(e)
         msg = str(e)
-        if 'insufficient' in msg.lower() or 'permission' in msg.lower() or '403' in msg:
+        if reason == 'storageQuotaExceeded':
             return jsonify({
-                'error': ("Drive blocked the upload — the service account only has Viewer "
-                          "access to this folder. In Drive: right-click the folder → Share → "
+                'error': ("Drive rejected the save due to a storage-quota limit on the "
+                          "service account. This shouldn't happen for an in-place update — "
+                          "if you're seeing this, something about the Drive call changed; "
+                          "this needs a code fix, not a sharing-settings change.")
+            }), 403
+        if reason in ('insufficientFilePermissions', 'insufficientPermissions') or \
+           'insufficient' in msg.lower() or 'permission' in msg.lower() or '403' in msg:
+            return jsonify({
+                'error': ("Drive blocked the save — the service account only has Viewer "
+                          "access to this file. In Drive: right-click the folder → Share → "
                           "change the service account's role to Editor, then try again.")
             }), 403
-        return jsonify({'error': f'Could not upload the cropped image to Drive: {msg}'}), 500
+        return jsonify({'error': f'Could not save the cropped image to Drive: {msg}'}), 500
 
-    # 4. Move the original into _Removed (recoverable, same as delete). If
-    #    this fails, undo the upload so Drive isn't left holding two copies.
-    try:
-        removed_id = get_or_create_removed_folder(service, get_root_folder_id(owner_id))
-        service.files().update(
-            fileId=old_file_id,
-            addParents=removed_id,
-            removeParents=','.join(meta.get('parents', [])),
-            fields='id'
-        ).execute()
-    except Exception as e:
-        try:
-            service.files().delete(fileId=new_file['id']).execute()
-        except Exception:
-            pass
-        return jsonify({'error': f'Could not move the original to {REMOVED_FOLDER_NAME}: {e}'}), 500
-
-    # 5. Update the database row in place — the id stays the same, so tags,
-    #    colors ownership, decks, favorites, and filmography all still point
-    #    at this image. Only the derived, now-stale data gets recomputed.
+    # 4. Update the database row — the id and drive_file_id are unchanged, so
+    #    tags, colors, decks, favorites, and filmography all still point at
+    #    this image. Only the derived, now-stale data gets recomputed. There
+    #    is no pre-crop backup kept anywhere (Drive or DB) — a crop can't be
+    #    undone once this succeeds.
     thumbnail = generate_thumbnail(cropped_bytes)
     if not thumbnail:
         return jsonify({
@@ -3490,10 +3512,10 @@ def crop_image(image_id):
     conn = get_db()
     c = conn.cursor()
     c.execute('''
-        UPDATE images SET drive_file_id = ?, thumbnail_blob = ?, aspect_ratio = ?,
+        UPDATE images SET thumbnail_blob = ?, aspect_ratio = ?,
                           md5_checksum = ?, phash = ?
         WHERE id = ?
-    ''', (new_file['id'], thumbnail, aspect_ratio, new_file.get('md5Checksum'),
+    ''', (thumbnail, aspect_ratio, updated_file.get('md5Checksum'),
           compute_phash(thumbnail), image_id))
     conn.commit()
     conn.close()
