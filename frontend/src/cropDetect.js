@@ -394,33 +394,38 @@ function detectNavBar(data, W, H) {
 // an over-crop actually shrinks the detected bar and reveals more real content,
 // instead of silently re-running the identical check. Wide, monotonic sweep so
 // repeated presses visibly move the boundary.
+// Mean luminance of a line and its TRIMMED std (spread after removing the
+// brightest TRIM_FRAC of pixels). Trimming lets a flat bar keep a low std
+// even with a few bright icon/text pixels on it (close button, bookmark,
+// like-count text), while a textured dark wall — whose variation is spread
+// across the whole line, not a few outliers — still reads as high-std and
+// is correctly rejected. Hoisted to module scope (was private to
+// detectPureBlackBars) so detectCrop's own row/column std — which is what
+// isChromeCandidateRow/isStrictUniformRow actually gate on — gets the same
+// protection, not just the dedicated pure-black-bar fast path.
+const TRIM_FRAC = 0.12;
+function lineStats(read, n) {
+  const lums = new Float32Array(n);
+  let sum = 0;
+  for (let j = 0; j < n; j++) { const l = read(j); lums[j] = l; sum += l; }
+  const mean = sum / n;
+  const sorted = Float32Array.from(lums).sort();
+  const keep = Math.max(1, Math.floor(n * (1 - TRIM_FRAC)));
+  let tSum = 0;
+  for (let j = 0; j < keep; j++) tSum += sorted[j];
+  const tMean = tSum / keep;
+  let v = 0;
+  for (let j = 0; j < keep; j++) { const d = sorted[j] - tMean; v += d * d; }
+  return { mean, std: Math.sqrt(v / keep) };
+}
+
 function detectPureBlackBars(data, W, H, level = 0) {
   const DARK_LUMA_THRESH = Math.max(8, 18 - level * 2.0);   // bar must be near-black (18 → 8)
   const FLAT_STD_THRESH  = Math.max(1.5, 4.5 - level * 0.5); // bar must be near dead-flat (4.5 → 1.5)
   const MIN_BAR_SIZE = 6;         // minimum consecutive lines to count as a bar (not noise)
   const EDGE_SCAN_DEPTH = 0.45;   // scan up to 45% from each edge
   const GAP_TOLERANCE = 4;        // lines allowed to briefly fail (a taller icon/text line) before the bar is considered ended
-  const TRIM_FRAC = 0.12;         // drop this fraction of brightest pixels before measuring spread (ignores UI glyphs)
 
-  // Mean luminance of a line and its TRIMMED std (spread after removing the
-  // brightest TRIM_FRAC of pixels). Trimming lets a flat bar keep a low std
-  // even with a few bright icon/text pixels on it, while a textured dark wall
-  // — whose variation is spread across the whole line, not a few outliers —
-  // still reads as high-std and is correctly rejected.
-  function lineStats(read, n) {
-    const lums = new Float32Array(n);
-    let sum = 0;
-    for (let j = 0; j < n; j++) { const l = read(j); lums[j] = l; sum += l; }
-    const mean = sum / n;
-    const sorted = Float32Array.from(lums).sort();
-    const keep = Math.max(1, Math.floor(n * (1 - TRIM_FRAC)));
-    let tSum = 0;
-    for (let j = 0; j < keep; j++) tSum += sorted[j];
-    const tMean = tSum / keep;
-    let v = 0;
-    for (let j = 0; j < keep; j++) { const d = sorted[j] - tMean; v += d * d; }
-    return { mean, std: Math.sqrt(v / keep) };
-  }
   const rowStats = y => lineStats(x => 0.299*data[(y*W+x)*4] + 0.587*data[(y*W+x)*4+1] + 0.114*data[(y*W+x)*4+2], W);
   const colStats = x => lineStats(y => 0.299*data[(y*W+x)*4] + 0.587*data[(y*W+x)*4+1] + 0.114*data[(y*W+x)*4+2], H);
 
@@ -472,18 +477,18 @@ function detectPureBlackBars(data, W, H, level = 0) {
 function detectCrop(img, level = 0) {
   const { data, W, H, scale } = rasterize(img);
 
-  // Per-row luminance + std dev
+  // Per-row luminance + std dev. std uses the same TRIMMED spread as
+  // detectPureBlackBars (brightest 12% of the line dropped before measuring
+  // variance) — otherwise a flat, near-black bar with a few small bright
+  // icon glyphs on it (close button, bookmark, like-count text) spikes rowStd
+  // from those few outlier pixels and fails isChromeCandidateRow/
+  // isStrictUniformRow below, even though the bar itself is genuinely flat.
   const rowLum = new Float32Array(H);
   const rowStd = new Float32Array(H);
   for (let y = 0; y < H; y++) {
-    let sum = 0;
-    for (let x = 0; x < W; x++) { const i=(y*W+x)*4; sum += 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; }
-    rowLum[y] = sum / W;
-  }
-  for (let y = 0; y < H; y++) {
-    let v = 0;
-    for (let x = 0; x < W; x++) { const i=(y*W+x)*4; const l=0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; v+=(l-rowLum[y])**2; }
-    rowStd[y] = Math.sqrt(v / W);
+    const s = lineStats(x => 0.299*data[(y*W+x)*4]+0.587*data[(y*W+x)*4+1]+0.114*data[(y*W+x)*4+2], W);
+    rowLum[y] = s.mean;
+    rowStd[y] = s.std;
   }
 
   // Per-row edge/texture density — fraction of horizontally-adjacent pixel
@@ -698,8 +703,22 @@ function detectCrop(img, level = 0) {
       for (let ry = ss; ry < ee; ry++) avgEdgeDensity += rowEdgeDensity[ry];
       avgEdgeDensity /= rLen;
       const looksFlat = avgEdgeDensity < EDGE_DENSITY_THRESH;
+      // v35: this non-split branch used to trust allUniform / the soft
+      // flat-and-short-enough test with NO edge requirement, unlike every
+      // other chrome-trust path in this file (split fragments just above,
+      // pure-black bars, landmark bands, nav/tab bars) which all require
+      // touching the image's true edge. Confirmed on a real low-key/hazy
+      // source frame: a band of atmospheric haze floating well inside the
+      // real photo (not touching either edge) read as dark+flat+low-edge-
+      // density enough to pass this test on its own, which split one
+      // continuous photo into fragments and threw away the largest one —
+      // cropping straight through the subject's head at the top and legs at
+      // the bottom. Real chrome always connects to a physical edge (that's
+      // the whole premise the rest of this file already relies on); a flat
+      // run floating in the interior is exactly the case that principle was
+      // built to catch, and this was the one place it wasn't applied yet.
       if (allBlack && touchesEdge) for (let ry = ss; ry < ee; ry++) isActualChrome[ry] = 1;
-      else if (allUniform || (rLen >= MIN_FLAT_RUN && rLen <= MAX_CHROME_RUN && looksFlat))
+      else if (touchesEdge && (allUniform || (rLen >= MIN_FLAT_RUN && rLen <= MAX_CHROME_RUN && looksFlat)))
         for (let ry = ss; ry < ee; ry++) isActualChrome[ry] = 1;
     }
   }
@@ -999,17 +1018,19 @@ function detectCrop(img, level = 0) {
   const bestLen = bestEnd - bestStart + 1;
   if (bestLen < 40) return null;
 
-  // Column detection within photo row block
+  // Column detection within photo row block. Same trimmed-std reasoning as
+  // rowStd above — a flat pillarbox bar with small bright glyphs on it
+  // shouldn't fail the flat test just because of those few outlier pixels.
   const colLum = new Float32Array(W);
   const colStd = new Float32Array(W);
   const colEdgeDensity = new Float32Array(W);
   for (let x = 0; x < W; x++) {
-    let sum = 0, count = bestEnd - bestStart + 1;
-    for (let y = bestStart; y <= bestEnd; y++) { const i=(y*W+x)*4; sum+=0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; }
-    colLum[x] = sum / count;
-    let v = 0;
-    for (let y = bestStart; y <= bestEnd; y++) { const i=(y*W+x)*4; const l=0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; v+=(l-colLum[x])**2; }
-    colStd[x] = Math.sqrt(v / count);
+    const s = lineStats(j => {
+      const i = ((bestStart + j) * W + x) * 4;
+      return 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+    }, bestEnd - bestStart + 1);
+    colLum[x] = s.mean;
+    colStd[x] = s.std;
   }
   for (let x = 0; x < W; x++) {
     let edges = 0;
