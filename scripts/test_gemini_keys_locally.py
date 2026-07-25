@@ -43,7 +43,7 @@ def main():
 
     friend_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     friend = mod.app.test_client()
-    r = friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", "password": "friendpass1"})
+    r = friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", 'email': 'casey@test.com', "password": "friendpass1"})
     assert r.status_code == 200, r.get_json()
 
     # 1. Admin (user 1) rides the shared env key with no key of their own saved.
@@ -87,7 +87,7 @@ def main():
     # not a crash or empty numbers.
     code2 = admin.post("/api/admin/invite-codes").get_json()["code"]
     friend2 = mod.app.test_client()
-    friend2.post("/api/auth/register", json={"invite_code": code2, "username": "jordan", "password": "friendpass2"})
+    friend2.post("/api/auth/register", json={"invite_code": code2, "username": "jordan", 'email': 'jordan@test.com', "password": "friendpass2"})
     r = friend2.get("/api/billing/spend")
     body = r.get_json()
     assert r.status_code == 400 and body["error"] == "no_key", body

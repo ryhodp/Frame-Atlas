@@ -136,7 +136,7 @@ def main():
 
     friend_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     friend = mod.app.test_client()
-    r = friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", "password": "friendpass1"})
+    r = friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", 'email': 'casey@test.com', "password": "friendpass1"})
     assert r.status_code == 200, r.get_json()
     FRIEND_ID = 2
 
@@ -245,7 +245,7 @@ def main():
                            "current_file": "casey_secret_project.jpg", "errors": []})
     other_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     other = mod.app.test_client()
-    r = other.post("/api/auth/register", json={"invite_code": other_code, "username": "sam", "password": "sampass12"})
+    r = other.post("/api/auth/register", json={"invite_code": other_code, "username": "sam", 'email': 'sam@test.com', "password": "sampass12"})
     assert r.status_code == 200, r.get_json()
     view_other = other.get("/api/sync/status").get_json()
     assert view_other["yours"] is False and view_other["current_file"] == "", view_other

@@ -564,6 +564,18 @@ def init_db():
     except Exception:
         pass
 
+    # V24: how much of the frame each palette color actually covers (0.0-1.0).
+    # extract_palette() always computed this and threw it away; color search
+    # ranked by vibrance alone, so a lipstick-sized patch of red scored the
+    # same as a red wall. NULL = extracted before V24; the backfill
+    # (/api/extract-colors?force=true) fills those in.
+    try:
+        c.execute("ALTER TABLE colors ADD COLUMN share REAL")
+        conn.commit()
+        print("[migration] Added share column to colors")
+    except Exception:
+        pass
+
     c.execute("""
         INSERT INTO users (id, username, password_hash)
         SELECT 1, 'ryan', ''
@@ -1591,57 +1603,123 @@ def extract_palette(image_data, num_colors=10):
         def _dist(a, b):
             return ((a[0]-b[0]) * 0.30) ** 2 + ((a[1]-b[1]) * 0.59) ** 2 + ((a[2]-b[2]) * 0.11) ** 2
 
-        def _is_dup(rgb, chosen):
+        def _dup_index(rgb, chosen):
             # Hue-aware dedupe: the brightness-weighted distance alone thinks
             # dark green == dark brown and white == pale sage. Colors from
             # different hue families never merge unless nearly identical.
+            # Returns the index of the color that absorbs this one, else None.
             h1, s1, v1 = colorsys.rgb_to_hsv(rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0)
-            for c in chosen:
+            for i, c in enumerate(chosen):
                 h2, s2, v2 = colorsys.rgb_to_hsv(c[0]/255.0, c[1]/255.0, c[2]/255.0)
                 d = _dist(rgb, c)
                 if d < 120:  # nearly identical regardless of hue
-                    return True
+                    return i
                 if s1 > 0.16 and s2 > 0.16:
                     hd = abs(h1 - h2)
                     hd = min(hd, 1 - hd)  # hue wraps around the color wheel
                     if d < 450 and hd < 0.09:
-                        return True
+                        return i
                 elif s1 <= 0.16 and s2 <= 0.16:
                     if abs(v1 - v2) < 0.25:  # spread neutrals across brightness
-                        return True
-            return False
+                        return i
+            return None
 
         chromatic.sort(reverse=True)
         neutrals.sort(reverse=True)
 
+        # V24: `picked` carries [rgb, share]. A merged-away shade donates its
+        # share to whichever color absorbed it, so the stored number means
+        # "how much of the frame this color FAMILY covers" — a wall split into
+        # dark/mid/bright red reads as one big red, which is what the eye sees
+        # and what the prominence filter needs. Keep scanning after the palette
+        # fills so those late shades still get counted; only new entries stop.
         picked = []
+
+        def _absorb(share, rgb, cap):
+            idx = _dup_index(rgb, [p[0] for p in picked])
+            if idx is not None:
+                picked[idx][1] += share
+            elif len(picked) < cap:
+                picked.append([rgb, share])
+
         for score, share, rgb in chromatic:
-            if len(picked) >= num_colors - 2:
-                break
             if share < 0.001:  # under ~0.1% of pixels = JPEG noise, not a color
                 continue
-            if not _is_dup(rgb, picked):
-                picked.append(rgb)
+            _absorb(share, rgb, num_colors - 2)
         for score, share, rgb in neutrals:
-            if len(picked) >= num_colors:
-                break
             if share < 0.01:  # a neutral must cover at least 1% of the frame
                 continue
-            if not _is_dup(rgb, picked):
-                picked.append(rgb)
+            _absorb(share, rgb, num_colors)
 
-        return ['#%02x%02x%02x' % c for c in picked]
+        return [('#%02x%02x%02x' % tuple(rgb), round(share, 5)) for rgb, share in picked]
     except Exception:
         return []
 
-def save_palette(image_id, user_id, hexes):
+def backfill_palette_shares():
+    """V24 one-time self-heal: give pre-V24 palettes their coverage numbers.
+
+    extract_palette() always knew what fraction of the frame each colour
+    covered, but nothing stored it until V24, so every palette extracted
+    before this release has share NULL and the coverage slider has nothing
+    to filter on. Rebuilding from the stored thumbnails costs no Drive or
+    Gemini calls and runs at roughly 20ms an image.
+
+    Runs in a background thread so a large library can't delay boot, and
+    self-disables: once every row has a share, the query finds nothing and
+    this returns immediately on all later boots."""
+    try:
+        conn = get_db()
+        pending = [r['image_id'] for r in conn.execute(
+            'SELECT DISTINCT image_id FROM colors WHERE share IS NULL'
+        ).fetchall()]
+        conn.close()
+    except Exception as e:
+        print(f"[palette-backfill] Could not check for pending rows: {e}")
+        return
+
+    if not pending:
+        return
+
+    def _job():
+        done = failed = 0
+        for image_id in pending:
+            try:
+                conn = get_db()
+                row = conn.execute(
+                    'SELECT id, user_id, thumbnail_blob FROM images WHERE id = ?', (image_id,)
+                ).fetchone()
+                conn.close()
+                if not row or not row['thumbnail_blob']:
+                    continue
+                entries = extract_palette(row['thumbnail_blob'])
+                if entries:
+                    save_palette(row['id'], row['user_id'], entries)
+                    done += 1
+            except Exception as e:
+                failed += 1
+                print(f"[palette-backfill] Image {image_id} failed: {e}")
+        print(f"[palette-backfill] Rebuilt {done} palette(s) with coverage data"
+              + (f", {failed} failed" if failed else "")
+              + ". Colour search coverage is now live.")
+
+    print(f"[palette-backfill] {len(pending)} palette(s) predate V24 — rebuilding in background.")
+    threading.Thread(target=_job, daemon=True).start()
+
+
+def save_palette(image_id, user_id, entries):
+    """entries: list of (hex, share) from extract_palette. Bare hex strings are
+    still accepted (share stored NULL) so any older caller keeps working."""
     conn = get_db()
     c = conn.cursor()
     c.execute('DELETE FROM colors WHERE image_id = ?', (image_id,))
-    for rank, hex_color in enumerate(hexes):
+    for rank, entry in enumerate(entries):
+        if isinstance(entry, (tuple, list)):
+            hex_color, share = entry[0], entry[1]
+        else:
+            hex_color, share = entry, None
         c.execute(
-            'INSERT INTO colors (image_id, user_id, hex, rank) VALUES (?, ?, ?, ?)',
-            (image_id, user_id, hex_color, rank)
+            'INSERT INTO colors (image_id, user_id, hex, rank, share) VALUES (?, ?, ?, ?, ?)',
+            (image_id, user_id, hex_color, rank, share)
         )
     conn.commit()
     conn.close()
@@ -1655,6 +1733,87 @@ def color_distance(hex_a, hex_b):
     rb, gb, bb = hex_to_rgb(hex_b)
     # Weighted RGB distance — human eyes are most sensitive to green
     return ((rb - ra) * 0.30) ** 2 + ((gb - ga) * 0.59) ** 2 + ((bb - ba) * 0.11) ** 2
+
+
+# ── V24: COLOR SEARCH — PROMINENCE + HUE EXACTNESS ─────────────────────────
+# Two knobs replace the old single fixed distance threshold:
+#   prominence — how much of the frame the color must cover (summed share)
+#   exactness  — how close in hue it has to be
+#
+# Hue replaces weighted-RGB for the closeness test because that metric is
+# green-heavy and so reads "darker and duller" as "different color": measured
+# against the red swatch, brown scored 461 and rust 406, both inside the old
+# 1000 threshold, while pink (a far better red match) scored 1633. In hue
+# terms the split is clean — real reds land under 14 degrees, brown/rust/
+# orange sit at 22-27. Saturation guards are mandatory: gray reports hue 0.0,
+# identical to pure red, and would otherwise match it perfectly.
+
+EXACTNESS_LOOSE_DEG = 30.0   # exactness = 0
+EXACTNESS_TIGHT_DEG = 6.0    # exactness = 100
+DEFAULT_EXACTNESS = 60.0     # ~15 deg: keeps crimson/brick/burgundy, drops brown/rust
+DEFAULT_PROMINENCE = 6.0     # percent of frame
+
+
+def _hsv(hex_color):
+    import colorsys
+    r, g, b = hex_to_rgb(hex_color)
+    return colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+
+
+def exactness_to_hue_tol(exactness):
+    """0-100 slider -> allowed hue difference as a fraction of the wheel."""
+    e = max(0.0, min(100.0, float(exactness)))
+    deg = EXACTNESS_LOOSE_DEG - (e / 100.0) * (EXACTNESS_LOOSE_DEG - EXACTNESS_TIGHT_DEG)
+    return deg / 360.0
+
+
+def color_matches(picked_hex, candidate_hex, hue_tol):
+    """Does one palette entry count as the picked color?"""
+    try:
+        hp, sp, vp = _hsv(picked_hex)
+        hc, sc, vc = _hsv(candidate_hex)
+    except Exception:
+        return False
+
+    # Picking a neutral (gray/black/cream): hue carries no information, so
+    # match on "also neutral, and about as bright."
+    if sp < 0.18:
+        if sc >= 0.28:
+            return False
+        return abs(vp - vc) <= 0.22
+
+    # Picked a real color — a washed-out or near-gray palette entry is not it,
+    # however close its nominal hue reads.
+    if sc < 0.22:
+        return False
+    # Near-black entries have unstable hue; don't let them count.
+    if vc < 0.12:
+        return False
+
+    hd = abs(hp - hc)
+    hd = min(hd, 1.0 - hd)  # hue wraps around the wheel
+    if hd > hue_tol:
+        return False
+
+    # Sanity on saturation distance so a pale pastel doesn't read as a
+    # saturated hue at loose settings (and vice versa).
+    return abs(sp - sc) <= 0.55
+
+
+def color_match_share(picked_hex, entries, hue_tol):
+    """Summed share of every palette entry matching the picked color.
+
+    entries: list of (hex, share). A wall extracted as dark/mid/bright red
+    counts once, at its combined size — matching how the eye reads the frame.
+    Entries stored before V24 have share NULL; those fall back to counting as
+    a match with no size information (see caller)."""
+    total = 0.0
+    for hex_color, share in entries:
+        if share is None:
+            continue
+        if color_matches(picked_hex, hex_color, hue_tol):
+            total += share
+    return total
 
 def sync_folder_worker(folder_id, user_id):
     global sync_state
@@ -2285,6 +2444,18 @@ def search():
     color_raw = request.args.get('color', '').strip()
     film_raw = request.args.get('film', '').strip()
     ar_raw = request.args.get('ar', '').strip()  # V15: aspect-ratio bucket, e.g. "2.39:1"
+    # V24: color search knobs. Absent (old bookmarks, old clients) = the new
+    # defaults, which is the agreed behaviour — a saved search returns fewer,
+    # cleaner results than it used to rather than keeping the old noise.
+    try:
+        prominence = float(request.args.get('prom', DEFAULT_PROMINENCE))
+    except ValueError:
+        prominence = DEFAULT_PROMINENCE
+    try:
+        exactness = float(request.args.get('exact', DEFAULT_EXACTNESS))
+    except ValueError:
+        exactness = DEFAULT_EXACTNESS
+    prominence = max(0.0, min(100.0, prominence))
     page = int(request.args.get('page', 0))
     per = int(request.args.get('per', 50))
     active_chips = [t.strip() for t in chips_raw.split(',') if t.strip()] if chips_raw else []
@@ -2320,18 +2491,37 @@ def search():
 
     if color_raw:
         # Small library — compute color matches in Python.
-        # Palettes now hold 15 colors so subject colors (red dress in a blue
-        # room) survive extraction. Search checks the top 6 with a tight
-        # threshold: deep enough to catch the subject, tight enough that
-        # "blue" doesn't return gray.
-        threshold = 1000
+        # V24: an image matches when the palette entries close enough in hue
+        # to the picked color TOGETHER cover at least `prominence` percent of
+        # the frame. This is what kills the old false positives: a lipstick-
+        # sized patch of red is a real red, but it's ~1% of the frame, so it
+        # only survives at a low prominence setting.
+        hue_tol = exactness_to_hue_tol(exactness)
+        min_share = prominence / 100.0
+
+        entries_by_image = {}
+        legacy_rank_hits = set()  # pre-V24 rows: share unknown
+        for row in c.execute(
+            'SELECT image_id, hex, rank, share FROM colors WHERE user_id = ?', (uid,)
+        ).fetchall():
+            entries_by_image.setdefault(row['image_id'], []).append((row['hex'], row['share']))
+            if row['share'] is None and row['rank'] is not None and row['rank'] <= 5:
+                legacy_rank_hits.add(row['image_id'])
+
         matched_ids = set()
-        for row in c.execute('SELECT DISTINCT image_id, hex FROM colors WHERE rank <= 5').fetchall():
-            try:
-                if color_distance(color_raw, row['hex']) < threshold:
-                    matched_ids.add(row['image_id'])
-            except Exception:
+        for image_id, entries in entries_by_image.items():
+            if color_match_share(color_raw, entries, hue_tol) >= min_share:
+                matched_ids.add(image_id)
                 continue
+            # Graceful degradation: palettes extracted before V24 have no
+            # share, so prominence can't be judged. Rather than have color
+            # search go silently empty until the backfill runs, fall back to
+            # the old hue-only test on the top ranks for those images.
+            if image_id in legacy_rank_hits and any(
+                s is None and color_matches(color_raw, h, hue_tol) for h, s in entries
+            ):
+                matched_ids.add(image_id)
+
         if matched_ids:
             cph = ','.join('?' * len(matched_ids))
             conditions.append(f'id IN ({cph})')
@@ -4611,8 +4801,10 @@ def serve(path):
 if __name__ == '__main__':
     init_db()
     load_embeddings_seed()
+    backfill_palette_shares()
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
 
 init_db()
 load_embeddings_seed()
+backfill_palette_shares()

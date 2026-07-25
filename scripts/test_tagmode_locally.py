@@ -2,25 +2,28 @@
 Frame Atlas — local test for the Day 10 bulk tagging backend.
 
 Same trick as test_similar_locally.py: boots a patched copy of the server
-against a throwaway database, loads a handful of REAL images + tags from
-the live site, then exercises the five new tag-mode endpoints end to end.
+against a throwaway database, seeds a small synthetic library with a designed
+tag co-occurrence structure, then exercises the five tag-mode endpoints end
+to end.
+
+Originally this pulled real images from the live site; that stopped working
+when Day 14 login-gated the app. Hand-built tags turned out to suit this test
+better anyway — the expected suggestions are exact instead of depending on
+whatever the library happens to hold.
 
 Usage (from the frame-atlas folder):
     scripts/.venv/bin/python scripts/test_tagmode_locally.py
 """
 
-import base64
 import importlib.util
+import io
 import os
 import shutil
 import sqlite3
 import sys
 import tempfile
 
-import requests
-
 REPO = os.path.join(os.path.dirname(__file__), "..")
-SITE = "https://frame-atlas-production.up.railway.app"
 NUM_IMAGES = 10
 
 
@@ -42,27 +45,48 @@ def main():
     spec.loader.exec_module(mod)
     print("App imported OK.")
 
-    data = requests.get(f"{SITE}/api/search?per={NUM_IMAGES}", timeout=120).json()
-    live = data["images"][:NUM_IMAGES]
+    # Synthetic library with a DESIGNED co-occurrence structure. The app has
+    # been login-gated since Day 14, so the original unauthenticated fetch of
+    # real images fails — and for this test hand-built tags are actually
+    # better, because the expected suggestions become exact rather than
+    # "whatever the library happens to contain today".
+    #
+    #   ids 1-10  the selection: all tense, 6 also night, 3 also interior
+    #   ids 11-20 rest of library: tense + low-key + desaturated
+    #
+    # So "tense" sits on every selected image (must NOT be suggested), while
+    # "low-key"/"desaturated" co-occur with it library-wide (should surface).
+    def fake_thumbnail(n):
+        img = mod.Image.new("RGB", (120, 68), (30, 40 + (n * 7) % 120, 90))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        return buf.getvalue()
+
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    for img in live:
-        blob = base64.b64decode(img["thumbnail"].split(",", 1)[1])
+    for n in range(1, 21):
         c.execute(
             "INSERT INTO images (id, user_id, drive_file_id, filename, thumbnail_blob, caption, aspect_ratio)"
-            " VALUES (?, 1, ?, ?, ?, ?, ?)",
-            (img["id"], f"test-{img['id']}", img["filename"], blob,
-             img.get("caption"), img.get("aspect_ratio")),
+            " VALUES (?, 1, ?, ?, ?, ?, '16:9')",
+            (n, f"test-{n}", f"img_{n}.jpg", fake_thumbnail(n), f"synthetic image {n}"),
         )
-        for t in img.get("tags", []):
+        tags = [("mood", "tense")]
+        if n <= NUM_IMAGES:
+            if n <= 6:
+                tags.append(("time_of_day", "night"))
+            if n <= 3:
+                tags.append(("location", "interior"))
+        else:
+            tags += [("lighting_style", "low-key"), ("color_palette", "desaturated")]
+        for cat, val in tags:
             c.execute(
                 "INSERT INTO tags (image_id, user_id, category, value) VALUES (?, 1, ?, ?)",
-                (img["id"], t["category"], t["value"]),
+                (n, cat, val),
             )
     conn.commit()
     conn.close()
-    ids = [img["id"] for img in live]
-    print(f"Inserted {len(ids)} real images with their real tags: {ids}")
+    ids = list(range(1, NUM_IMAGES + 1))
+    print(f"Inserted 20 synthetic images; selection = {ids}")
 
     client = mod.app.test_client()
     setup_r = client.post('/api/setup', json={'email': 'test@test.com', 'password': 'testpass123'})
@@ -72,8 +96,12 @@ def main():
     r = client.get("/api/tag-categories")
     assert r.status_code == 200, r.get_json()
     cats = r.get_json()
-    assert len(cats) == 15, f"expected 15 categories, got {len(cats)}"
+    # Assert against the source of truth, not a number frozen on Day 10 —
+    # this used to say 15 and silently went stale when my_work was added.
+    assert len(cats) == len(mod.CAT_LABELS), \
+        f"endpoint returned {len(cats)} categories, CAT_LABELS has {len(mod.CAT_LABELS)}"
     assert all({"key", "label", "color"} <= set(c) for c in cats)
+    assert {c["key"] for c in cats} == set(mod.CAT_LABELS)
     print(f"/api/tag-categories OK — {len(cats)} categories.")
 
     # 2. Selection summary on the real tags

@@ -76,7 +76,7 @@ def main():
     # Register a friend via an admin-issued invite code (same flow real signup uses).
     code = owner.post('/api/admin/invite-codes').get_json()['code']
     friend = mod.app.test_client()
-    r = friend.post('/api/auth/register', json={'invite_code': code, 'username': 'alex', 'password': 'friendpass123'})
+    r = friend.post('/api/auth/register', json={'invite_code': code, 'username': 'alex', 'email': 'alex@test.com', 'password': 'friendpass123'})
     assert r.status_code == 200, r.get_json()
     friend_id = r.get_json()['user']['id']
     # register() doesn't collect email — set it directly, same as a friend filling out Account later.
@@ -132,7 +132,7 @@ def main():
 
     code2 = owner.post('/api/admin/invite-codes').get_json()['code']
     friend2 = mod.app.test_client()
-    r = friend2.post('/api/auth/register', json={'invite_code': code2, 'username': 'sam', 'password': 'friendpass123'})
+    r = friend2.post('/api/auth/register', json={'invite_code': code2, 'username': 'sam', 'email': 'sam@test.com', 'password': 'friendpass123'})
     sam_id = r.get_json()['user']['id']
 
     r = friend2.post(f'/api/decks/invite/{token}/accept')
@@ -151,7 +151,7 @@ def main():
     owner.delete(f'/api/decks/{deck_id}/invite-link')
     friend3_code = owner.post('/api/admin/invite-codes').get_json()['code']
     friend3 = mod.app.test_client()
-    friend3.post('/api/auth/register', json={'invite_code': friend3_code, 'username': 'jo', 'password': 'friendpass123'})
+    friend3.post('/api/auth/register', json={'invite_code': friend3_code, 'username': 'jo', 'email': 'jo@test.com', 'password': 'friendpass123'})
     r = friend3.post(f'/api/decks/invite/{token}/accept')
     assert r.status_code == 404, r.get_json()
     print("Revoked invite link correctly rejected — OK.")

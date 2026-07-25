@@ -43,7 +43,7 @@ def main():
 
     friend_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     friend = mod.app.test_client()
-    r = friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", "password": "friendpass1"})
+    r = friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", 'email': 'casey@test.com', "password": "friendpass1"})
     assert r.status_code == 200, r.get_json()
 
     # 1. /api/config exposes the OAuth client id + Picker key to any logged-in user.
@@ -78,12 +78,19 @@ def main():
     assert mod.get_root_folder_id(2) == "friend-folder-id", mod.get_root_folder_id(2)
     print("5. get_root_folder_id() is correctly scoped per user (admin's row is older, still returns correctly).")
 
-    # 6. Friend trying to sync without connecting Google first gets a clear
-    # error, not a crash or a silent no-op.
+    # 6. A friend can start a sync WITHOUT any personal Google connection.
+    #
+    # This check used to assert the opposite — a 400 'not_signed_in' — which
+    # was correct before V17, when each user synced with their own OAuth
+    # token. V17 moved every sync onto the shared service account (the friend
+    # shares their folder with the robot email instead), because the
+    # drive.file OAuth scope can only see files the app itself created and so
+    # could never read a friend's existing folder. Needing no personal Google
+    # connection here is now the intended design, not a regression.
     r = friend.post("/api/sync/start")
-    body = r.get_json()
-    assert r.status_code == 400 and body["error"] == "not_signed_in", body
-    print("6. Starting a sync with no Google connection returns a clean 'not_signed_in' error.")
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json().get("success") is True, r.get_json()
+    print("6. Friend starts a sync with no personal Google connection (V17: service-account sync).")
 
     # 7. Picker-token endpoint requires a Google connection.
     r = friend.get("/api/drive/picker-token")

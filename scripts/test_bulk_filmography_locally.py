@@ -126,7 +126,7 @@ def main():
     # 3. Non-admin cannot bulk-set or bulk-clear.
     friend_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     friend = mod.app.test_client()
-    friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", "password": "friendpass1"})
+    friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", 'email': 'casey@test.com', "password": "friendpass1"})
     assert friend.post("/api/filmography/bulk-set", json={"image_ids": ids, "title": "x"}).status_code == 403
     assert friend.post("/api/filmography/bulk-clear", json={"image_ids": ids}).status_code == 403
     print("3. Non-admin blocked from both bulk filmography endpoints.")

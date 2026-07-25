@@ -2,27 +2,30 @@
 Frame Atlas — local test for the new "Find Similar" backend (Day 9).
 
 Boots a patched copy of the server on this Mac (pointed at a throwaway
-database instead of Railway's), loads a handful of REAL images + tags from
-the live site, loads their real CLIP fingerprints from the seed file, and
-then calls the new /similar endpoint to prove the whole path works before
-we deploy.
+database instead of Railway's), seeds images carrying REAL CLIP fingerprints
+taken from embeddings_seed.json.gz, and calls the /similar endpoint to prove
+the whole path works before we deploy.
+
+The image ids come from the seed file rather than the live site: the app has
+been login-gated since Day 14, so an unauthenticated fetch of real images
+fails. The vectors being real is what makes the ranking meaningful; the
+thumbnails themselves are synthetic and don't affect the result.
 
 Usage (from the frame-atlas folder):
     scripts/.venv/bin/python scripts/test_similar_locally.py
 """
 
-import base64
+import gzip
 import importlib.util
+import io
+import json
 import os
 import shutil
 import sqlite3
 import sys
 import tempfile
 
-import requests
-
 REPO = os.path.join(os.path.dirname(__file__), "..")
-SITE = "https://frame-atlas-production.up.railway.app"
 NUM_IMAGES = 8
 
 
@@ -48,24 +51,45 @@ def main():
     spec.loader.exec_module(mod)
     print("App imported OK — routes registered, empty-DB seed load didn't crash.")
 
-    # 3. Pull a few real images (with tags) from the live site and insert them.
-    data = requests.get(f"{SITE}/api/search", timeout=120).json()
-    live = data["images"][:NUM_IMAGES]
+    # 3. Seed images whose ids come from the fingerprint file itself.
+    #    The whole app has been login-gated since Day 14, so the original trick
+    #    of pulling real images from the live site fails with a bare request.
+    #    Borrowing the ids from embeddings_seed.json.gz keeps what actually
+    #    matters here — real CLIP vectors, so the ranking under test is real —
+    #    and only the pixels are synthetic.
+    seed = json.load(gzip.open(os.path.join(REPO, "backend", "embeddings_seed.json.gz")))
+    seed_ids = [int(i) for i in sorted(seed["vectors"], key=int)[:NUM_IMAGES]]
+    assert len(seed_ids) == NUM_IMAGES, f"seed file only has {len(seed_ids)} vectors"
+
+    def fake_thumbnail(n):
+        img = mod.Image.new("RGB", (120, 68), (20 + n * 25 % 200, 60, 140))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        return buf.getvalue()
+
+    # Two shared tags across the first few images so the 30% tag-overlap half
+    # of the similarity score has something to bite on.
+    tag_sets = [
+        [("mood", "tense"), ("time_of_day", "night")],
+        [("mood", "tense"), ("time_of_day", "night")],
+        [("mood", "tense")],
+    ]
+
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    for img in live:
-        blob = base64.b64decode(img["thumbnail"].split(",", 1)[1])
+    for n, img_id in enumerate(seed_ids):
         c.execute(
             "INSERT INTO images (id, user_id, drive_file_id, filename, thumbnail_blob, caption, aspect_ratio)"
             " VALUES (?, 1, ?, ?, ?, ?, ?)",
-            (img["id"], f"test-{img['id']}", img["filename"], blob,
-             img.get("caption"), img.get("aspect_ratio")),
+            (img_id, f"test-{img_id}", f"img_{img_id}.jpg", fake_thumbnail(n),
+             f"synthetic test image {n}", "16:9"),
         )
-        for t in img.get("tags", []):
+        for cat, val in (tag_sets[n] if n < len(tag_sets) else []):
             c.execute(
                 "INSERT INTO tags (image_id, user_id, category, value) VALUES (?, 1, ?, ?)",
-                (img["id"], t["category"], t["value"]),
+                (img_id, cat, val),
             )
+    live = [{"id": i} for i in seed_ids]
     # One extra image that has NO fingerprint, to test the 404 path.
     c.execute(
         "INSERT INTO images (id, user_id, drive_file_id, filename, thumbnail_blob) VALUES (999999, 1, 'test-nofp', 'no_fingerprint.jpg', ?)",
@@ -73,7 +97,7 @@ def main():
     )
     conn.commit()
     conn.close()
-    print(f"Inserted {len(live)} real images (+1 without fingerprint).")
+    print(f"Inserted {len(live)} images with real fingerprints (+1 without).")
 
     # 4. Re-run the seed loader now that images exist — vectors should attach.
     mod.load_embeddings_seed()

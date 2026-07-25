@@ -18,12 +18,32 @@ const PRESET_SWATCHES = [
 const PER_PAGE = 60;
 const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP' };
 
+// V24 color search. Keep these in step with DEFAULT_PROMINENCE /
+// DEFAULT_EXACTNESS in backend/app.py.
+const DEFAULT_PROM = 6;    // percent of frame
+const DEFAULT_EXACT = 60;  // 0 = any nearby hue, 100 = near-identical hue
+
+// Coverage runs on a log scale (0.5%–40%): most of the useful range sits low,
+// so a linear slider would bunch every meaningful setting into its first inch.
+const PROM_MIN = 0.5, PROM_SPAN = 80;
+const posToProm = (pos) => +(PROM_MIN * Math.pow(PROM_SPAN, pos / 100)).toFixed(1);
+const promToPos = (p) => Math.round(100 * Math.log(p / PROM_MIN) / Math.log(PROM_SPAN));
+const exactLabel = (e) => (e < 25 ? 'very loose' : e < 50 ? 'loose' : e < 75 ? 'close' : 'exact');
+
 export default function Home() {
   const { isAdmin } = useAuth();
   const isMobile = useIsMobile();
   const [chips, setChips] = useState([]);
   const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
   const [color, setColor] = useState(null);           // active hex or null
+  // V24: color search knobs. `prom` = min % of the frame the color must cover,
+  // `exact` = 0-100 hue strictness. The *Applied values are what actually get
+  // searched — they trail the sliders by a beat so a drag fires one request,
+  // not fifty.
+  const [prom, setProm] = useState(DEFAULT_PROM);
+  const [exact, setExact] = useState(DEFAULT_EXACT);
+  const [promApplied, setPromApplied] = useState(DEFAULT_PROM);
+  const [exactApplied, setExactApplied] = useState(DEFAULT_EXACT);
   const [film, setFilm] = useState(null);             // film/director/DP text filter
   const [ar, setAr] = useState(null);                 // V15: aspect-ratio bucket, e.g. "2.39:1"
   const [searchText, setSearchText] = useState('');
@@ -63,6 +83,7 @@ export default function Home() {
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
   const autoRequestId = useRef(0);
+  const searchRequestId = useRef(0);
   const pageRef = useRef(0);
   const fetchingRef = useRef(false);
   const sentinelRef = useRef(null);
@@ -88,16 +109,32 @@ export default function Home() {
       .catch(() => {});
   }, [isAdmin, loading, images.length, hasFilters]);
 
+  // Let the slider thumb move freely; commit the value a beat after it settles.
+  useEffect(() => {
+    const t = setTimeout(() => { setPromApplied(prom); setExactApplied(exact); }, 220);
+    return () => clearTimeout(t);
+  }, [prom, exact]);
+
   // ── Fetch one page of results; append=true keeps existing images ───────────
   const fetchPage = useCallback(async (pageNum, append) => {
-    if (fetchingRef.current) return;
+    // Only appends need the in-flight guard — that's what stops infinite
+    // scroll double-loading a page. A page-0 reset must never be dropped:
+    // it's usually the color sliders committing, and silently keeping the
+    // previous results would make the live match count lie. Concurrent
+    // resets are handled by the request id instead, so the last one wins.
+    if (append && fetchingRef.current) return;
     fetchingRef.current = true;
+    const reqId = ++searchRequestId.current;
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (chips.length) params.set('chips', chips.join(','));
       if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
-      if (color) params.set('color', color);
+      if (color) {
+        params.set('color', color);
+        params.set('prom', promApplied);
+        params.set('exact', exactApplied);
+      }
       if (film) params.set('film', film);
       if (ar) params.set('ar', ar);
       // No filters → default browse view → ask the server for this visit's shuffle
@@ -108,16 +145,20 @@ export default function Home() {
       params.set('per', PER_PAGE);
       const res = await fetch(`/api/search?${params}`);
       const data = await res.json();
+      if (reqId !== searchRequestId.current) return;  // a newer search superseded this one
       setImages(prev => append ? [...prev, ...(data.images || [])] : (data.images || []));
       setTotal(data.total || 0);
       setHasMore(!!data.has_more);
       pageRef.current = pageNum;
     } catch (e) {
       console.error('Search failed', e);
+    } finally {
+      if (reqId === searchRequestId.current) {
+        setLoading(false);
+        fetchingRef.current = false;
+      }
     }
-    setLoading(false);
-    fetchingRef.current = false;
-  }, [chips, nlChips, color, film, ar]);
+  }, [chips, nlChips, color, film, ar, promApplied, exactApplied]);
 
   // Filters changed → reset to page 0 (skip while in Find Similar mode)
   useEffect(() => {
@@ -345,6 +386,8 @@ export default function Home() {
     setChips([]);
     setNlChips([]);
     setColor(null);
+    setProm(DEFAULT_PROM);
+    setExact(DEFAULT_EXACT);
     setFilm(null);
     setAr(null);
     setSimilarTo(null);
@@ -418,7 +461,7 @@ export default function Home() {
       await fetch('/api/bookmarks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, state: { chips, nlChips, color, film, ar } })
+        body: JSON.stringify({ name, state: { chips, nlChips, color, film, ar, prom, exact } })
       });
       setSaveName('');
       loadBookmarks();
@@ -433,6 +476,12 @@ export default function Home() {
     setColor(bm.state.color || null);
     setFilm(bm.state.film || null);
     setAr(bm.state.ar || null);
+    // Bookmarks saved before V24 carry no knobs — they take the new defaults,
+    // so they come back tighter (and cleaner) than when they were saved.
+    setProm(bm.state.prom ?? DEFAULT_PROM);
+    setExact(bm.state.exact ?? DEFAULT_EXACT);
+    setPromApplied(bm.state.prom ?? DEFAULT_PROM);
+    setExactApplied(bm.state.exact ?? DEFAULT_EXACT);
     setShowBookmarks(false);
   };
 
@@ -965,6 +1014,75 @@ export default function Home() {
             </button>
           )}
         </div>
+
+        {/* V24: coverage + hue-match sliders. Only meaningful with a color
+            picked, so they stay out of the way until then. The live match
+            count is the whole point — it turns "is 6% right?" into something
+            you can see instead of guess. */}
+        {color && (
+          <div style={{
+            display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+            gap: isMobile ? '10px' : '18px',
+            marginTop: '10px', padding: '9px 12px',
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.07)',
+            borderRadius: '7px'
+          }}>
+            {[
+              {
+                key: 'prom',
+                label: 'COVERAGE',
+                value: `at least ${prom}% of frame`,
+                pos: promToPos(prom),
+                onChange: (pos) => setProm(posToProm(pos)),
+                hint: 'How much of the frame this color has to fill'
+              },
+              {
+                key: 'exact',
+                label: 'HUE MATCH',
+                value: exactLabel(exact),
+                pos: exact,
+                onChange: (pos) => setExact(pos),
+                hint: 'How close the shade has to be to the one you picked'
+              }
+            ].map(s => (
+              <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+                <span title={s.hint} style={{
+                  fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em',
+                  color: '#65625a', cursor: 'help', whiteSpace: 'nowrap'
+                }}>{s.label}</span>
+                <input
+                  type="range"
+                  min="0" max="100" step="1"
+                  value={s.pos}
+                  onChange={e => s.onChange(Number(e.target.value))}
+                  aria-label={s.hint}
+                  style={{ width: isMobile ? '110px' : '130px', accentColor: '#D9A441', cursor: 'pointer' }}
+                />
+                <span style={{
+                  fontSize: '11.5px', color: '#9c988d', whiteSpace: 'nowrap',
+                  minWidth: s.key === 'prom' ? '128px' : '62px'
+                }}>{s.value}</span>
+              </div>
+            ))}
+
+            <span style={{ fontSize: '11.5px', color: '#65625a', whiteSpace: 'nowrap' }}>
+              {loading ? '…' : `${total} image${total === 1 ? '' : 's'}`}
+            </span>
+
+            {(prom !== DEFAULT_PROM || exact !== DEFAULT_EXACT) && (
+              <button
+                onClick={() => { setProm(DEFAULT_PROM); setExact(DEFAULT_EXACT); }}
+                style={{
+                  background: 'none', border: 'none', color: '#65625a',
+                  cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit', padding: '2px 4px'
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = '#cf7152'}
+                onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+              >reset</button>
+            )}
+          </div>
+        )}
 
         {/* Active chips (tags + NL phrases + film + aspect ratio + similar) */}
         {(chips.length > 0 || nlChips.length > 0 || film || ar || similarTo) && (

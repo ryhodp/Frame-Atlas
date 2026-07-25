@@ -130,7 +130,7 @@ def main():
     # 9. Autocomplete only searches this user's own filmography (scoped).
     friend_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     friend = mod.app.test_client()
-    friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", "password": "friendpass1"})
+    friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", 'email': 'casey@test.com', "password": "friendpass1"})
     r = friend.get("/api/autocomplete?q=he")
     assert r.get_json() == [], r.get_json()
     print("9. A friend with no images of their own gets zero film/tag matches for the same query.")

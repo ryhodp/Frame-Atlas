@@ -79,7 +79,7 @@ drive.folders["SharedDemoFolder_ABC123"] = {
     "files": [
         {"id": f"demo_{i}", "name": f"inspo_{i:02d}.jpg", "mimeType": "image/jpeg",
          "size": "1000", "md5Checksum": f"demo_md5_{i}"}
-        for i in range(8)
+        for i in range(10)
     ],
 }
 drive.folders["UnsharedDemoFolder_XYZ789"] = {"name": "Locked", "shared": False, "files": []}
@@ -144,6 +144,16 @@ def _demo_image_uncached(idx):
     elif idx == 4:           # dark-gray letterbox (uniform but not pure black)
         img = PILImage.new("RGB", (1080, 1920), (12, 12, 12))
         img.paste(_noise_photo(1080, 810, idx, base), (0, 555))
+    # V24 colour-search cases: the pair that motivated the coverage slider.
+    # Searching red should return the wall and NOT the accent frame.
+    elif idx == 8:           # red wall in three shades — a genuinely red frame
+        img = PILImage.new("RGB", (1440, 810), (20, 20, 26))
+        img.paste(_noise_photo(1440, 270, idx, (150, 26, 26)), (0, 0))
+        img.paste(_noise_photo(1440, 270, idx + 40, (196, 40, 40)), (0, 270))
+        img.paste(_noise_photo(1440, 270, idx + 80, (232, 60, 60)), (0, 540))
+    elif idx == 9:           # blue frame, small red accent (the "lipstick" case)
+        img = _noise_photo(1440, 810, idx, (34, 62, 150))
+        img.paste(_noise_photo(190, 190, idx + 40, (214, 34, 44)), (620, 300))
     else:                    # idx 3, 7: full-bleed photo — nothing to crop
         img = _noise_photo(1080, 1350, idx, base)
     return _to_jpeg(img)
@@ -162,7 +172,7 @@ def _demo_image(idx):
 
 drive.uploaded = {}          # id -> cropped bytes (from files().create)
 drive.file_meta = {f"demo_{i}": {"parents": ["SharedDemoFolder_ABC123"], "mimeType": "image/jpeg"}
-                   for i in range(8)}
+                   for i in range(10)}
 drive.removed_folders = {}   # root folder id -> _Removed folder id
 drive.id_counter = 0
 
@@ -274,6 +284,7 @@ print("Fake Drive active:")
 print("  shareable folder ID:  SharedDemoFolder_ABC123  (connects + syncs 8 images)")
 print("  unshared folder ID:   UnsharedDemoFolder_XYZ789 (shows the share-first error)")
 print("  demo images: 0/5 letterbox · 1 pillarbox · 2/6 IG chrome · 4 dark-gray bars · 3/7 full-bleed")
+print("               8 red wall · 9 blue frame w/ small red accent (V24 colour search)")
 
 # Seed an admin + one friend account with credentials printed below so the
 # browser check can log straight in without going through /register by hand.
