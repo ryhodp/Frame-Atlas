@@ -139,9 +139,15 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - Stored as base64 blobs in SQLite, served as data URIs (no separate thumbnail folder or `/thumbnails/` route)
 - Target spec: 600px wide, Pillow quality 75
 
+**Colour (V24)**
+- `colors.share` = fraction of the frame that colour covers. `extract_palette()` always computed it; before V24 it was discarded. Shades merged during dedupe donate their share to the colour that absorbed them, so a palette entry means "this colour family", not one bin
+- Palette rank is **vibrance**-ordered on purpose (a small vivid patch outranks a big dull one), which is why coverage — not rank — is what filters out specks of colour
+- Hue angle, not `color_distance()`, decides colour closeness. The weighted-RGB metric is green-heavy and rates brown (461) a closer match to red than pink (1633). Always guard on saturation when comparing hues: grey reports hue 0.0, identical to pure red
+- `backfill_palette_shares()` runs at boot, rebuilds any palette with a NULL share, and self-disables. Search falls back to hue-only matching for rows it hasn't reached yet
+
 **API Endpoints (complete)**
 - `/api/images` — all images
-- `/api/search` — AND-filter tag search; optional `seed` param (V14) switches the unfiltered grid to a deterministic shuffled order — images the user viewed in the last 7 days sort below unseen ones; any active filter ignores the seed and stays newest-first. Optional `ar` param (V15) filters by aspect-ratio bucket (e.g. `ar=2.39:1`) — every image snaps to its nearest standard format via `normalize_ar_label()`, same math as the tile labels
+- `/api/search` — AND-filter tag search; optional `seed` param (V14) switches the unfiltered grid to a deterministic shuffled order — images the user viewed in the last 7 days sort below unseen ones; any active filter ignores the seed and stays newest-first. Optional `ar` param (V15) filters by aspect-ratio bucket (e.g. `ar=2.39:1`) — every image snaps to its nearest standard format via `normalize_ar_label()`, same math as the tile labels. Optional `prom` + `exact` params (V24) tune the `color` filter: `prom` is the minimum percent of the frame the colour must cover (default 6), `exact` is 0–100 hue strictness (default 60, ≈15°). Absent params take those defaults, so pre-V24 bookmarks come back tighter than they were saved
 - `/api/views/log` — POST (V14), body `{image_ids: [...]}`; upserts per-user `image_views` rows (`last_seen_at`, `seen_count`). Frontend batches viewed tiles and flushes only on tab-hide/page-leave so the shuffle order never shifts mid-visit
 - `/api/autocomplete` — tag suggestions, frequency-sorted; also returns film matches (title/director/DP) and (V15) aspect-ratio bucket suggestions (`type: 'ar'`) when the query looks like a ratio ("9:16", "2.35") or an alias ("scope", "vertical", "square")
 - `/api/sync/status` — current sync state; V17: only the sync's owner (or admin) sees filenames/errors, everyone else gets a bare `{in_progress, yours: false}`
