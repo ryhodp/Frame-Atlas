@@ -1796,7 +1796,12 @@ def color_matches(picked_hex, candidate_hex, hue_tol):
         return False
 
     # Sanity on saturation distance so a pale pastel doesn't read as a
-    # saturated hue at loose settings (and vice versa).
+    # saturated hue at loose settings (and vice versa). Scaled to the picked
+    # color's own saturation: picking a vivid red (sp high) should reject
+    # muddy rust/brown (sc low) even though their hue is close, while picking
+    # a muted/dusty color shouldn't demand the candidate be equally vivid.
+    if sp >= 0.60:
+        return sc >= sp - 0.20
     return abs(sp - sc) <= 0.55
 
 

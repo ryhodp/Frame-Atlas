@@ -173,6 +173,19 @@ def main():
     assert not mod.color_matches(RED, "#c96a4a", tight), "terracotta should drop out at tightest"
     print("6. Exactness slider: widens to brown at 0, drops terracotta at 100, gray never in.")
 
+    # 6b. Saturation guard scales with the picked color, not a flat distance.
+    # Picking a vivid red must reject a same-hue but washed-out entry (dusty
+    # rose) even though its hue matches exactly — this is the false positive
+    # that let desaturated/rust tones through a "close" hue search before the
+    # guard was tied to the picked color's own saturation.
+    bright = "#e02020"
+    assert not mod.color_matches(bright, "#c98a8a", tol), \
+        "dusty rose (same hue, low saturation) must not match a vivid red pick"
+    assert not mod.color_matches(bright, "#b56a5a", tol), \
+        "muted brick must not match a vivid red pick"
+    assert mod.color_matches(bright, "#c0263a", tol), "crimson should still match vivid red"
+    print("6b. Saturation guard scales with picked color: vivid red rejects dusty/muted same-hue tones.")
+
     # 7. Picking a neutral matches neutrals, not saturated colors
     gray_tol = mod.exactness_to_hue_tol(mod.DEFAULT_EXACTNESS)
     assert mod.color_matches("#808080", "#8a8a8a", gray_tol), "gray should match near-gray"
