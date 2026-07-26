@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useOfflineCache } from '../hooks/useOfflineCache';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -65,20 +66,40 @@ export default function DecksPage() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null); // deck object or null
   const [busy, setBusy] = useState(false);
+  const [showingCached, setShowingCached] = useState(false);
   const isMobile = useIsMobile();
+
+  const cache = useOfflineCache();
+  const { ready: cacheReady, error: cacheError, getCachedDecks } = cache;
 
   const navigate = useNavigate();
 
-  const loadDecks = () => {
+  const loadDecks = useCallback(async () => {
     setLoading(true);
-    fetch('/api/decks')
-      .then(res => res.json())
-      .then(data => setDecks(Array.isArray(data) ? data : []))
-      .catch(err => console.error('Failed to load decks', err))
-      .finally(() => setLoading(false));
-  };
+    try {
+      const res = await fetch('/api/decks');
+      if (!res.ok) throw new Error(`decks fetch failed: ${res.status}`);
+      const data = await res.json();
+      setDecks(Array.isArray(data) ? data : []);
+      setShowingCached(false);
+    } catch (err) {
+      // Offline: show whatever decks this device has saved, so the list is
+      // still a way in to the cached deck pages rather than a dead end.
+      const cached = await getCachedDecks();
+      if (cached.length) {
+        setDecks(cached.map(entry => entry.data).filter(Boolean));
+        setShowingCached(true);
+      } else {
+        console.error('Failed to load decks', err);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [getCachedDecks]);
 
-  useEffect(() => { loadDecks(); }, []);
+  useEffect(() => {
+    if (cacheReady || cacheError) loadDecks();
+  }, [loadDecks, cacheReady, cacheError]);
 
   const createDeck = async () => {
     const name = newDeckName.trim();
@@ -116,6 +137,16 @@ export default function DecksPage() {
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto', padding: isMobile ? '20px 16px' : '32px 24px' }}>
+      {showingCached && (
+        <div style={{
+          background: 'rgba(140,150,170,0.12)', border: '1px solid rgba(140,150,170,0.35)',
+          borderRadius: '8px', padding: '12px 14px', marginBottom: '16px',
+          fontSize: '12px', color: '#aab2c0'
+        }}>
+          ⚡ Offline — showing {decks.length} deck{decks.length === 1 ? '' : 's'} saved to this device.
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: '16px' }}>
         <h1 style={{ fontSize: isMobile ? '24px' : '32px', lineHeight: isMobile ? '30px' : '40px', fontWeight: 700, color: '#e2e2e6', margin: 0 }}>
           Decks

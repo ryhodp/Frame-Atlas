@@ -29,9 +29,9 @@ import './App.css'
 function Shell() {
   const location = useLocation()
   const isSharePage = location.pathname.startsWith('/share/')
-  const [backendHealthy, setBackendHealthy] = useState(false)
+  const [backendHealthy, setBackendHealthy] = useState(null) // null = still checking
   const [needsSetup, setNeedsSetup] = useState(null) // null = still checking
-  const { user, loading: authLoading, refresh } = useAuth()
+  const { user, loading: authLoading, offline, refresh } = useAuth()
   const isMobile = useIsMobile()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
@@ -42,13 +42,13 @@ function Shell() {
   useEffect(() => {
     fetch('/api/health')
       .then(res => res.json())
-      .then(data => {
-        if (data.status === 'ok') {
-          setBackendHealthy(true)
-        }
-      })
+      .then(data => setBackendHealthy(data.status === 'ok'))
       .catch(err => {
-        console.error('Backend health check failed:', err)
+        // Unreachable, not unhealthy. Recorded as false rather than left
+        // pending so the app can fall through to offline mode instead of
+        // sitting on "Connecting to backend..." forever.
+        console.warn('Backend unreachable:', err)
+        setBackendHealthy(false)
       })
   }, [])
 
@@ -69,10 +69,26 @@ function Shell() {
     )
   }
 
-  if (!backendHealthy || needsSetup === null || authLoading) {
+  if (backendHealthy === null || needsSetup === null || authLoading) {
     return (
       <div style={{ minHeight: '100vh', background: '#0a0a0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <p style={{ textAlign: 'center', color: '#8e9099' }}>Connecting to backend...</p>
+      </div>
+    )
+  }
+
+  // Server unreachable AND no session to resume — nothing useful to render, so
+  // say so plainly instead of showing a login form that can't possibly work.
+  if (!backendHealthy && !offline) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0a0a0b', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+        <div style={{ textAlign: 'center', maxWidth: '380px' }}>
+          <p style={{ color: '#e2e2e6', fontSize: '15px', marginBottom: '8px' }}>Can't reach Frame Atlas</p>
+          <p style={{ color: '#8e9099', fontSize: '13px', lineHeight: 1.6 }}>
+            You appear to be offline. Decks you've opened before are available
+            once you've signed in on this device at least once.
+          </p>
+        </div>
       </div>
     )
   }
@@ -101,6 +117,28 @@ function Shell() {
       {isMobile && <MobileHeader onMenuClick={() => setMobileNavOpen(true)} />}
       <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
+        {/* Offline: most pages need the server, so say once at the top why
+            they look empty. Decks are the part that still works. */}
+        {offline && (
+          <div style={{
+            background: 'rgba(140,150,170,0.14)',
+            borderBottom: '1px solid rgba(140,150,170,0.3)',
+            padding: '9px 16px', fontSize: '12px', color: '#aab2c0',
+            display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap'
+          }}>
+            <span>⚡ Offline — showing saved decks. Search and syncing need a connection.</span>
+            <button
+              onClick={refresh}
+              style={{
+                background: 'none', border: '1px solid rgba(140,150,170,0.5)',
+                color: '#aab2c0', borderRadius: '5px', padding: '3px 10px',
+                fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
+              }}
+            >
+              Reconnect
+            </button>
+          </div>
+        )}
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/sync" element={user.role === 'admin' ? <SyncManager /> : <Navigate to="/" replace />} />

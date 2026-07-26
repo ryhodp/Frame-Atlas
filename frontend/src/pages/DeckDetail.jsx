@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import StoryboardView from '../components/StoryboardView';
-import { useOfflineCache } from '../hooks/useOfflineCache';
+import { useOfflineCache, hasRemoteUpdates } from '../hooks/useOfflineCache';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -83,39 +83,63 @@ export default function DeckDetail() {
   const [membersOpen, setMembersOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
 
-  // Offline caching
+  // Offline caching. Held in a ref so loadDeck can depend on [id] alone —
+  // depending on the cache object itself re-created loadDeck on every render,
+  // which re-fired the effect below and hammered /api/decks/<id> forever.
   const cache = useOfflineCache();
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
+
   const [remoteUpdates, setRemoteUpdates] = useState(false); // "New changes" banner
-  const [isCached, setIsCached] = useState(false); // Is this deck in the offline cache?
+  const [showingCached, setShowingCached] = useState(false); // serving an offline copy?
 
   const loadDeck = useCallback(async () => {
     setLoading(true);
+    const c = cacheRef.current;
     try {
       const res = await fetch(`/api/decks/${id}`);
+      if (!res.ok) throw new Error(`deck fetch failed: ${res.status}`);
       const data = await res.json();
+
+      // Compare against what we cached BEFORE overwriting it — caching first
+      // and then reading it back only ever compared the fresh copy to itself,
+      // so the "New changes" banner could never fire.
+      const cached = await c.getCachedDeck(id);
+      if (hasRemoteUpdates(cached, data.updated_at)) setRemoteUpdates(true);
+
       setDeck(data);
       setDeckNameDraft(data.name || '');
-
-      // Offline caching: cache the deck and check for remote updates
-      if (cache.ready) {
-        cache.cacheDeck(data);
-        const cached = await cache.getCachedDeck(parseInt(id));
-        if (cached) {
-          setIsCached(true);
-          // Check if remote has newer updates than what we cached
-          if (cache.hasRemoteUpdates(cached, data.updated_at)) {
-            setRemoteUpdates(true);
-          }
-        }
-      }
+      setShowingCached(false);
+      c.cacheDeck(data);
     } catch (err) {
-      console.error('Failed to load deck', err);
+      // Offline (or the server is down): fall back to the last copy we saved.
+      const cached = await c.getCachedDeck(id);
+      if (cached?.data) {
+        setDeck(cached.data);
+        setDeckNameDraft(cached.data.name || '');
+        setShowingCached(true);
+        setRemoteUpdates(false);
+      } else {
+        console.error('Failed to load deck', err);
+      }
     } finally {
       setLoading(false);
     }
-  }, [id, cache]);
+  }, [id]);
 
-  useEffect(() => { loadDeck(); }, [loadDeck]);
+  // Wait for IndexedDB to open before the first load, otherwise an offline
+  // cold start races the cache and falls through to "Deck not found".
+  useEffect(() => {
+    if (cache.ready || cache.error) loadDeck();
+  }, [loadDeck, cache.ready, cache.error]);
+
+  // Coming back online: retry a load that only had a cached copy to show.
+  useEffect(() => {
+    if (!showingCached) return;
+    const onOnline = () => loadDeck();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [showingCached, loadDeck]);
 
   if (loading && !deck) {
     return (
@@ -253,6 +277,30 @@ export default function DeckDetail() {
       >
         ← All Decks
       </button>
+
+      {/* Offline — showing the last copy saved to this device */}
+      {showingCached && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '12px',
+          background: 'rgba(140,150,170,0.12)', border: '1px solid rgba(140,150,170,0.35)',
+          borderRadius: '8px', padding: '12px 14px', marginBottom: '16px'
+        }}>
+          <span style={{ fontSize: '12px', color: '#aab2c0', flex: 1 }}>
+            ⚡ Offline — showing the last saved copy of this deck. Edits aren't available until you reconnect.
+          </span>
+          <button
+            onClick={loadDeck}
+            style={{
+              background: 'none', border: '1px solid rgba(140,150,170,0.5)',
+              color: '#aab2c0', borderRadius: '6px', padding: '6px 12px',
+              fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'inherit', flexShrink: 0
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* "New changes" banner for offline cache */}
       {remoteUpdates && (

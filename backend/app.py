@@ -10,6 +10,7 @@ import time
 import zlib
 import threading
 import queue as queue_module
+import urllib.parse
 from array import array
 from datetime import datetime, timedelta
 from functools import wraps
@@ -564,6 +565,15 @@ def init_db():
     except Exception:
         pass
 
+    # V25: where a web-clipped image came from, so a still pulled off a blog
+    # can be traced back to its page later. NULL for Drive syncs and uploads.
+    try:
+        c.execute("ALTER TABLE images ADD COLUMN source_url TEXT")
+        conn.commit()
+        print("[migration] Added source_url column to images")
+    except Exception:
+        pass
+
     # V24: how much of the frame each palette color actually covers (0.0-1.0).
     # extract_palette() always computed this and threw it away; color search
     # ranked by vibrance alone, so a lipstick-sized patch of red scored the
@@ -699,6 +709,34 @@ PUBLIC_API_ROUTES = {
     '/api/setup/status',
 }
 
+def _adopt_session_from_header():
+    """Let the browser extension reuse the login you already have.
+
+    Session cookies are SameSite-restricted, so they don't ride along on a
+    request made from a chrome-extension:// origin. The extension reads the
+    cookie itself (chrome.cookies) and echoes the value in X-FA-Session; this
+    verifies that signature with Flask's own serializer and adopts it.
+
+    Not a CSRF hole: a custom header can't be set by a cross-site form or
+    image tag, and the value is the very cookie the caller would have needed
+    anyway — no new capability, just a different envelope.
+    """
+    raw = request.headers.get('X-FA-Session')
+    if not raw:
+        return
+    serializer = app.session_interface.get_signing_serializer(app)
+    if serializer is None:
+        return
+    try:
+        data = serializer.loads(
+            raw, max_age=int(app.permanent_session_lifetime.total_seconds())
+        )
+    except Exception:
+        return          # forged, tampered with, or simply expired
+    if isinstance(data, dict) and data.get('user_id'):
+        session.update(data)
+
+
 @app.before_request
 def require_login():
     path = request.path
@@ -706,6 +744,8 @@ def require_login():
         return None
     if path in PUBLIC_API_ROUTES or path.startswith('/api/share/'):
         return None
+    if not session.get('user_id'):
+        _adopt_session_from_header()
     if session.get('user_id'):
         return None
     return jsonify({'error': 'login_required'}), 401
@@ -730,34 +770,6 @@ def admin_required(fn):
             return jsonify({'error': 'admin_required'}), 403
         return fn(*args, **kwargs)
     return wrapper
-
-def check_deck_permission(deck_id, user_id, required_permission='editor'):
-    """Check if a user has permission to edit a deck.
-    Returns (has_permission: bool, is_owner: bool)"""
-    conn = get_db()
-    c = conn.cursor()
-
-    # Owner bypass
-    owner = c.execute('SELECT user_id FROM decks WHERE id = ?', (deck_id,)).fetchone()
-    if owner and owner['user_id'] == user_id:
-        conn.close()
-        return True, True
-
-    # Check collaborator permission
-    perm = c.execute(
-        'SELECT permission FROM deck_members WHERE deck_id = ? AND user_id = ?',
-        (deck_id, user_id)
-    ).fetchone()
-    conn.close()
-
-    if not perm:
-        return False, False
-
-    if required_permission == 'viewer':
-        return perm['permission'] in ('viewer', 'editor'), False
-    elif required_permission == 'editor':
-        return perm['permission'] == 'editor', False
-    return False, False
 
 def fav_flag_cols(user_id, alias='images'):
     """SQL fragment computing is_favorite/is_flagged for one user against the
@@ -2977,6 +2989,76 @@ def google_disconnect():
     conn.close()
     return jsonify({'success': True})
 
+def _load_existing_phashes():
+    """Every already-known image fingerprint, for near-duplicate checks."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT id, filename, thumbnail_blob, phash FROM images WHERE phash IS NOT NULL')
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
+                  force=False, source_url=None):
+    """Put one image into the library: duplicate check, write to Drive, store
+    the row, build the thumbnail + palette.
+
+    Shared by /api/upload and /api/clip so the browser extension can't drift
+    away from the in-app uploader. `existing` is the phash list from
+    _load_existing_phashes(); successful ingests are appended to it so a batch
+    also dedupes against itself. Returns the per-file result dict.
+    """
+    img_phash = compute_phash(image_data)
+
+    if not force and img_phash:
+        dup = next((r for r in existing
+                    if phash_distance(img_phash, r['phash']) <= PHASH_NEAR_DUP_THRESHOLD), None)
+        if dup:
+            return {
+                'filename': filename,
+                'status': 'duplicate',
+                'existing': {
+                    'id': dup['id'],
+                    'filename': dup['filename'],
+                    'thumbnail': f"data:image/jpeg;base64,{base64.b64encode(dup['thumbnail_blob']).decode('utf-8')}"
+                }
+            }
+
+    try:
+        media = MediaIoBaseUpload(io.BytesIO(image_data), mimetype=mimetype or 'image/jpeg')
+        drive_file = service.files().create(
+            body={'name': filename, 'parents': [folder_id]},
+            media_body=media, fields='id, md5Checksum'
+        ).execute()
+    except Exception as e:
+        return {'filename': filename, 'status': 'error', 'message': str(e)}
+
+    thumbnail = generate_thumbnail(image_data)
+    aspect_ratio = get_image_aspect_ratio(image_data)
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio,
+                            tagging_status, md5_checksum, phash, source_url)
+        VALUES (1, ?, ?, ?, ?, 'pending', ?, ?, ?)
+    ''', (drive_file['id'], filename, thumbnail, aspect_ratio,
+          drive_file.get('md5Checksum'), img_phash, source_url))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+
+    if thumbnail:
+        hexes = extract_palette(thumbnail)
+        if hexes:
+            save_palette(new_id, 1, hexes)
+        existing.append({'id': new_id, 'filename': filename,
+                         'thumbnail_blob': thumbnail, 'phash': img_phash})
+
+    return {'filename': filename, 'status': 'uploaded', 'image_id': new_id}
+
+
 @app.route('/api/upload', methods=['POST'])
 @admin_required
 def upload_images():
@@ -3003,69 +3085,139 @@ def upload_images():
         return jsonify({'error': 'No files provided'}), 400
 
     folder_id = get_root_folder_id(1)
-    results = []
+    existing = _load_existing_phashes()
 
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT id, filename, thumbnail_blob, phash FROM images WHERE phash IS NOT NULL')
-    existing = c.fetchall()
-    conn.close()
-
-    for f in files:
-        image_data = f.read()
-        filename = f.filename
-        img_phash = compute_phash(image_data)
-
-        if not force and img_phash:
-            dup = next((r for r in existing
-                        if phash_distance(img_phash, r['phash']) <= PHASH_NEAR_DUP_THRESHOLD), None)
-            if dup:
-                results.append({
-                    'filename': filename,
-                    'status': 'duplicate',
-                    'existing': {
-                        'id': dup['id'],
-                        'filename': dup['filename'],
-                        'thumbnail': f"data:image/jpeg;base64,{base64.b64encode(dup['thumbnail_blob']).decode('utf-8')}"
-                    }
-                })
-                continue
-
-        try:
-            media = MediaIoBaseUpload(io.BytesIO(image_data), mimetype=f.mimetype or 'image/jpeg')
-            drive_file = service.files().create(
-                body={'name': filename, 'parents': [folder_id]},
-                media_body=media, fields='id, md5Checksum'
-            ).execute()
-        except Exception as e:
-            results.append({'filename': filename, 'status': 'error', 'message': str(e)})
-            continue
-
-        thumbnail = generate_thumbnail(image_data)
-        aspect_ratio = get_image_aspect_ratio(image_data)
-
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('''
-            INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio, tagging_status, md5_checksum, phash)
-            VALUES (1, ?, ?, ?, ?, 'pending', ?, ?)
-        ''', (drive_file['id'], filename, thumbnail, aspect_ratio, drive_file.get('md5Checksum'), img_phash))
-        new_id = c.lastrowid
-        conn.commit()
-        conn.close()
-
-        if thumbnail:
-            hexes = extract_palette(thumbnail)
-            if hexes:
-                save_palette(new_id, 1, hexes)
-            existing.append({'id': new_id, 'filename': filename, 'thumbnail_blob': thumbnail, 'phash': img_phash})
-
-        results.append({'filename': filename, 'status': 'uploaded', 'image_id': new_id})
+    results = [
+        _ingest_image(service, folder_id, f.read(), f.filename, f.mimetype, existing, force=force)
+        for f in files
+    ]
 
     if any(r['status'] == 'uploaded' for r in results):
         trigger_tagging()
 
     return jsonify({'results': results})
+
+# ============================================================================
+# V25: WEB CLIPPING — browser extension endpoint
+# ============================================================================
+
+CLIP_MAX_BYTES = 25 * 1024 * 1024        # a clipped still well past any sane size
+CLIP_ALLOWED_MIME = {'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'}
+
+
+def _clip_filename(source_url, mimetype, fallback='clip'):
+    """A sensible Drive filename for a clipped image.
+
+    Web image URLs are frequently junk for this — query strings, CDN hashes,
+    no extension at all — so anything unusable falls back to a timestamp, and
+    the extension is always corrected to match the actual image type.
+    """
+    ext = {
+        'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp',
+        'image/gif': '.gif', 'image/avif': '.avif',
+    }.get(mimetype, '.jpg')
+
+    stem = ''
+    try:
+        path = urllib.parse.urlparse(source_url or '').path
+        stem = os.path.splitext(os.path.basename(urllib.parse.unquote(path)))[0]
+    except Exception:
+        stem = ''
+
+    stem = re.sub(r'[^A-Za-z0-9._-]+', '-', stem).strip('-.')[:60]
+    if not stem:
+        stem = f"{fallback}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    return f'{stem}{ext}'
+
+
+@app.route('/api/clip', methods=['POST'])
+@admin_required
+def clip_image():
+    """Save one image grabbed from a web page by the browser extension.
+
+    The extension sends the actual bytes rather than a URL: it captures in the
+    browser, where the page's own cookies and hotlink protection already
+    apply, so images this server could never fetch on its own still work — and
+    video frames, which exist only as canvas pixels, work at all.
+
+    Admin-only, like /api/upload, because both write into Ryan's Drive folder
+    via user 1's Google connection.
+    """
+    data = request.get_json(silent=True) or {}
+    raw = data.get('image') or ''
+    source_url = (data.get('source_url') or '').strip()[:2000] or None
+    force = bool(data.get('force'))
+
+    if not raw:
+        return jsonify({'error': 'no_image', 'message': 'No image data was sent.'}), 400
+
+    # data:image/jpeg;base64,XXXX
+    m = re.match(r'^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$', raw, re.DOTALL)
+    if not m:
+        return jsonify({'error': 'bad_image', 'message': 'Expected a base64 image data URL.'}), 400
+
+    mimetype = m.group(1).lower()
+    if mimetype not in CLIP_ALLOWED_MIME:
+        return jsonify({
+            'error': 'unsupported_type',
+            'message': f"{mimetype} isn't a supported image type."
+        }), 400
+
+    try:
+        image_data = base64.b64decode(m.group(2), validate=True)
+    except Exception:
+        return jsonify({'error': 'bad_image', 'message': 'Image data was not valid base64.'}), 400
+
+    if not image_data:
+        return jsonify({'error': 'bad_image', 'message': 'Image data was empty.'}), 400
+    if len(image_data) > CLIP_MAX_BYTES:
+        return jsonify({
+            'error': 'too_large',
+            'message': f'That image is over {CLIP_MAX_BYTES // (1024 * 1024)}MB.'
+        }), 413
+
+    # Confirm it really is a decodable image before it reaches Drive — the
+    # extension can hand us whatever a page served under an image URL.
+    try:
+        Image.open(io.BytesIO(image_data)).verify()
+    except Exception:
+        return jsonify({'error': 'bad_image', 'message': "That file isn't a readable image."}), 400
+
+    try:
+        service = get_user_drive_service(1)
+    except Exception:
+        return jsonify({
+            'error': 'google_auth_failed',
+            'message': 'Your Google connection expired. Reconnect it in Frame Atlas → Settings.'
+        }), 401
+    if not service:
+        return jsonify({
+            'error': 'not_signed_in',
+            'message': 'Connect Google Drive in Frame Atlas → Settings first.'
+        }), 401
+
+    existing = _load_existing_phashes()
+    result = _ingest_image(
+        service, get_root_folder_id(1), image_data,
+        _clip_filename(source_url, mimetype), mimetype,
+        existing, force=force, source_url=source_url,
+    )
+
+    if result['status'] == 'uploaded':
+        trigger_tagging()
+        return jsonify({
+            'status': 'clipped',
+            'image_id': result['image_id'],
+            'filename': result['filename'],
+        })
+    if result['status'] == 'duplicate':
+        return jsonify({
+            'status': 'duplicate',
+            'existing': result['existing'],
+            'message': 'Already in your library.',
+        })
+    return jsonify({'status': 'error', 'message': result.get('message', 'Clip failed.')}), 500
+
 
 # ============================================================================
 # DAY 8 (V7): IMAGE ACTIONS — favorite, flag, tags, download, delete
@@ -3875,7 +4027,8 @@ def _deck_access(c, deck_id, user_id):
     add/remove photos, etc.) should keep using the stricter
     `user_id = session['user_id']` owner-only check instead of this."""
     deck_row = c.execute(
-        'SELECT id, name, created_at, share_token, invite_token, user_id FROM decks WHERE id = ?', (deck_id,)
+        'SELECT id, name, created_at, updated_at, share_token, invite_token, user_id '
+        'FROM decks WHERE id = ?', (deck_id,)
     ).fetchone()
     if not deck_row:
         return None, False
@@ -3888,16 +4041,27 @@ def _deck_access(c, deck_id, user_id):
         return deck_row, False
     return None, False
 
+def touch_deck(c, deck_id):
+    """Bumps a deck's last-modified stamp. The offline cache diffs this to
+    decide whether to show the "New changes" banner, so anything that alters
+    what a deck LOOKS like has to call it."""
+    c.execute('UPDATE decks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (deck_id,))
+
 def log_deck_activity(c, deck_id, action, detail=None):
     """Appends one row to the deck's activity feed, attributed to whoever's
     logged in right now. Only the deck owner can call the write endpoints
     this is hooked into, so `action` almost always describes an owner edit —
     the exception is 'invited'/'joined', which fire for the two sides of a
-    member joining."""
+    member joining.
+
+    Also bumps the deck's updated_at: every mutating endpoint already logs
+    activity, so hooking the timestamp here keeps the two from drifting apart
+    the way they would if each endpoint had to remember both calls."""
     c.execute(
         'INSERT INTO deck_activity (deck_id, user_id, action, detail) VALUES (?, ?, ?, ?)',
         (deck_id, session['user_id'], action, detail)
     )
+    touch_deck(c, deck_id)
 
 @app.route('/api/decks', methods=['GET'])
 def list_decks():
@@ -4200,6 +4364,10 @@ def _deck_payload(c, deck_row):
         'id': deck_row['id'],
         'name': deck_row['name'],
         'created_at': deck_row['created_at'],
+        # The offline cache compares this against its saved copy to decide
+        # whether to offer a refresh — leaving it out of the payload made the
+        # frontend's "New changes" banner permanently dead.
+        'updated_at': deck_row['updated_at'],
         'share_token': deck_row['share_token'],
         'scenes': scenes,
         'images': images_out
@@ -4475,16 +4643,25 @@ def reorder_deck_images(deck_id):
 
     for position, di_id in enumerate(ordered_ids):
         c.execute('UPDATE deck_images SET storyboard_order = ? WHERE id = ?', (position, di_id))
+    # Reordering is the one mutation with no activity-feed entry, so it has to
+    # bump the timestamp itself.
+    touch_deck(c, deck_id)
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'updated': len(ordered_ids)})
 
 @app.route('/api/decks/<int:deck_id>/share', methods=['POST', 'DELETE'])
 def deck_share_token(deck_id):
-    """POST creates (or returns the existing) share token for a deck with permission level.
+    """POST creates (or returns the existing) share token for a deck.
     DELETE revokes it — the old link stops working immediately, and a later
     POST mints a brand new token rather than reviving the old one.
-    Accepts ?permission=viewer|editor (default: viewer)"""
+
+    Share links are view-only, deliberately. V23 accepted a ?permission=editor
+    flag and echoed it back, but never stored it — everyone who joined landed
+    on 'viewer' regardless, so the flag was pure decoration. Rather than make
+    it real, it's gone: a share link is a URL, and anyone who ends up holding
+    it should not be able to rewrite the deck. Granting edit rights is what
+    the named-invite flow (/api/decks/<id>/invite) is for."""
     conn = get_db()
     c = conn.cursor()
     row = c.execute(
@@ -4500,23 +4677,19 @@ def deck_share_token(deck_id):
         conn.close()
         return jsonify({'success': True, 'share_token': None})
 
-    permission = request.args.get('permission', 'viewer')
-    if permission not in ('viewer', 'editor'):
-        conn.close()
-        return jsonify({'error': 'permission must be viewer or editor'}), 400
-
     token = row['share_token']
     if not token:
         token = secrets.token_urlsafe(16)
         c.execute('UPDATE decks SET share_token = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (token, deck_id))
         conn.commit()
     conn.close()
-    return jsonify({'share_token': token, 'share_path': f'/share/{token}', 'permission': permission})
+    return jsonify({'share_token': token, 'share_path': f'/share/{token}', 'permission': 'viewer'})
 
 @app.route('/api/decks/join/<token>', methods=['POST'])
 def join_deck_via_link(token):
     """Join a deck via its public share link. Must be logged in.
-    Creates a deck_members row with the permission level specified when the link was created."""
+    Always joins as a viewer — see deck_share_token() for why links don't
+    grant edit rights."""
     conn = get_db()
     c = conn.cursor()
 
@@ -4541,8 +4714,6 @@ def join_deck_via_link(token):
         conn.close()
         return jsonify({'message': 'Already a member', 'permission': existing['permission']}), 200
 
-    # Default to viewer for public links (permission was stored in the token generation, but we
-    # store the permission level per-member, so for now default to viewer for public join)
     c.execute(
         'INSERT INTO deck_members (deck_id, user_id, permission) VALUES (?, ?, ?)',
         (deck_row['id'], user_id, 'viewer')
@@ -4560,7 +4731,8 @@ def get_shared_deck(token):
     conn = get_db()
     c = conn.cursor()
     deck_row = c.execute(
-        'SELECT id, name, created_at, share_token, user_id FROM decks WHERE share_token = ?', (token,)
+        'SELECT id, name, created_at, updated_at, share_token, user_id '
+        'FROM decks WHERE share_token = ?', (token,)
     ).fetchone()
     if not deck_row:
         conn.close()

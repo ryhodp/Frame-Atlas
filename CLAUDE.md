@@ -145,8 +145,24 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - Hue angle, not `color_distance()`, decides colour closeness. The weighted-RGB metric is green-heavy and rates brown (461) a closer match to red than pink (1633). Always guard on saturation when comparing hues: grey reports hue 0.0, identical to pure red
 - `backfill_palette_shares()` runs at boot, rebuilds any palette with a NULL share, and self-disables. Search falls back to hue-only matching for rows it hasn't reached yet
 
+**Web clipping (V25)**
+- Chrome extension lives in `/extension/` (MV3, load unpacked — see its README)
+- `POST /api/clip` takes a base64 data URL, not a URL to fetch: capture happens in the browser, where the page's own cookies and hotlink protection already apply, so images this server could never fetch still work — and video frames, which exist only as canvas pixels, work at all
+- Shares `_ingest_image()` with `/api/upload`, so clips get the same phash duplicate check, Drive write, thumbnail, palette and tagging queue
+- Admin-only, like upload — both write through user 1's Google connection
+- `images.source_url` records the page a clip came from (NULL for syncs/uploads)
+- Auth: the session cookie is SameSite-blocked from a `chrome-extension://` origin, so the extension reads it via `chrome.cookies` and echoes it in `X-FA-Session`; `_adopt_session_from_header()` verifies the signature with Flask's own serializer. Not a CSRF hole — a custom header can't be set cross-site, and the value is the cookie the caller needed anyway
+
+**Offline support (V23, fixed)**
+- `frontend/public/sw.js` caches the app shell so Frame Atlas opens with no connection; deck DATA comes from IndexedDB (`useOfflineCache.js`). The service worker never caches `/api` — a stale `/api/auth/me` would show the wrong account
+- Cache lookups MUST pass `{ignoreVary: true}`: flask-cors sets `Vary: Origin`, and an ES-module request carries an `Origin` header the worker's own precache fetch doesn't — without it the JS bundle misses the cache and the app never boots offline (the stylesheet, being no-cors, matched fine and hid the problem)
+- Cached responses are replayed with rebuilt headers; the Flask dev server emits a doubled `Date` that the module loader rejects outright
+- `AuthContext` remembers the last signed-in user in localStorage so a dropped connection isn't treated as a logout. UI hint only — the server still checks every request
+- Deck edits stamp `decks.updated_at` via `log_deck_activity()`; `reorder` has no activity entry so it calls `touch_deck()` itself
+
 **API Endpoints (complete)**
 - `/api/images` — all images
+- `/api/clip` — POST (V25), browser-extension clipping; see above
 - `/api/search` — AND-filter tag search; optional `seed` param (V14) switches the unfiltered grid to a deterministic shuffled order — images the user viewed in the last 7 days sort below unseen ones; any active filter ignores the seed and stays newest-first. Optional `ar` param (V15) filters by aspect-ratio bucket (e.g. `ar=2.39:1`) — every image snaps to its nearest standard format via `normalize_ar_label()`, same math as the tile labels. Optional `prom` + `exact` params (V24) tune the `color` filter: `prom` is the minimum percent of the frame the colour must cover (default 6), `exact` is 0–100 hue strictness (default 60, ≈15°). Absent params take those defaults, so pre-V24 bookmarks come back tighter than they were saved
 - `/api/views/log` — POST (V14), body `{image_ids: [...]}`; upserts per-user `image_views` rows (`last_seen_at`, `seen_count`). Frontend batches viewed tiles and flushes only on tab-hide/page-leave so the shuffle order never shifts mid-visit
 - `/api/autocomplete` — tag suggestions, frequency-sorted; also returns film matches (title/director/DP) and (V15) aspect-ratio bucket suggestions (`type: 'ar'`) when the query looks like a ratio ("9:16", "2.35") or an alias ("scope", "vertical", "square")
