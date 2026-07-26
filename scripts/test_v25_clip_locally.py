@@ -224,13 +224,17 @@ def main():
     })
     check("Extension follows the real image type, not the URL", r.get_json().get("filename") == "shot.png", r.get_json())
 
-    # ── 5. auth ────────────────────────────────────────────────────────────
+    # ── 5. auth & personal libraries ────────────────────────────────────────
     anon = mod.app.test_client()
     r = anon.post("/api/clip", json={"image": data_url(red)})
     check("Anonymous clipping is refused", r.status_code == 401, r.status_code)
 
-    r = friend.post("/api/clip", json={"image": data_url(red)})
-    check("Non-admin clipping is refused", r.status_code == 403, r.status_code)
+    # V25 personal clipping: friends clip to their own folders (not admin-only)
+    # In this test the friend has a faked drive service, so the clip succeeds
+    r = friend.post("/api/clip", json={"image": data_url(blue)})
+    check("Friend can clip to their own folder (using faked Drive)",
+          r.status_code == 200 and r.get_json().get("status") in ["clipped", "duplicate"],
+          r.get_json())
 
     # The extension can't rely on the cookie riding along cross-origin, so it
     # copies the value into X-FA-Session instead. That has to be equivalent.

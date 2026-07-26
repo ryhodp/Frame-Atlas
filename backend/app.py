@@ -3131,7 +3131,6 @@ def _clip_filename(source_url, mimetype, fallback='clip'):
 
 
 @app.route('/api/clip', methods=['POST'])
-@admin_required
 def clip_image():
     """Save one image grabbed from a web page by the browser extension.
 
@@ -3140,9 +3139,13 @@ def clip_image():
     apply, so images this server could never fetch on its own still work — and
     video frames, which exist only as canvas pixels, work at all.
 
-    Admin-only, like /api/upload, because both write into Ryan's Drive folder
-    via user 1's Google connection.
+    Writes to the logged-in user's Drive folder. Friends with their own
+    personal libraries can clip to their own folders. Ryan clips to his folder.
     """
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'login_required', 'message': 'Sign in to Frame Atlas first.'}), 401
+
     data = request.get_json(silent=True) or {}
     raw = data.get('image') or ''
     source_url = (data.get('source_url') or '').strip()[:2000] or None
@@ -3184,7 +3187,7 @@ def clip_image():
         return jsonify({'error': 'bad_image', 'message': "That file isn't a readable image."}), 400
 
     try:
-        service = get_user_drive_service(1)
+        service = get_user_drive_service(user_id)
     except Exception:
         return jsonify({
             'error': 'google_auth_failed',
@@ -3198,7 +3201,7 @@ def clip_image():
 
     existing = _load_existing_phashes()
     result = _ingest_image(
-        service, get_root_folder_id(1), image_data,
+        service, get_root_folder_id(user_id), image_data,
         _clip_filename(source_url, mimetype), mimetype,
         existing, force=force, source_url=source_url,
     )

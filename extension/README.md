@@ -11,11 +11,12 @@ app does, just without leaving the page you're on.
 
 ## Installing it (one time, about a minute)
 
-Chrome doesn't allow installing an extension from a folder by double-clicking —
-it has to be loaded manually. This is normal for a private extension that isn't
+This extension works in **Chrome, Edge, Brave, and Comet** (Chromium-based
+browsers). It doesn't allow installing from a folder by double-clicking — it
+has to be loaded manually. This is normal for a private extension that isn't
 published to the Chrome Web Store.
 
-1. Open Chrome and go to `chrome://extensions`
+1. Open your browser and go to `chrome://extensions` (or your browser's equivalent)
 2. Turn on **Developer mode** (toggle, top right)
 3. Click **Load unpacked** (button, top left)
 4. Select this `extension` folder inside `frame-atlas`
@@ -23,7 +24,7 @@ published to the Chrome Web Store.
 
 It stays installed. You only do this once.
 
-> Loading it this way means Chrome shows a "Disable developer mode extensions"
+> Loading it this way means your browser shows a "Disable developer mode extensions"
 > warning bubble on startup. Harmless — just close it.
 
 ---
@@ -40,13 +41,20 @@ already in your library it says so instead of adding a second copy.
 
 ---
 
-## Signing in
+## Signing in and connecting your Drive
 
-There's nothing to set up. The extension uses the Frame Atlas login already
-open in your browser.
+The extension uses the Frame Atlas login already open in your browser.
 
-If clipping fails with a sign-in message, open Frame Atlas in a tab, log in,
-and try the clip again.
+**For the extension to save clips**, you also need to have connected your Google
+Drive folder in Frame Atlas. In the app:
+
+- **Ryan**: just sign in. Your folder is already set up.
+- **Invited friends**: go to Frame Atlas → Sync, click "Connect a folder", and
+  paste the link to your Drive folder. (First-time setup is a 3-step wizard —
+  it'll walk you through it.)
+
+If clipping fails with a sign-in message about Google Drive, open Frame Atlas
+in a tab, connect your folder in Sync, and try the clip again.
 
 ---
 
