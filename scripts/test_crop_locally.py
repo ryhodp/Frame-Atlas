@@ -72,11 +72,20 @@ class FakeFilesResource:
             return FakeRequest(boom)
         return FakeRequest(lambda: {"id": fileId, "md5Checksum": "md5_after_crop"})
 
+    def list(self, q=None, fields=None, **kw):
+        # get_or_create_removed_folder() looks _Removed up before the backup
+        # write. Report it as already existing so the service account never
+        # needs to create anything (see create() below).
+        return FakeRequest(lambda: {"files": [{"id": "REMOVED_FOLDER_ID"}]})
+
     def create(self, **kw):
-        # Regression guard: crop must never create a brand-new file object —
-        # that's the exact operation a zero-quota service account can't do.
-        raise AssertionError("files().create() was called — crop must use "
-                              "files().update() on the existing file instead")
+        # Regression guard: the SERVICE ACCOUNT must never create a file object
+        # — that's the exact operation a zero-quota service account can't do.
+        # The pre-crop backup deliberately goes through the user's OAuth client
+        # instead (FakeUserDrive), which is allowed to create.
+        raise AssertionError("service-account files().create() was called — crop must use "
+                              "files().update() on the existing file, and route the "
+                              "_Removed backup through the user's OAuth client")
 
 
 class FakeDrive:
@@ -87,6 +96,37 @@ class FakeDrive:
 
     def files(self):
         return FakeFilesResource(self)
+
+
+class FakeUserFilesResource:
+    def __init__(self, drive):
+        self.drive = drive
+
+    def create(self, body=None, media_body=None, fields=None, **kw):
+        self.drive.create_calls.append({
+            "name": (body or {}).get("name"),
+            "parents": (body or {}).get("parents"),
+            "had_media": media_body is not None,
+        })
+        if self.drive.next_create_error is not None:
+            err = self.drive.next_create_error
+            self.drive.next_create_error = None
+
+            def boom():
+                raise err
+            return FakeRequest(boom)
+        return FakeRequest(lambda: {"id": "BACKUP_FILE_ID"})
+
+
+class FakeUserDrive:
+    """The signed-in user's OAuth client — the one with storage quota, used
+    only to write the pre-crop backup into _Removed."""
+    def __init__(self):
+        self.create_calls = []
+        self.next_create_error = None
+
+    def files(self):
+        return FakeUserFilesResource(self)
 
 
 class FakeDownloader:
@@ -135,7 +175,9 @@ def main():
 
     jpeg = make_jpeg(mod)
     drive = FakeDrive(jpeg)
+    user_drive = FakeUserDrive()
     mod.get_drive_service = lambda: drive
+    mod.get_user_drive_service = lambda uid: user_drive
     mod.MediaIoBaseDownload = FakeDownloader
 
     admin = mod.app.test_client()
@@ -173,6 +215,17 @@ def main():
     check("drive_file_id in the DB is unchanged", row["drive_file_id"] == "ORIGINAL_FILE_ID")
     check("thumbnail_blob was updated to the cropped image", row["thumbnail_blob"] != thumb)
 
+    # --- Pre-crop backup: the original must be preserved before it's replaced ---
+    check("exactly one backup file was created", len(user_drive.create_calls) == 1)
+    check("the backup landed in _Removed",
+          user_drive.create_calls and user_drive.create_calls[0]["parents"] == ["REMOVED_FOLDER_ID"])
+    check("the backup carried the original bytes",
+          user_drive.create_calls and user_drive.create_calls[0]["had_media"])
+    check("the backup name marks it as pre-crop and keeps the extension",
+          user_drive.create_calls
+          and "pre-crop" in (user_drive.create_calls[0]["name"] or "")
+          and (user_drive.create_calls[0]["name"] or "").endswith(".jpg"))
+
     # --- Error path 1: Editor access missing (insufficientFilePermissions) ---
     drive.update_calls.clear()
     drive.next_update_error = fake_http_error("insufficientFilePermissions")
@@ -194,6 +247,30 @@ def main():
     check("quota error message names quota, not sharing", "quota" in msg.lower())
     check("quota error message does not send user to fix sharing settings",
           "Editor" not in msg)
+
+    # --- Error path 3: a failed backup must ABORT the crop ---
+    #     The whole point of the backup is that the original survives a bad
+    #     crop. If the backup can't be written and we overwrite anyway, the
+    #     safety net is decorative — so the Drive write must not happen at all.
+    drive.update_calls.clear()
+    user_drive.create_calls.clear()
+    user_drive.next_create_error = RuntimeError("backup upload exploded")
+    r = admin.post(f"/api/images/{image_id}/crop",
+                    json={"box": {"x": 5, "y": 5, "w": 50, "h": 50}})
+    msg = (r.get_json() or {}).get("error", "")
+    check("failed backup -> error, not success", r.status_code >= 400)
+    check("failed backup left the Drive file untouched", len(drive.update_calls) == 0)
+    check("failed-backup message says the image is untouched",
+          "untouched" in msg.lower())
+
+    # --- Error path 4: no connected Google account -> refuse, don't silently skip ---
+    drive.update_calls.clear()
+    mod.get_user_drive_service = lambda uid: None
+    r = admin.post(f"/api/images/{image_id}/crop",
+                    json={"box": {"x": 5, "y": 5, "w": 50, "h": 50}})
+    check("no OAuth client -> crop refused", r.status_code >= 400)
+    check("no OAuth client -> Drive file untouched", len(drive.update_calls) == 0)
+    mod.get_user_drive_service = lambda uid: user_drive
 
     passed = sum(1 for _, ok in checks if ok)
     print(f"\n{passed}/{len(checks)} checks passed")

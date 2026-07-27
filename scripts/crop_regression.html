@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crop detection — regression sheet</title>
+<!--
+  Visual + numeric regression check for frontend/src/cropDetectV2.js.
+
+  HOW TO RUN
+    cd /Users/ryanhoang/Desktop/frame-atlas
+    python3 -m http.server 8971 --bind 127.0.0.1
+    open http://127.0.0.1:8971/scripts/crop_regression.html
+
+  It must be served from the REPO ROOT: the page loads the detector from
+  /frontend/src/ and the images from "/Test Photos/To Crop/" (that folder is
+  local-only, not in git — the sheet just reports missing files if it's absent).
+
+  WHAT TO LOOK FOR
+    · Green box hugs the picture, with no chrome inside and no picture outside.
+    · The "tighten Δ" column should be 0 on nearly everything. Auto-tighten is
+      only meant to shave a residue of a few px off an edge detection already
+      peeled; anything double digits means a guard in tightenBox has regressed.
+    · The MAD sweep row shows what each image would do at looser thresholds.
+      Looser should always mean MORE cropped — if a stricter threshold ever
+      crops more, the peel logic is wrong.
+
+  Baseline as of the MAD rewrite (14 images, all correct except as noted):
+    Flex 3            0,320,3840,1520      IMG_4306   218,0,2000,1125
+    IMG_1063          0,592,1290,1612      IMG_6846   0,320,3840,1520
+    IMG_1068          0,592,1290,1612      IMG_6848   0,320,3840,1520
+    IMG_1074          0,753,1290,1290      Tokyo      no crop (thin white
+    IMG_1076          0,753,1290,1290                  line at top remains)
+    IMG_1078          0,592,1290,1612      Untitled   240,0,1440,1080
+    IMG_1081          0,592,1290,1612      IMG_5530   0,208,1125,708
+    IMG_1243          48,55,1194,777  (exact picture bounds, after tighten)
+-->
+<style>
+body{background:#141416;color:#e8e4dc;font:12px ui-monospace,monospace;margin:0;padding:12px}
+h1{color:#D9A441;font:600 15px -apple-system;margin:0 0 4px}
+p.sub{color:#8a8a92;margin:0 0 12px}
+#g{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.c{width:150px}
+.p{position:relative;background:#000;width:150px}
+.p img{max-width:150px;display:block;margin:0 auto}
+.b{position:absolute;border:1.5px solid #6ef06e;box-sizing:border-box}
+.n{color:#D9A441;font-size:10px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v{color:#8a8a92;font-size:10px}
+table{border-collapse:collapse;font-size:11.5px}
+td,th{border:1px solid #2f2f36;padding:3px 8px;text-align:right;white-space:nowrap}
+th{color:#8a8a92;font-weight:500}td.f{text-align:left;color:#D9A441}
+.zero{color:#4a4a52}.moved{color:#8fbf6f}.big{color:#e07a55}
+</style>
+</head>
+<body>
+<h1>Crop detection — regression sheet</h1>
+<p class="sub">green box = what the Crop button would propose (detect + auto-tighten)</p>
+<div id="g">loading…</div>
+<div id="t"></div>
+
+<script type="module">
+import { detectCrop, detectCropTightened, detectCropAtFlatMad } from '/frontend/src/cropDetectV2.js';
+
+const DIR = '/Test Photos/To Crop/';
+const FILES = ["Flex 3.jpg","IMG_1063.PNG","IMG_1068.PNG","IMG_1074.PNG","IMG_1076 (1).PNG",
+  "IMG_1078.PNG","IMG_1081.PNG","IMG_1243.jpg","IMG_4306.PNG","IMG_6846.JPG",
+  "IMG_6848.JPG","Tokyo Story 10.png","Untitled_1.22.1.JPEG","cropped_IMG_5530.png"];
+
+const load = s => new Promise((res, rej) => {
+  const i = new Image();
+  i.onload = () => res(i);
+  i.onerror = () => rej(new Error('missing'));
+  i.src = s;
+});
+
+const g = document.getElementById('g');
+g.innerHTML = '';
+const rows = [];
+
+for (const f of FILES) {
+  let img;
+  try { img = await load(DIR + encodeURIComponent(f)); }
+  catch { rows.push({ f, missing: true }); continue; }
+
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const raw  = detectCrop(img, 0);
+  const done = detectCropTightened(img, 0);
+  const b = done ? done.box : { x: 0, y: 0, w: W, h: H };
+  const rb = raw ? raw.box : { x: 0, y: 0, w: W, h: H };
+
+  const sweep = t => { const r = detectCropAtFlatMad(img, t); return r ? `${r.box.w}×${r.box.h}` : 'none'; };
+  rows.push({
+    f, size: `${W}×${H}`,
+    box: `${b.x},${b.y},${b.w},${b.h}`,
+    conf: done ? done.confidence : '-',
+    dL: b.x - rb.x, dT: b.y - rb.y,
+    dR: (rb.x + rb.w) - (b.x + b.w), dB: (rb.y + rb.h) - (b.y + b.h),
+    m0: sweep(0), m1: sweep(1), m2: sweep(2),
+  });
+
+  const sc = 150 / W;
+  const el = document.createElement('div');
+  el.className = 'c';
+  el.innerHTML = `<div class="p" style="height:${H * sc}px"><img src="${DIR + encodeURIComponent(f)}">
+    <div class="b" style="left:${b.x * sc}px;top:${b.y * sc}px;width:${b.w * sc}px;height:${b.h * sc}px"></div></div>
+    <div class="n" title="${f}">${f}</div>
+    <div class="v">${done ? ((1 - (b.w * b.h) / (W * H)) * 100).toFixed(0) + '% · ' + done.confidence : 'no crop'}</div>`;
+  g.appendChild(el);
+}
+
+const cls = v => v === 0 ? 'zero' : (v > 10 ? 'big' : 'moved');
+document.getElementById('t').innerHTML =
+  '<table><tr><th>file</th><th>size</th><th>final box</th><th>conf</th>' +
+  '<th colspan="4">tighten Δ (L/T/R/B)</th><th>MAD≤0</th><th>MAD≤1</th><th>MAD≤2</th></tr>' +
+  rows.map(r => r.missing
+    ? `<tr><td class="f">${r.f}</td><td colspan="10" style="text-align:left;color:#e07a55">not found — is "Test Photos/To Crop/" present?</td></tr>`
+    : `<tr><td class="f">${r.f}</td><td>${r.size}</td><td>${r.box}</td><td>${r.conf}</td>` +
+      `<td class="${cls(r.dL)}">${r.dL}</td><td class="${cls(r.dT)}">${r.dT}</td>` +
+      `<td class="${cls(r.dR)}">${r.dR}</td><td class="${cls(r.dB)}">${r.dB}</td>` +
+      `<td>${r.m0}</td><td>${r.m1}</td><td>${r.m2}</td></tr>`).join('') +
+  '</table>';
+
+window.__rows = rows;
+</script>
+</body>
+</html>

@@ -3738,9 +3738,9 @@ def crop_image(image_id):
     or files.copy of a file the caller doesn't own — fails with
     'storageQuotaExceeded' even when the account has Editor access. Updating
     an existing file's content doesn't create a new object, so it isn't
-    subject to that limit. The tradeoff (accepted deliberately): unlike
-    delete, a crop has no _Removed undo — the pre-crop bytes aren't kept
-    anywhere once this succeeds.
+    subject to that limit. Because that overwrite is destructive, the
+    untouched original is copied into _Removed first (step 2.5) and a failed
+    backup aborts the crop, so a bad crop is always recoverable from Drive.
 
     Owner-or-admin, mirroring delete. Friends need the service account
     upgraded to Editor on their folder (Viewer can read but not write).
@@ -3817,6 +3817,44 @@ def crop_image(image_id):
     except Exception as e:
         return jsonify({'error': f'Cropping failed: {e}'}), 500
 
+    # 2.5 Back the untouched original up into _Removed BEFORE overwriting.
+    #     A crop is destructive — step 3 replaces the Drive file's bytes and the
+    #     originals are gone — so this runs first and a failure here aborts the
+    #     crop. A safety net that silently doesn't catch is worse than none.
+    #
+    #     Two different Drive clients, on purpose:
+    #       · the SERVICE ACCOUNT finds/creates the _Removed folder, because it
+    #         is the client that can actually list the library folder;
+    #       · the OWNER'S OAuth writes the backup file, because a service
+    #         account has no storage quota on a personal Drive and any
+    #         files().create() it makes fails with storageQuotaExceeded. The
+    #         upload path already creates files this way (see _ingest_image),
+    #         so drive.file scope is known to allow a create into a known
+    #         folder id even though it cannot list that folder.
+    try:
+        backup_service = get_user_drive_service(owner_id) or get_user_drive_service(1)
+        if backup_service is None:
+            return jsonify({
+                'error': ("Can't crop yet — the original needs to be backed up to "
+                          f"{REMOVED_FOLDER_NAME} first, and that requires a connected "
+                          "Google account. Connect Google on the Settings page, then retry.")
+            }), 400
+        removed_id = get_or_create_removed_folder(service, get_root_folder_id(owner_id))
+        stem, dot, ext = (row['filename'] or 'image').rpartition('.')
+        if not dot:
+            stem, ext = (row['filename'] or 'image'), 'jpg'
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        backup_service.files().create(
+            body={'name': f'{stem} (pre-crop {stamp}).{ext}', 'parents': [removed_id]},
+            media_body=MediaIoBaseUpload(io.BytesIO(original_bytes), mimetype=mime),
+            fields='id',
+        ).execute()
+    except Exception as e:
+        return jsonify({
+            'error': (f'Could not back the original up to {REMOVED_FOLDER_NAME}, so the crop '
+                      f'was not applied and your image is untouched. Reason: {e}')
+        }), 500
+
     # 3. Overwrite the ORIGINAL file's content in place — same file id, same
     #    name, same folder. This must be files().update(), not files().create():
     #    a service account has zero storage quota on a personal Drive, so any
@@ -3849,9 +3887,8 @@ def crop_image(image_id):
 
     # 4. Update the database row — the id and drive_file_id are unchanged, so
     #    tags, colors, decks, favorites, and filmography all still point at
-    #    this image. Only the derived, now-stale data gets recomputed. There
-    #    is no pre-crop backup kept anywhere (Drive or DB) — a crop can't be
-    #    undone once this succeeds.
+    #    this image. Only the derived, now-stale data gets recomputed. The
+    #    pre-crop bytes live on in _Removed (step 2.5) if this needs undoing.
     thumbnail = generate_thumbnail(cropped_bytes)
     if not thumbnail:
         return jsonify({

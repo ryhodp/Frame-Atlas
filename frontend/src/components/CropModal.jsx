@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { detectCrop, tightenBox, isFullImageBox } from '../cropDetect';
+import { detectCropTightened, tightenBox, isFullImageBox } from '../cropDetectV2';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 // ── CropModal — Frame Atlas V18 ───────────────────────────────────────────────
@@ -129,7 +129,11 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       item.imgEl = img;
       let result = null;
       try {
-        result = detectCrop(img);
+        // Detection deliberately stops at the first line that isn't dead flat,
+        // so it lands a few pixels short of the seam on compressed sources.
+        // The paired tighten pass closes that gap and is guarded so it can
+        // only shave a residue, never take a bite out of the picture.
+        result = detectCropTightened(img);
       } catch (e) {
         console.error('Crop detection failed, falling back to manual', e);
       }
@@ -277,7 +281,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     const before = snapshotItem(item);
     const level = (item.redetectLevel || 0) + 1;
     let result = null;
-    try { result = detectCrop(item.imgEl, level); } catch (e) { console.error('Redetect failed', e); }
+    try { result = detectCropTightened(item.imgEl, level); } catch (e) { console.error('Redetect failed', e); }
     const prevBox = item.cropBox;
     let regressed = false;
     if (result) {
@@ -285,8 +289,11 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       item.confidence = result.confidence;
       item.isFallback = false;
     } else if (prevBox) {
-      // Stricter thresholds found nothing — keep the existing box rather
-      // than discarding a real (if imperfect) crop.
+      // Each level widens what counts as flat, so Redetect is the way past a
+      // bar the strict first pass refused to peel (film grain over a
+      // letterbox, a gradient mat). Finding nothing here means even the looser
+      // threshold saw no flat edge — keep the existing box rather than
+      // discarding a real, if imperfect, crop.
       regressed = true;
     } else {
       item.cropBox = { x: 0, y: 0, w: item.imgEl.naturalWidth, h: item.imgEl.naturalHeight };
