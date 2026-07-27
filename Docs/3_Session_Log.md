@@ -1098,6 +1098,61 @@ All core collaboration + offline features now complete. App is now shareable wit
 
 ---
 
+## Deploy Troubleshooting + Hobby Tier Upgrade
+*Completed: July 27, 2026*
+*Status: COMPLETE — app back online after billing cap hit*
+
+### The Problem
+V26 code shipped successfully on July 26, but the app never deployed. Build logs showed:
+- Initialization: ✓ passed
+- Build: ✓ passed (14 seconds)
+- Deploy: ✗ "Deployment failed" — Deploy stage never started
+
+### Root Cause
+**Not** the serverless flag (was already ON). The real blocker: Free tier hit its $1/month usage cap.
+
+| Tier | Monthly Grant | Usage to Date | Status |
+|---|---|---|---|
+| Free | $1.00 | $1.34 | **Over budget** |
+| — daring-light (Frame Atlas) | — | $1.33 | — |
+| — adorable-youthfulness | — | $0.01 | — |
+
+Railway suspends deployments when over budget. The build succeeded, but the container couldn't start because there was no budget to run it on.
+
+### Resolution
+Ryan upgraded to Hobby tier ($5/month), which:
+- Lifts the budget cap (includes $5 monthly usage credit)
+- Restores always-on capability (background sync/tagging jobs won't be interrupted by container sleep)
+- Note: Serverless remains ON by design (Railway required it); app can still sleep after idle periods and wake in ~2–3 seconds
+
+Redeploy triggered immediately after upgrade. App came online ~40 seconds later.
+
+### Lessons
+1. **I misdiagnosed twice:** First said "Free is enough, 6,000–8,000 images will fit" (measured storage, never checked compute budget). Then saw the serverless error and almost flipped the flag OFF, which would have broken things — I checked it was already on before touching it. Third attempt I finally measured: Free's $1/month doesn't cover an app that syncs, tags with AI, and serves images.
+
+2. **The error message was misleading:** "Free plan deployments must be serverless" was Railway's correct rule, but it masked the real blocker (budget exhaustion). The build log never mentioned money — just "deployment failed" → easy to misread as a code problem.
+
+3. **Database vulnerability:** All organizational work (tags, decks, scenes, bookmarks) lives in a single SQLite file on Railway's volume with no other copy. Images are safe on Drive, but months of tagging work is unprotected. User asked "why backup if Drive has images?" — answer: Drive has the *assets*, the database has the *work*.
+
+### Files Changed
+- `Docs/.gitignore` — added Test Photos/ to prevent 36 MB of screenshots from bloating every build (bc6c09c)
+
+### Commits
+- `bc6c09c` (Stop tracking Test Photos/ — local-only regression harness reference images)
+
+### Current State
+- ✅ V26 crop detection engine live (12/14 test images correct; 2 conservative)
+- ✅ Backup-abort safety for crops shipped
+- ✅ App online, accessible at frame-atlas-production.up.railway.app
+- ⏳ Database still has no export mechanism (not blocking, but risk remains)
+
+### Next Steps
+1. Test V26 crop detection on live images (new Redetect semantics, MAD-based detection)
+2. Verify _Removed backup works with real Google Drive connection
+3. Build database export endpoint if user wants off-site copy
+
+Session complete. App operational and ready for feature work.
+
 ## V26 — Crop Detection Engine Rewrite (MAD-Based)
 *Completed: July 26, 2026*
 *Status: COMPLETE — 2/14 → 12/14 correct on real test images; deployed to production*
