@@ -7,3 +7,7 @@ dist/
 scripts/.venv/
 scripts/.model_cache/
 scripts/fingerprints.log
+
+# Local-only reference images for the crop regression harness (scripts/crop_regression.html).
+# Kept on disk, never committed — 36 MB of screenshots that only slow the build context.
+Test Photos/
