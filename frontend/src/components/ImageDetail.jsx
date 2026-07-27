@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import CompositionOverlay, { OVERLAY_MODES, OVERLAY_LABELS, OVERLAY_ROTATABLE } from './CompositionOverlay';
 
 const CAT_LABELS = {
   'mood': 'Mood', 'lighting_quality': 'Lighting',
@@ -45,6 +46,13 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
 
+  // Composition-guide overlay (thirds / golden ratio / spiral / diagonal / cross)
+  const [overlayMode, setOverlayMode] = useState('off');
+  const [overlayOrientation, setOverlayOrientation] = useState(0);
+  const [overlayMenuOpen, setOverlayMenuOpen] = useState(false);
+  const imgWrapRef = useRef(null);
+  const [imgBoxSize, setImgBoxSize] = useState({ width: 0, height: 0 });
+
   useEffect(() => {
     if (!image) return;
     let objectUrl = null;
@@ -58,6 +66,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     setEditingFilm(false);
     setConfirmDelete(false);
     setDeleteError(null);
+    setOverlayMode('off');
+    setOverlayMenuOpen(false);
 
     fetch(`/api/images/${image.id}/full`)
       .then(res => {
@@ -81,6 +91,18 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
+
+  // Tracks the img's own rendered box (not the letterboxed container) so the
+  // overlay lines up with the actual picture at any zoom/resize.
+  useEffect(() => {
+    const el = imgWrapRef.current;
+    if (!el) return;
+    const update = () => setImgBoxSize({ width: el.clientWidth, height: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fullImage, image?.id]);
 
   if (!image) return null;
 
@@ -250,6 +272,163 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           >×</button>
         </div>
 
+        {/* Action toolbar — above the photo, so it's not competing with tags
+            for attention down at the bottom of a long scroll */}
+        <div style={{
+          padding: '10px 20px',
+          borderBottom: '1px solid rgba(255,255,255,0.065)',
+          display: 'flex', gap: '8px', alignItems: 'center',
+          flexWrap: 'wrap', rowGap: '8px'
+        }}>
+          <button
+            onClick={toggleFavorite}
+            style={{
+              ...footBtn('#dcbd76'),
+              background: isFavorite ? 'rgba(201,162,83,0.18)' : 'none',
+              borderColor: isFavorite ? 'rgba(201,162,83,0.6)' : 'rgba(201,162,83,0.3)'
+            }}
+          >
+            {isFavorite ? '★ Favorited' : '☆ Favorite'}
+          </button>
+          <button
+            onClick={toggleFlag}
+            style={{
+              ...footBtn('#cf7152'),
+              background: isFlagged ? 'rgba(207,113,82,0.18)' : 'none',
+              borderColor: isFlagged ? 'rgba(207,113,82,0.6)' : 'rgba(207,113,82,0.3)'
+            }}
+          >
+            ⚑ {isFlagged ? 'Flagged' : 'Flag'}
+          </button>
+
+          {/* Composition-guide overlay: icon button opens a popover of modes;
+              a rotate control appears only for the two directional guides */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setOverlayMenuOpen(v => !v)}
+              title="Show composition guides over the photo"
+              style={{
+                ...footBtn('#7fb3d9'),
+                background: overlayMode !== 'off' ? 'rgba(127,179,217,0.18)' : 'none',
+                borderColor: overlayMode !== 'off' ? 'rgba(127,179,217,0.6)' : 'rgba(127,179,217,0.3)'
+              }}
+            >
+              ▦ {overlayMode === 'off' ? 'Overlay' : OVERLAY_LABELS[overlayMode]}
+            </button>
+            {overlayMenuOpen && (
+              <>
+                {/* click-outside catcher */}
+                <div onClick={() => setOverlayMenuOpen(false)}
+                  style={{ position: 'fixed', inset: 0, zIndex: 1001 }} />
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 6px)', left: 0,
+                  background: '#18181b', border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: '8px', padding: '4px', zIndex: 1002,
+                  minWidth: '160px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
+                }}>
+                  {OVERLAY_MODES.map(m => (
+                    <button
+                      key={m}
+                      onClick={() => { setOverlayMode(m); setOverlayMenuOpen(false); }}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        background: overlayMode === m ? 'rgba(127,179,217,0.15)' : 'none',
+                        border: 'none', color: overlayMode === m ? '#7fb3d9' : '#efeadd',
+                        borderRadius: '5px', padding: '7px 10px',
+                        cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
+                      }}
+                    >
+                      {OVERLAY_LABELS[m]}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          {OVERLAY_ROTATABLE[overlayMode] && (
+            <button
+              onClick={() => setOverlayOrientation(o => (o + 1) % 4)}
+              title="Rotate the guide to a different corner"
+              style={footBtn('#7fb3d9')}
+            >
+              ⟳
+            </button>
+          )}
+
+          {onFindSimilar && (
+            <button
+              onClick={() => onFindSimilar(image)}
+              title="Find visually similar images"
+              style={footBtn('#a99bf7')}
+            >
+              ≈ Find Similar
+            </button>
+          )}
+          {onCrop && (
+            <button
+              onClick={() => onCrop(image)}
+              title="Auto-detect and remove letterbox bars / screenshot chrome"
+              style={footBtn('#d9a441')}
+            >
+              ✂ Crop
+            </button>
+          )}
+
+          <div style={{ flex: 1 }} />
+
+          <a
+            href={`/api/images/${image.id}/download`}
+            download={image.filename}
+            style={{ ...footBtn('#9c988d'), textDecoration: 'none', display: 'inline-block' }}
+            title="Download full-resolution original"
+          >
+            ↓ Download
+          </a>
+
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              style={footBtn('#cf7152')}
+            >
+              Delete
+            </button>
+          ) : (
+            <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: '#cf7152' }}>Sure?</span>
+              <button
+                onClick={doDelete}
+                disabled={deleting}
+                style={{
+                  ...footBtn('#efeadd'),
+                  background: 'rgba(207,113,82,0.85)',
+                  border: '1px solid rgba(207,113,82,1)',
+                  opacity: deleting ? 0.6 : 1
+                }}
+              >
+                {deleting ? 'Deleting…' : 'Yes, delete'}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                style={footBtn('#9c988d')}
+              >
+                Cancel
+              </button>
+            </span>
+          )}
+        </div>
+
+        {/* Delete error */}
+        {deleteError && (
+          <div style={{
+            padding: '10px 20px', fontSize: '11.5px', color: '#cf7152',
+            borderBottom: '1px solid rgba(207,113,82,0.25)',
+            background: 'rgba(207,113,82,0.06)'
+          }}>
+            {deleteError}
+          </div>
+        )}
+
         {/* Scrollable content */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {/* Full-res image (falls back to thumbnail while loading) */}
@@ -259,16 +438,28 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             overflow: 'hidden'
           }}>
-            <img
-              src={fullImage || image.thumbnail}
-              alt={image.filename}
-              style={{
-                maxWidth: '100%', maxHeight: '420px',
-                objectFit: 'contain',
-                filter: fullImage ? 'none' : 'blur(0.5px)',
-                transition: 'filter 0.3s ease'
-              }}
-            />
+            <div ref={imgWrapRef} style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', maxHeight: '420px' }}>
+              <img
+                src={fullImage || image.thumbnail}
+                alt={image.filename}
+                style={{
+                  display: 'block',
+                  maxWidth: '100%', maxHeight: '420px',
+                  objectFit: 'contain',
+                  filter: fullImage ? 'none' : 'blur(0.5px)',
+                  transition: 'filter 0.3s ease'
+                }}
+                onLoad={() => imgWrapRef.current && setImgBoxSize({
+                  width: imgWrapRef.current.clientWidth, height: imgWrapRef.current.clientHeight
+                })}
+              />
+              <CompositionOverlay
+                mode={overlayMode}
+                orientation={overlayOrientation}
+                width={imgBoxSize.width}
+                height={imgBoxSize.height}
+              />
+            </div>
           </div>
           {!fullImage && !fullError && (
             <div style={{
@@ -650,108 +841,6 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             })}
 
           </div>
-        </div>
-
-        {/* Delete error */}
-        {deleteError && (
-          <div style={{
-            padding: '10px 20px', fontSize: '11.5px', color: '#cf7152',
-            borderTop: '1px solid rgba(207,113,82,0.25)',
-            background: 'rgba(207,113,82,0.06)'
-          }}>
-            {deleteError}
-          </div>
-        )}
-
-        {/* Footer actions */}
-        <div style={{
-          padding: '12px 20px',
-          borderTop: '1px solid rgba(255,255,255,0.065)',
-          display: 'flex', gap: '8px', alignItems: 'center',
-          flexWrap: isMobile ? 'wrap' : 'nowrap',
-          rowGap: '8px'
-        }}>
-          <button
-            onClick={toggleFavorite}
-            style={{
-              ...footBtn('#dcbd76'),
-              background: isFavorite ? 'rgba(201,162,83,0.18)' : 'none',
-              borderColor: isFavorite ? 'rgba(201,162,83,0.6)' : 'rgba(201,162,83,0.3)'
-            }}
-          >
-            {isFavorite ? '★ Favorited' : '☆ Favorite'}
-          </button>
-          <button
-            onClick={toggleFlag}
-            style={{
-              ...footBtn('#cf7152'),
-              background: isFlagged ? 'rgba(207,113,82,0.18)' : 'none',
-              borderColor: isFlagged ? 'rgba(207,113,82,0.6)' : 'rgba(207,113,82,0.3)'
-            }}
-          >
-            ⚑ {isFlagged ? 'Flagged' : 'Flag'}
-          </button>
-          {onFindSimilar && (
-            <button
-              onClick={() => onFindSimilar(image)}
-              title="Find visually similar images"
-              style={footBtn('#a99bf7')}
-            >
-              ≈ Find Similar
-            </button>
-          )}
-          {onCrop && (
-            <button
-              onClick={() => onCrop(image)}
-              title="Auto-detect and remove letterbox bars / screenshot chrome"
-              style={footBtn('#d9a441')}
-            >
-              ✂ Crop
-            </button>
-          )}
-
-          <div style={{ flex: 1 }} />
-
-          <a
-            href={`/api/images/${image.id}/download`}
-            download={image.filename}
-            style={{ ...footBtn('#9c988d'), textDecoration: 'none', display: 'inline-block' }}
-            title="Download full-resolution original"
-          >
-            ↓ Download
-          </a>
-
-          {!confirmDelete ? (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              style={footBtn('#cf7152')}
-            >
-              Delete
-            </button>
-          ) : (
-            <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: '#cf7152' }}>Sure?</span>
-              <button
-                onClick={doDelete}
-                disabled={deleting}
-                style={{
-                  ...footBtn('#efeadd'),
-                  background: 'rgba(207,113,82,0.85)',
-                  border: '1px solid rgba(207,113,82,1)',
-                  opacity: deleting ? 0.6 : 1
-                }}
-              >
-                {deleting ? 'Deleting…' : 'Yes, delete'}
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                disabled={deleting}
-                style={footBtn('#9c988d')}
-              >
-                Cancel
-              </button>
-            </span>
-          )}
         </div>
       </div>
 
