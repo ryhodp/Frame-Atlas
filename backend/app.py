@@ -2127,6 +2127,55 @@ def color_match_share(picked_hex, entries, hue_tol):
             total += share
     return total
 
+
+# V27: color-overlap check for near-duplicate detection. phash only reads
+# brightness LAYOUT (dark frame, one bright patch) — two completely
+# different photos can share that shape (e.g. a night street and a lit
+# doorway) and get flagged as duplicates even though no human would say they
+# match. Requiring the actual colors to line up too, using the same
+# hue-based closeness test as color search, catches that.
+DUP_COLOR_HUE_TOL = exactness_to_hue_tol(DEFAULT_EXACTNESS)
+DUP_COLOR_MIN_OVERLAP = 0.5  # each side's own colorful content must be at least half explained by the other's
+
+def _chromatic_entries(entries):
+    """Palette entries with enough color to carry hue information. Near-
+    black/white/gray entries are excluded — otherwise two unrelated dark
+    photos would "match" purely because both are mostly black background."""
+    out = []
+    for hex_color, share in entries:
+        if share is None:
+            continue
+        try:
+            _, s, v = _hsv(hex_color)
+        except Exception:
+            continue
+        if s >= 0.22 and v >= 0.12:
+            out.append((hex_color, share))
+    return out
+
+def palettes_overlap(entries_a, entries_b):
+    """True if two palettes describe the same actual colors, not just a
+    similar brightness shape. entries: list of (hex, share) from the colors
+    table. If either image has no real color signal (b&w, or palette not
+    extracted yet), this doesn't block a match — phash alone decides, same
+    graceful-degradation rule color search already uses for pre-V24 rows."""
+    chroma_a = _chromatic_entries(entries_a)
+    chroma_b = _chromatic_entries(entries_b)
+    if not chroma_a or not chroma_b:
+        return True
+
+    def matched_fraction(entries, other):
+        total = sum(share for _, share in entries)
+        if total <= 0:
+            return 0.0
+        matched = sum(share for hex_color, share in entries
+                      if any(color_matches(hex_color, other_hex, DUP_COLOR_HUE_TOL)
+                             for other_hex, _ in other))
+        return matched / total
+
+    return (matched_fraction(chroma_a, chroma_b) >= DUP_COLOR_MIN_OVERLAP
+            and matched_fraction(chroma_b, chroma_a) >= DUP_COLOR_MIN_OVERLAP)
+
 def sync_folder_worker(folder_id, user_id):
     global sync_state
     try:
@@ -3306,12 +3355,19 @@ def google_disconnect():
     return jsonify({'success': True})
 
 def _load_existing_phashes():
-    """Every already-known image fingerprint, for near-duplicate checks."""
+    """Every already-known image fingerprint plus palette (for the
+    color-overlap check), for near-duplicate checks."""
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT id, filename, thumbnail_blob, phash FROM images WHERE phash IS NOT NULL')
-    rows = c.fetchall()
+    rows = [dict(r) for r in c.fetchall()]
+    c.execute('SELECT image_id, hex, share FROM colors')
+    palettes = {}
+    for r in c.fetchall():
+        palettes.setdefault(r['image_id'], []).append((r['hex'], r['share']))
     conn.close()
+    for r in rows:
+        r['colors'] = palettes.get(r['id'], [])
     return rows
 
 
@@ -3321,15 +3377,18 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
     the row, build the thumbnail + palette.
 
     Shared by /api/upload and /api/clip so the browser extension can't drift
-    away from the in-app uploader. `existing` is the phash list from
+    away from the in-app uploader. `existing` is the phash+palette list from
     _load_existing_phashes(); successful ingests are appended to it so a batch
     also dedupes against itself. Returns the per-file result dict.
     """
     img_phash = compute_phash(image_data)
+    thumbnail = generate_thumbnail(image_data)
+    new_palette = extract_palette(thumbnail) if thumbnail else []
 
     if not force and img_phash:
         dup = next((r for r in existing
-                    if phash_distance(img_phash, r['phash']) <= PHASH_NEAR_DUP_THRESHOLD), None)
+                    if phash_distance(img_phash, r['phash']) <= PHASH_NEAR_DUP_THRESHOLD
+                    and palettes_overlap(new_palette, r['colors'])), None)
         if dup:
             return {
                 'filename': filename,
@@ -3350,7 +3409,6 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
     except Exception as e:
         return {'filename': filename, 'status': 'error', 'message': str(e)}
 
-    thumbnail = generate_thumbnail(image_data)
     aspect_ratio = get_image_aspect_ratio(image_data)
 
     conn = get_db()
@@ -3366,11 +3424,11 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
     conn.close()
 
     if thumbnail:
-        hexes = extract_palette(thumbnail)
-        if hexes:
-            save_palette(new_id, 1, hexes)
+        if new_palette:
+            save_palette(new_id, 1, new_palette)
         existing.append({'id': new_id, 'filename': filename,
-                         'thumbnail_blob': thumbnail, 'phash': img_phash})
+                         'thumbnail_blob': thumbnail, 'phash': img_phash,
+                         'colors': new_palette})
 
     return {'filename': filename, 'status': 'uploaded', 'image_id': new_id}
 
@@ -4125,8 +4183,12 @@ def reset_crop_progress():
 @admin_required
 def duplicates_scan():
     """Backfills fingerprints for any image missing them, then returns
-    duplicate groups. phash comes from stored thumbnails (instant); md5 comes
-    from one Drive folder listing (a few seconds)."""
+    duplicate groups. phash and color palette come from stored thumbnails
+    (instant); md5 comes from one Drive folder listing (a few seconds).
+    Backfilling the palette here matters now that the duplicate check needs
+    real color data to rule out false matches — an image missing one would
+    otherwise just fall back to phash-only, the exact failure mode this scan
+    exists to catch."""
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT id, thumbnail_blob FROM images WHERE phash IS NULL')
@@ -4135,9 +4197,19 @@ def duplicates_scan():
         if ph:
             c.execute('UPDATE images SET phash = ? WHERE id = ?', (ph, r['id']))
     conn.commit()
+    c.execute('''
+        SELECT id, user_id, thumbnail_blob FROM images
+        WHERE id NOT IN (SELECT DISTINCT image_id FROM colors)
+    ''')
+    missing_palette = c.fetchall()
     c.execute('SELECT COUNT(*) FROM images WHERE md5_checksum IS NULL')
     missing_md5 = c.fetchone()[0]
     conn.close()
+
+    for r in missing_palette:
+        hexes = extract_palette(r['thumbnail_blob'])
+        if hexes:
+            save_palette(r['id'], r['user_id'], hexes)
 
     if missing_md5:
         try:
@@ -4168,6 +4240,10 @@ def find_duplicates():
         FROM images ORDER BY date_added ASC
     ''')
     rows = c.fetchall()
+    c.execute('SELECT image_id, hex, share FROM colors')
+    palette_map = {}
+    for r in c.fetchall():
+        palette_map.setdefault(r['image_id'], []).append((r['hex'], r['share']))
     conn.close()
 
     # Union-find: any two images linked by an exact or near match end up in
@@ -4189,7 +4265,8 @@ def find_duplicates():
                 parent[find(i)] = find(j)
                 exact_pairs.add((i, j))
             elif (a['phash'] and b['phash']
-                  and phash_distance(a['phash'], b['phash']) <= PHASH_NEAR_DUP_THRESHOLD):
+                  and phash_distance(a['phash'], b['phash']) <= PHASH_NEAR_DUP_THRESHOLD
+                  and palettes_overlap(palette_map.get(a['id'], []), palette_map.get(b['id'], []))):
                 parent[find(i)] = find(j)
 
     buckets = {}
