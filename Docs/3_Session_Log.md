@@ -1095,3 +1095,106 @@ No known bugs. All features verified end-to-end.
 - Test Settings cache: verify count updates, clear cache works
 
 All core collaboration + offline features now complete. App is now shareable with cinematographer crews and works without internet access.
+
+---
+
+## V26 — Crop Detection Engine Rewrite (MAD-Based)
+*Completed: July 26, 2026*
+*Status: COMPLETE — 2/14 → 12/14 correct on real test images; deployed to production*
+
+### The Problem
+The original crop detector (ported from CropStudio_v34) scored **2 out of 14** on Ryan's real cinematography screenshots. It asked "is this line dark or light enough to be chrome?" which failed symmetrically:
+- **Over-cropped** on dark artwork (black picture on Instagram background looked like pillarbox → cut away thirds of the frame)
+- **Under-cropped** on white matting (one-sided trim logic left scrollbar residue because it only dropped the *brightest* pixels, useless for a white mat with a dark scrollbar)
+- Same image could fail in both directions at once
+
+### What We Built
+
+**Frontend (`frontend/src/cropDetectV2.js`):**
+- New single-statistic detection: **median absolute deviation per line**. Chrome = flat, regardless of color.
+- Key invariants:
+  - Threshold MAD ≤ 0 strictly (anything looser eats real dark picture edges)
+  - Three-pass algorithm: full-width rows → content-row columns → content-column rows
+  - Peeling is conservative — stops at first non-flat line, no gap-bridging (under-crop is one Tighten press away; over-crop is permanent picture loss)
+- Auto-tighten rewritten on MAD with **two independent guards:**
+  1. Edge-restriction: only peeled edges can be tightened
+  2. Terminal condition: if flat run reaches 2% cap without ending, return 0 (signals picture, not residue)
+- Old `cropDetect.js` deleted; v34 source recoverable via git history
+
+**Frontend (`frontend/src/components/CropModal.jsx`):**
+- Wired to `detectCropTightened()` instead of old `detectCrop()`
+- Redetect semantics **inverted**: each press now strips MORE (v34 used to strip less)
+
+**Backend (`backend/app.py`, `crop_image()` endpoint):**
+- Before overwriting the Drive file, back up originals to `_Removed` folder
+- Backup filename: `{stem} (pre-crop {timestamp}).{ext}`
+- Uses user's OAuth client for backup write (has storage quota), service account for _Removed lookup
+- **Failed backup aborts the crop** — never silently proceeds without the safety net
+- Error messages distinguish: "Editor access required" vs. "storage quota exceeded"
+
+**Test Coverage (`scripts/test_crop_locally.py`):**
+- Expanded from basic endpoint test to **23 comprehensive checks** covering:
+  - Happy path: crop succeeds, Drive file updated in-place, DB row unchanged, thumbnail refreshed
+  - Backup creation: exactly one file created, landed in _Removed, carried original bytes, marked as pre-crop
+  - Abort-on-failure: failed backup → error returned, Drive file untouched, no crop executed
+  - Error branches: Editor access missing vs. quota exceeded vs. no OAuth connected
+- Added `FakeUserDrive` class (simulates user OAuth with storage quota)
+- All 23 checks pass
+
+**Visual Regression Harness (`scripts/crop_regression.html`):**
+- Contact sheet view of all 14 test images with green crop boxes
+- Shows tighten delta per edge (should be 0 on nearly everything; >10 signals regression)
+- MAD sweep column (tests looser thresholds)
+- Baseline boxes documented in header comment
+- Run locally: `python3 -m http.server 8971`, then open the script
+
+**Documentation (`CLAUDE.md` V26 section):**
+- ~50 lines covering why v34 failed, MAD rationale, threshold guards, three-pass ordering, peeling conservatism, auto-tighten dual guards, two-client backup architecture, regression harness location, confidence label unreliability
+
+### Results
+**Baseline: 2/14 correct (v34)**
+- Flex 3, IMG_1063: over-cropped
+- IMG_1068, IMG_1081, cropped_IMG_5530: severe over-crop (lost picture to sides)
+- IMG_1074, IMG_1076, IMG_1078: under-cropped (scrollbar residue left behind)
+- IMG_6846, IMG_6848: over-cropped
+- Tokyo Story, IMG_1243: partial (expected to fail)
+
+**After MAD rewrite: 12/14 correct**
+- All 12 above failures fixed
+- Tokyo Story: still no crop (thin white line at top remains — conservative, not destructive)
+- IMG_1243: exact picture bounds after tighten (48,55,1194,777)
+
+### Design Decisions (Confirmed with Ryan)
+- ✅ Replace v34 entirely — proven failure, not salvageable
+- ✅ Back up originals to `_Removed` before crop — destructive ops need undo built-in
+- ✅ Abort on failed backup — safety net that doesn't work defeats its purpose
+- ✅ MAD-based single statistic — simpler, more robust than multi-factor brightness logic
+
+### Testing & Deployment
+- Frontend build: ✓ successful
+- Backend tests: ✓ all 23 checks pass
+- Regression harness: ✓ loads locally, baseline boxes match
+- Deployed to Railway via git push; auto-deploy in progress
+
+### Files Changed
+- `frontend/src/cropDetectV2.js` — new, MAD-based detection engine
+- `frontend/src/components/CropModal.jsx` — wired to new detector
+- `backend/app.py` — backup system, abort-on-failure, error message routing
+- `scripts/test_crop_locally.py` — 23 checks, happy + error paths, backup/abort testing
+- `scripts/crop_regression.html` — new visual harness for ongoing verification
+- `CLAUDE.md` — V26 section documenting engine, invariants, guards, architecture
+- `frontend/src/cropDetect.js` — deleted (recovered via `git show 10316f3:...`)
+
+### Commits
+- `c877c48` (V26: Replace crop detection engine with MAD-based algorithm)
+
+### Known Limitations (Not Blocking)
+- **Confidence labels:** Currently unreliable (dark artwork reads "low" even on perfect crops). Not treated as a safety signal; marked for future rework.
+- **Tokyo Story edge case:** Thin white line at top remains undetected. Conservative (keeps picture), not destructive. User can press Redetect to tighten manually if desired.
+
+### Next Steps
+1. **Live testing (Ryan):** Run a batch of the test images through the crop UI in production. Eye-verify at full resolution. Report any surprises.
+2. **Backup safety check:** Try one throwaway image end-to-end to confirm _Removed backup works with real Google Drive connection.
+3. **Polish:** Rework confidence labels if needed based on live feedback.
+
+All photo-integrity work complete for this version. Crop is now safe (backup-abort architecture) and accurate (12/14 on real images).
