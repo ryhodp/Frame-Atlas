@@ -1292,3 +1292,46 @@ Ryan opened the Duplicate Review screen and found groups of photos that look not
 2. No other work queued from this session — pick up wherever the next feature request comes from.
 
 All photo-integrity work complete for this version. Crop is now safe (backup-abort architecture) and accurate (12/14 on real images).
+
+---
+
+## V28 — Composition-Guide Overlay + Photo Actions Moved Above the Frame
+*Completed: July 27, 2026*
+*Status: COMPLETE — deployed to production*
+
+### The Request
+Ryan asked for two things on the photo detail panel: (1) move the row of buttons (Favorite/Flag/Find Similar/Crop/Download/Delete) from below the photo — where they were competing with tags for attention — up above it, and (2) add an "Overlay" feature to show composition guide lines (rule of thirds, golden spiral, etc.) drawn on top of the photo.
+
+### Design Decisions (Confirmed with Ryan via multiple-choice questions before coding)
+- ✅ All action buttons move into one toolbar directly above the photo (not split, not floating on top of the image)
+- ✅ Overlay covers the full set of classic guides: Rule of Thirds, Golden Ratio (Phi grid), Golden Spiral, Diagonal Method (golden triangle), and Center Cross
+- ✅ Mode switching via a single "Overlay" icon button that opens a popover menu listing all modes (not a cycling button, not separate toggle pills)
+- ✅ A rotate (⟳) control cycles the two directional guides (Golden Spiral, Diagonal Method) through all 4 corner orientations — hidden for the symmetric grids (Thirds/Phi/Cross), which don't need it
+
+### What We Built
+**New file (`frontend/src/components/CompositionOverlay.jsx`):**
+- Pure geometry + rendering for all 5 guide modes, given the photo's actual rendered pixel width/height
+- Golden Spiral / Diagonal Method math: inscribes a true golden-ratio rectangle inside the photo's own aspect ratio (centered, with margin on whichever axis doesn't fit), then recursively peels the largest square off the rectangle's long side, rotating direction each time. Because the inscribed rectangle is always exactly golden, every remainder is itself golden (rotated 90°) — this never degenerates regardless of whether the photo is ultra-wide, tall, or square. Verified by hand against wide/tall/square/ultra-wide test cases in a throwaway prototype before porting into the real component.
+- The connecting spiral arc between squares is derived geometrically (which corner each square shares with the next, not hardcoded per direction) so it stays correct for all 4 rotations
+- Lines are drawn with a dark halo behind a gold stroke so they read against both bright and dark photos
+
+**Changed (`frontend/src/components/ImageDetail.jsx`):**
+- All action buttons moved into a new toolbar between the close button and the photo
+- Added the Overlay button + popover menu, and the rotate control (only shown for Spiral/Diagonal)
+- Wrapped the `<img>` in an inline-block wrapper tracked with a `ResizeObserver`, so the overlay SVG is sized to the image's own rendered box — not the surrounding letterboxed container. Verified against a photo with black bars baked into the file itself (a letterbox demo image): the guide lines span the true rendered picture, including those bars, not just the panel.
+- Old bottom footer removed entirely; delete-confirmation flow ("Sure? / Yes, delete / Cancel") now lives in the new top toolbar
+
+### Testing
+- Verified live via the local browser-check server (`scripts/run_local_for_browser_check.py`): toolbar layout, popover open/close, all 6 overlay modes (including Off), rotation through all 4 corners, and mobile responsive wrapping (buttons reflow into a clean grid at 375px width)
+- Confirmed overlay alignment against both a full-bleed photo and a photo with real baked-in letterbox bars
+
+### Files Changed
+- `frontend/src/components/CompositionOverlay.jsx` — new
+- `frontend/src/components/ImageDetail.jsx` — toolbar moved above photo, overlay wiring, image wrapper + ResizeObserver
+
+### Commits
+- `3625237` (V28: Composition-guide overlay + move photo actions above the frame)
+
+### Next Steps
+1. No other work queued from this session — pick up wherever the next feature request comes from.
+2. Note for next session: this repo currently has a V27 commit that landed the same day as V29 (color-overlap duplicate check) — if version numbers ever look out of sequence, check `git log` rather than assuming this doc's entry order is chronological; entries are append-only and this one was written after V29's entry even though V28 was committed earlier in the day.
