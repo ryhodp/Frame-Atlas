@@ -19,6 +19,21 @@ export default function SettingsPage() {
   const cache = useOfflineCache()
   const [cachedDecks, setCachedDecks] = useState([])
   const [clearing, setClearing] = useState(false)
+  const [backups, setBackups] = useState(null)   // null = loading, [] = none yet
+  const [keepCount, setKeepCount] = useState(2)
+  const [backupError, setBackupError] = useState('')
+  const [backingUp, setBackingUp] = useState(false)
+
+  const loadBackupStatus = () => {
+    fetch('/api/backups/status')
+      .then(async r => {
+        const data = await r.json()
+        if (!r.ok) { setBackupError(data.error || 'Could not load backup status.'); return }
+        setBackups(data.backups)
+        setKeepCount(data.keep_count)
+      })
+      .catch(() => setBackupError('Could not reach the server.'))
+  }
 
   useEffect(() => {
     fetch('/api/billing/spend')
@@ -33,7 +48,23 @@ export default function SettingsPage() {
       .then(r => r.json())
       .then(data => setGoogleStatus(!!data.signed_in))
       .catch(() => setGoogleStatus(false))
-  }, [])
+
+    if (isAdmin) loadBackupStatus()
+  }, [isAdmin])
+
+  const handleBackupNow = async () => {
+    setBackingUp(true)
+    setBackupError('')
+    try {
+      const res = await fetch('/api/backups/run', { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setBackupError(data.error || 'Backup failed.'); return }
+      loadBackupStatus()
+    } catch (e) {
+      setBackupError('Could not reach the server.')
+    }
+    setBackingUp(false)
+  }
 
   useEffect(() => {
     if (cache.ready) {
@@ -133,6 +164,57 @@ export default function SettingsPage() {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+            DATABASE BACKUP
+          </div>
+
+          {backupError ? (
+            <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.5 }}>
+              {backupError}
+            </p>
+          ) : backups === null ? (
+            <p style={{ fontSize: '13px', color: '#65625a', margin: '0 0 12px' }}>Loading…</p>
+          ) : backups.length === 0 ? (
+            <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.5 }}>
+              No backup yet — the first one runs automatically within a day, then
+              once a month after that. Your tags, decks, and bookmarks live only
+              in this database (the photos themselves stay safe on Drive either way).
+            </p>
+          ) : (
+            <div style={{ marginBottom: '12px' }}>
+              <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 8px' }}>
+                Last backup: <span style={{ color: '#efeadd', fontWeight: 600 }}>
+                  {new Date(backups[0].created_at + 'Z').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                </span>
+              </p>
+              <p style={{ fontSize: '12px', color: '#65625a', margin: 0, lineHeight: 1.5 }}>
+                Keeping the newest {keepCount} of {backups.length}, saved to a "_Backups" folder in Drive. Runs automatically once a month.
+              </p>
+            </div>
+          )}
+
+          <button
+            onClick={handleBackupNow}
+            disabled={backingUp}
+            style={{
+              background: 'rgba(184,206,161,0.18)',
+              border: '1px solid rgba(184,206,161,0.5)',
+              color: '#b8cea1',
+              borderRadius: '6px',
+              padding: '7px 14px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              opacity: backingUp ? 0.6 : 1
+            }}
+          >
+            {backingUp ? 'Backing up…' : 'Backup Now'}
+          </button>
         </div>
       )}
 

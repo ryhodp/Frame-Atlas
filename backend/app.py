@@ -122,6 +122,167 @@ _tag_progress_lock = threading.Lock()
 _sse_queues = []
 _sse_lock = threading.Lock()
 
+# V27: Background crop job queue. Multiple users can have crops running in
+# parallel (each in its own thread) without blocking the UI.
+_crop_queue = queue_module.Queue()
+_crop_progress = {
+    'in_progress': 0,
+    'total': 0,
+    'completed': 0,
+    'failed': [],
+    'active_jobs': {}  # Maps job_id to {image_id, filename, status, error}
+}
+_crop_lock = threading.Lock()
+_crop_job_counter = 0
+
+def _process_crop_jobs():
+    """Background worker thread that processes crop jobs from the queue."""
+    global _crop_job_counter
+    while True:
+        try:
+            job = _crop_queue.get(timeout=1)
+            if job is None:
+                break
+
+            job_id = job['id']
+            image_id = job['image_id']
+            user_id = job['user_id']
+            box = job['box']
+            filename = job['filename']
+
+            with _crop_lock:
+                _crop_progress['in_progress'] += 1
+                _crop_progress['active_jobs'][job_id] = {
+                    'image_id': image_id,
+                    'filename': filename,
+                    'status': 'processing',
+                    'error': None
+                }
+
+            try:
+                # Extract crop coordinates
+                x_pct = float(box.get('x', 0))
+                y_pct = float(box.get('y', 0))
+                w_pct = float(box.get('w', 100))
+                h_pct = float(box.get('h', 100))
+
+                x_pct = min(max(x_pct, 0.0), 100.0)
+                y_pct = min(max(y_pct, 0.0), 100.0)
+                w_pct = min(max(w_pct, 0.0), 100.0 - x_pct)
+                h_pct = min(max(h_pct, 0.0), 100.0 - y_pct)
+
+                if w_pct < 1 or h_pct < 1:
+                    raise ValueError('Crop box is too small')
+                if w_pct >= 99.5 and h_pct >= 99.5:
+                    raise ValueError('Crop covers the whole image')
+
+                conn = get_db()
+                c = conn.cursor()
+                c.execute('SELECT drive_file_id, filename, user_id FROM images WHERE id = ?', (image_id,))
+                row = c.fetchone()
+                conn.close()
+
+                if not row or (user_id != 1 and row['user_id'] != user_id):
+                    raise ValueError('Image not found or permission denied')
+
+                old_file_id = row['drive_file_id']
+                owner_id = row['user_id']
+
+                service = get_drive_service()
+
+                # Download original
+                original_bytes = download_drive_file(service, old_file_id)
+                meta = service.files().get(fileId=old_file_id, fields='mimeType').execute()
+
+                # Crop in memory
+                img = Image.open(io.BytesIO(original_bytes))
+                img = ImageOps.exif_transpose(img)
+                w_px, h_px = img.width, img.height
+                left = max(0, round(w_px * x_pct / 100.0))
+                top = max(0, round(h_px * y_pct / 100.0))
+                right = min(w_px, round(w_px * (x_pct + w_pct) / 100.0))
+                bottom = min(h_px, round(h_px * (y_pct + h_pct) / 100.0))
+
+                if right - left < 8 or bottom - top < 8:
+                    raise ValueError('Crop is too small to produce a usable image')
+
+                cropped = img.crop((left, top, right, bottom))
+
+                mime = meta.get('mimeType') or 'image/jpeg'
+                fmt, save_kwargs = CROP_SAVE_FORMATS.get(mime, CROP_SAVE_FORMATS['image/jpeg'])
+                if fmt == 'JPEG' and cropped.mode != 'RGB':
+                    cropped = cropped.convert('RGB')
+
+                out = io.BytesIO()
+                cropped.save(out, format=fmt, **save_kwargs)
+                cropped_bytes = out.getvalue()
+
+                # Back up original to _Removed
+                backup_service = get_user_drive_service(owner_id) or get_user_drive_service(1)
+                if backup_service is None:
+                    raise ValueError('No connected Google account for backup')
+
+                removed_id = get_or_create_removed_folder(service, get_root_folder_id(owner_id))
+                stem, dot, ext = (row['filename'] or 'image').rpartition('.')
+                if not dot:
+                    stem, ext = (row['filename'] or 'image'), 'jpg'
+                stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+                backup_service.files().create(
+                    body={'name': f'{stem} (pre-crop {stamp}).{ext}', 'parents': [removed_id]},
+                    media_body=MediaIoBaseUpload(io.BytesIO(original_bytes), mimetype=mime),
+                    fields='id',
+                ).execute()
+
+                # Overwrite original file
+                media = MediaIoBaseUpload(io.BytesIO(cropped_bytes), mimetype=mime)
+                service.files().update(
+                    fileId=old_file_id, media_body=media, fields='id, md5Checksum'
+                ).execute()
+
+                # Update database with new dimensions
+                new_img = Image.open(io.BytesIO(cropped_bytes))
+                new_w, new_h = new_img.width, new_img.height
+                new_ar = new_w / new_h if new_h > 0 else 1.0
+
+                conn = get_db()
+                c = conn.cursor()
+                c.execute('''UPDATE images
+                    SET width = ?, height = ?, aspect_ratio = ?,
+                        crop_box = NULL
+                    WHERE id = ?''',
+                    (new_w, new_h, new_ar, image_id))
+                conn.commit()
+                conn.close()
+
+                with _crop_lock:
+                    _crop_progress['completed'] += 1
+                    _crop_progress['active_jobs'][job_id]['status'] = 'completed'
+                    _crop_progress['in_progress'] -= 1
+
+            except Exception as e:
+                error_msg = str(e)
+                with _crop_lock:
+                    _crop_progress['failed'].append({
+                        'filename': filename,
+                        'error': error_msg
+                    })
+                    _crop_progress['active_jobs'][job_id]['status'] = 'failed'
+                    _crop_progress['active_jobs'][job_id]['error'] = error_msg
+                    _crop_progress['in_progress'] -= 1
+
+            finally:
+                _crop_queue.task_done()
+
+        except queue_module.Empty:
+            continue
+        except Exception as e:
+            print(f"[crop worker] Unexpected error: {e}")
+            continue
+
+# Start crop worker thread (daemon, dies if main thread exits)
+_crop_worker = threading.Thread(target=_process_crop_jobs, daemon=True)
+_crop_worker.start()
+
 # ============================================================================
 # GEMINI TAG TAXONOMY PROMPT
 # ============================================================================
@@ -491,6 +652,19 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (deck_id) REFERENCES decks(id),
             FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+
+    # V27: history of automatic monthly database backups uploaded to Drive.
+    # Lets the backup job know when it last ran (so it fires once a month,
+    # not on every boot) and which Drive file to delete once more than
+    # KEEP_BACKUP_COUNT copies exist.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS db_backups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            drive_file_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
 
@@ -1445,6 +1619,127 @@ def get_or_create_removed_folder(service, root_id):
     }
     return service.files().create(body=meta, fields='id').execute()['id']
 
+# ============================================================================
+# V27: MONTHLY DATABASE BACKUP TO DRIVE
+# ============================================================================
+# The images themselves already live on Drive — the SQLite database is the
+# only copy of the tags, decks, bookmarks, and filmography built on top of
+# them, and it lives solely on Railway's volume. This uploads a snapshot to
+# a `_Backups` folder once a month and keeps only the newest KEEP_BACKUP_COUNT.
+
+BACKUP_FOLDER_NAME = '_Backups'
+KEEP_BACKUP_COUNT = 2
+
+def get_or_create_backups_folder(service, root_id):
+    q = (f"'{root_id}' in parents and name = '{BACKUP_FOLDER_NAME}' "
+         "and mimeType = 'application/vnd.google-apps.folder' and trashed = false")
+    res = service.files().list(q=q, fields='files(id)').execute()
+    found = res.get('files', [])
+    if found:
+        return found[0]['id']
+    meta = {
+        'name': BACKUP_FOLDER_NAME,
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [root_id],
+    }
+    return service.files().create(body=meta, fields='id').execute()['id']
+
+def run_db_backup():
+    """Snapshot the SQLite database and upload it to Drive, then prune old
+    backups beyond KEEP_BACKUP_COUNT.
+
+    Uses sqlite3's own backup() API rather than a raw file copy, so a backup
+    running while the app is mid-write never captures a half-written page.
+
+    Uploads through the ADMIN's OAuth (get_user_drive_service(1)), not the
+    service account — same reason the pre-crop backup does: a service
+    account has zero storage quota on a personal Drive, so any
+    files().create() it makes fails with storageQuotaExceeded.
+    """
+    try:
+        backup_service = get_user_drive_service(1)
+        if backup_service is None:
+            print("[db-backup] Skipped — admin hasn't connected Google.")
+            return False
+
+        tmp_path = DB_PATH + '.backup-tmp'
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(tmp_path)
+        with dst:
+            src.backup(dst)
+        src.close()
+        dst.close()
+
+        with open(tmp_path, 'rb') as f:
+            db_bytes = f.read()
+        os.remove(tmp_path)
+
+        compressed = gzip.compress(db_bytes)
+        stamp = datetime.now().strftime('%Y-%m-%d')
+        filename = f'library-backup-{stamp}.db.gz'
+
+        root_id = get_root_folder_id(1)
+        folder_id = get_or_create_backups_folder(backup_service, root_id)
+
+        uploaded = backup_service.files().create(
+            body={'name': filename, 'parents': [folder_id]},
+            media_body=MediaIoBaseUpload(io.BytesIO(compressed), mimetype='application/gzip'),
+            fields='id',
+        ).execute()
+
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('INSERT INTO db_backups (drive_file_id, filename) VALUES (?, ?)',
+                  (uploaded['id'], filename))
+        conn.commit()
+
+        c.execute('SELECT id, drive_file_id, filename FROM db_backups ORDER BY created_at DESC')
+        rows = c.fetchall()
+        conn.close()
+
+        for old in rows[KEEP_BACKUP_COUNT:]:
+            try:
+                backup_service.files().delete(fileId=old['drive_file_id']).execute()
+            except Exception as e:
+                print(f"[db-backup] Could not delete old backup {old['filename']}: {e}")
+            conn = get_db()
+            c = conn.cursor()
+            c.execute('DELETE FROM db_backups WHERE id = ?', (old['id'],))
+            conn.commit()
+            conn.close()
+
+        print(f"[db-backup] Uploaded {filename} to Drive.")
+        return True
+    except Exception as e:
+        print(f"[db-backup] Failed: {e}")
+        return False
+
+def _backup_due():
+    """True if no backup has completed yet this calendar month."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT created_at FROM db_backups ORDER BY created_at DESC LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return True
+    last = datetime.strptime(row['created_at'].split('.')[0], '%Y-%m-%d %H:%M:%S')
+    now = datetime.now()
+    return (last.year, last.month) != (now.year, now.month)
+
+def _backup_scheduler_loop():
+    """Checks once a day whether this month's backup has run yet."""
+    while True:
+        try:
+            if _backup_due():
+                run_db_backup()
+        except Exception as e:
+            print(f"[db-backup] Scheduler error: {e}")
+        time.sleep(24 * 60 * 60)
+
+def start_backup_scheduler():
+    threading.Thread(target=_backup_scheduler_loop, daemon=True).start()
+
 def get_image_aspect_ratio(image_data):
     try:
         img = Image.open(io.BytesIO(image_data))
@@ -2116,6 +2411,27 @@ def account_setup_status():
         'image_cap': None if user_id == 1 else PERSONAL_LIBRARY_CAP,
         'has_gemini_key': user_id == 1 or bool(key_row and key_row['gemini_api_key']),
     })
+
+@app.route('/api/backups/status', methods=['GET'])
+@admin_required
+def backups_status():
+    """History of automatic monthly database backups, newest first (V27)."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT filename, created_at FROM db_backups ORDER BY created_at DESC')
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return jsonify({'backups': rows, 'keep_count': KEEP_BACKUP_COUNT})
+
+@app.route('/api/backups/run', methods=['POST'])
+@admin_required
+def backups_run_now():
+    """Manually trigger a database backup right now (V27) — for testing the
+    monthly job without waiting a month, or forcing a fresh copy on demand."""
+    ok = run_db_backup()
+    if not ok:
+        return jsonify({'error': 'Backup failed — check server logs for details.'}), 500
+    return jsonify({'success': True})
 
 @app.route('/api/sync/start', methods=['POST'])
 def start_sync():
@@ -3723,30 +4039,13 @@ CROP_SAVE_FORMATS = {
 
 @app.route('/api/images/<int:image_id>/crop', methods=['POST'])
 def crop_image(image_id):
-    """Replace an image with a cropped version of itself (V18).
+    """Queue a crop job to run in the background (V27).
 
-    The browser sends the crop box as percentages of the image (0-100), so
-    the same box means the same thing at any resolution. The cropped bytes
-    overwrite the ORIGINAL Drive file's content in place (same file id, same
-    name, same folder) and the database row is updated alongside it — which
-    is what lets every tag, caption, favorite, deck membership, and
-    filmography entry carry over without re-running Gemini.
-
-    This has to be a content update on the existing file, not a new file:
-    service accounts have zero storage quota on a personal (non-Workspace)
-    Drive, so any operation that creates a brand-new file object — files.create,
-    or files.copy of a file the caller doesn't own — fails with
-    'storageQuotaExceeded' even when the account has Editor access. Updating
-    an existing file's content doesn't create a new object, so it isn't
-    subject to that limit. Because that overwrite is destructive, the
-    untouched original is copied into _Removed first (step 2.5) and a failed
-    backup aborts the crop, so a bad crop is always recoverable from Drive.
-
-    Owner-or-admin, mirroring delete. Friends need the service account
-    upgraded to Editor on their folder (Viewer can read but not write).
-    Every stage fails loudly with a stage-specific message so a failed crop
-    can simply be retried.
+    The browser sends the crop box as percentages of the image (0-100).
+    Instead of blocking, this queues the job and returns immediately so the
+    user can navigate away. A progress endpoint tracks the queue.
     """
+    global _crop_job_counter
     user_id = session['user_id']
     data = request.get_json(silent=True) or {}
     box = data.get('box') or {}
@@ -3775,150 +4074,48 @@ def crop_image(image_id):
     if not row or (user_id != 1 and row['user_id'] != user_id):
         return jsonify({'error': 'Image not found'}), 404
 
-    old_file_id = row['drive_file_id']
-    owner_id = row['user_id']
+    with _crop_lock:
+        _crop_job_counter += 1
+        job_id = _crop_job_counter
+        _crop_progress['total'] += 1
+        _crop_progress['in_progress'] += 1
 
-    try:
-        service = get_drive_service()
-    except Exception as e:
-        return jsonify({'error': f'Could not connect to Google Drive: {e}'}), 500
-
-    # 1. Download the original
-    try:
-        original_bytes = download_drive_file(service, old_file_id)
-        meta = service.files().get(fileId=old_file_id, fields='mimeType').execute()
-    except Exception as e:
-        return jsonify({'error': f'Could not download the original from Drive: {e}'}), 500
-
-    # 2. Crop in memory
-    try:
-        img = Image.open(io.BytesIO(original_bytes))
-        # Phones often store rotation as a metadata note (EXIF) instead of
-        # rotating the pixels. Browsers honor the note, so the crop box the
-        # user drew is relative to the upright image — apply the note here
-        # too, or the box would land on a sideways image.
-        img = ImageOps.exif_transpose(img)
-        w_px, h_px = img.width, img.height
-        left = max(0, round(w_px * x_pct / 100.0))
-        top = max(0, round(h_px * y_pct / 100.0))
-        right = min(w_px, round(w_px * (x_pct + w_pct) / 100.0))
-        bottom = min(h_px, round(h_px * (y_pct + h_pct) / 100.0))
-        if right - left < 8 or bottom - top < 8:
-            return jsonify({'error': 'Crop box is too small to produce a usable image.'}), 400
-        cropped = img.crop((left, top, right, bottom))
-
-        mime = meta.get('mimeType') or 'image/jpeg'
-        fmt, save_kwargs = CROP_SAVE_FORMATS.get(mime, CROP_SAVE_FORMATS['image/jpeg'])
-        if fmt == 'JPEG' and cropped.mode != 'RGB':
-            cropped = cropped.convert('RGB')
-        out = io.BytesIO()
-        cropped.save(out, format=fmt, **save_kwargs)
-        cropped_bytes = out.getvalue()
-    except Exception as e:
-        return jsonify({'error': f'Cropping failed: {e}'}), 500
-
-    # 2.5 Back the untouched original up into _Removed BEFORE overwriting.
-    #     A crop is destructive — step 3 replaces the Drive file's bytes and the
-    #     originals are gone — so this runs first and a failure here aborts the
-    #     crop. A safety net that silently doesn't catch is worse than none.
-    #
-    #     Two different Drive clients, on purpose:
-    #       · the SERVICE ACCOUNT finds/creates the _Removed folder, because it
-    #         is the client that can actually list the library folder;
-    #       · the OWNER'S OAuth writes the backup file, because a service
-    #         account has no storage quota on a personal Drive and any
-    #         files().create() it makes fails with storageQuotaExceeded. The
-    #         upload path already creates files this way (see _ingest_image),
-    #         so drive.file scope is known to allow a create into a known
-    #         folder id even though it cannot list that folder.
-    try:
-        backup_service = get_user_drive_service(owner_id) or get_user_drive_service(1)
-        if backup_service is None:
-            return jsonify({
-                'error': ("Can't crop yet — the original needs to be backed up to "
-                          f"{REMOVED_FOLDER_NAME} first, and that requires a connected "
-                          "Google account. Connect Google on the Settings page, then retry.")
-            }), 400
-        removed_id = get_or_create_removed_folder(service, get_root_folder_id(owner_id))
-        stem, dot, ext = (row['filename'] or 'image').rpartition('.')
-        if not dot:
-            stem, ext = (row['filename'] or 'image'), 'jpg'
-        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-        backup_service.files().create(
-            body={'name': f'{stem} (pre-crop {stamp}).{ext}', 'parents': [removed_id]},
-            media_body=MediaIoBaseUpload(io.BytesIO(original_bytes), mimetype=mime),
-            fields='id',
-        ).execute()
-    except Exception as e:
-        return jsonify({
-            'error': (f'Could not back the original up to {REMOVED_FOLDER_NAME}, so the crop '
-                      f'was not applied and your image is untouched. Reason: {e}')
-        }), 500
-
-    # 3. Overwrite the ORIGINAL file's content in place — same file id, same
-    #    name, same folder. This must be files().update(), not files().create():
-    #    a service account has zero storage quota on a personal Drive, so any
-    #    call that creates a new file object (create, or copy of a file it
-    #    doesn't own) fails with storageQuotaExceeded even with Editor access.
-    #    Updating an existing file's content isn't a new object, so it's fine.
-    try:
-        media = MediaIoBaseUpload(io.BytesIO(cropped_bytes), mimetype=mime)
-        updated_file = service.files().update(
-            fileId=old_file_id, media_body=media, fields='id, md5Checksum'
-        ).execute()
-    except Exception as e:
-        reason = drive_error_reason(e)
-        msg = str(e)
-        if reason == 'storageQuotaExceeded':
-            return jsonify({
-                'error': ("Drive rejected the save due to a storage-quota limit on the "
-                          "service account. This shouldn't happen for an in-place update — "
-                          "if you're seeing this, something about the Drive call changed; "
-                          "this needs a code fix, not a sharing-settings change.")
-            }), 403
-        if reason in ('insufficientFilePermissions', 'insufficientPermissions') or \
-           'insufficient' in msg.lower() or 'permission' in msg.lower() or '403' in msg:
-            return jsonify({
-                'error': ("Drive blocked the save — the service account only has Viewer "
-                          "access to this file. In Drive: right-click the folder → Share → "
-                          "change the service account's role to Editor, then try again.")
-            }), 403
-        return jsonify({'error': f'Could not save the cropped image to Drive: {msg}'}), 500
-
-    # 4. Update the database row — the id and drive_file_id are unchanged, so
-    #    tags, colors, decks, favorites, and filmography all still point at
-    #    this image. Only the derived, now-stale data gets recomputed. The
-    #    pre-crop bytes live on in _Removed (step 2.5) if this needs undoing.
-    thumbnail = generate_thumbnail(cropped_bytes)
-    if not thumbnail:
-        return jsonify({
-            'error': ('The crop succeeded in Drive but the new thumbnail could not be '
-                      'generated. Run a sync to reconcile the library.')
-        }), 500
-    aspect_ratio = get_image_aspect_ratio(cropped_bytes)
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''
-        UPDATE images SET thumbnail_blob = ?, aspect_ratio = ?,
-                          md5_checksum = ?, phash = ?
-        WHERE id = ?
-    ''', (thumbnail, aspect_ratio, updated_file.get('md5Checksum'),
-          compute_phash(thumbnail), image_id))
-    conn.commit()
-    conn.close()
-
-    hexes = extract_palette(thumbnail)
-    if hexes:
-        save_palette(image_id, owner_id, hexes)
+    job = {
+        'id': job_id,
+        'image_id': image_id,
+        'user_id': user_id,
+        'box': {'x': x_pct, 'y': y_pct, 'w': w_pct, 'h': h_pct},
+        'filename': row['filename']
+    }
+    _crop_queue.put(job)
 
     return jsonify({
-        'success': True,
-        'image_id': image_id,
-        'thumbnail': f"data:image/jpeg;base64,{base64.b64encode(thumbnail).decode('utf-8')}",
-        'aspect_ratio': aspect_ratio,
-        'width': cropped.width,
-        'height': cropped.height,
+        'queued': True,
+        'job_id': job_id,
+        'message': 'Crop queued — check progress in the notification below.'
     })
+
+@app.route('/api/crop-progress', methods=['GET'])
+def get_crop_progress():
+    """Get current crop job queue progress and failures (V27)."""
+    with _crop_lock:
+        return jsonify({
+            'in_progress': _crop_progress['in_progress'],
+            'total': _crop_progress['total'],
+            'completed': _crop_progress['completed'],
+            'failed': _crop_progress['failed'],
+            'active_jobs': list(_crop_progress['active_jobs'].values())
+        })
+
+@app.route('/api/crop-progress/reset', methods=['POST'])
+def reset_crop_progress():
+    """Clear the progress state after user closes notifications (V27)."""
+    with _crop_lock:
+        _crop_progress['total'] = 0
+        _crop_progress['completed'] = 0
+        _crop_progress['failed'] = []
+        _crop_progress['active_jobs'] = {}
+    return jsonify({'reset': True})
 
 # ============================================================================
 # DAY 8 (V7): DUPLICATE DETECTION
@@ -5019,9 +5216,11 @@ if __name__ == '__main__':
     init_db()
     load_embeddings_seed()
     backfill_palette_shares()
+    start_backup_scheduler()
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
 
 init_db()
 load_embeddings_seed()
 backfill_palette_shares()
+start_backup_scheduler()

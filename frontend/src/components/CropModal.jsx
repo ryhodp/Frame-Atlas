@@ -409,10 +409,10 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     if (!targets.length) return;
     setPhase('applying');
     resultsRef.current = [];
-    let done = 0;
+
+    // V27: Queue all crops immediately instead of waiting for each one
+    const jobIds = [];
     for (const item of targets) {
-      done++;
-      setApplyProgress({ done, total: targets.length, filename: item.fa.filename });
       const iw = item.imgEl.naturalWidth, ih = item.imgEl.naturalHeight;
       const b = item.cropBox;
       try {
@@ -430,21 +430,69 @@ export default function CropModal({ images, onClose, onImageCropped }) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `Crop failed (HTTP ${res.status}).`);
-        resultsRef.current.push({ fa: item.fa, ok: true });
-        onImageCropped?.(item.fa.id, {
-          thumbnail: data.thumbnail,
-          aspect_ratio: data.aspect_ratio,
-          ar_float: data.width && data.height ? data.width / data.height : undefined,
-          // ar_label is a bucketed display label computed server-side at search
-          // time (e.g. "16:9") — stale after a crop changes the real ratio, and
-          // there's no client-side bucketing logic to recompute it here. Clear
-          // it so displays fall back to the now-current raw aspect_ratio.
-          ar_label: null,
-        });
+        if (data.job_id !== undefined) {
+          jobIds.push({ job_id: data.job_id, fa: item.fa });
+        }
       } catch (e) {
-        resultsRef.current.push({ fa: item.fa, ok: false, error: e.message || 'Network error — try again.' });
+        resultsRef.current.push({ fa: item.fa, ok: false, error: e.message || 'Failed to queue crop.' });
       }
     }
+
+    // Poll progress until all queued jobs complete
+    if (jobIds.length > 0) {
+      let polling = true;
+      while (polling) {
+        try {
+          const res = await fetch('/api/crop-progress');
+          const progress = await res.json();
+
+          // Show progress
+          const completed = progress.completed + progress.failed.length;
+          setApplyProgress({ done: completed, total: jobIds.length, filename: 'Processing queued crops...' });
+
+          // Check if all jobs finished
+          if (progress.in_progress === 0 && progress.total > 0) {
+            polling = false;
+
+            // Record results from background processing
+            if (progress.failed.length > 0) {
+              for (const fail of progress.failed) {
+                const matchingJob = jobIds.find(j => j.fa.filename === fail.filename);
+                if (matchingJob) {
+                  resultsRef.current.push({
+                    fa: matchingJob.fa,
+                    ok: false,
+                    error: fail.error
+                  });
+                }
+              }
+            }
+
+            // Mark successful crops
+            for (const job of jobIds) {
+              if (!resultsRef.current.some(r => r.fa.id === job.fa.id)) {
+                resultsRef.current.push({ fa: job.fa, ok: true });
+                onImageCropped?.(job.fa.id, {
+                  thumbnail: null,
+                  aspect_ratio: null,
+                  ar_label: null,
+                });
+              }
+            }
+
+            // Reset progress
+            await fetch('/api/crop-progress/reset', { method: 'POST' });
+          } else if (progress.in_progress > 0) {
+            // Still processing, wait before next poll
+            await new Promise(r => setTimeout(r, 500));
+          }
+        } catch (e) {
+          console.error('Failed to poll crop progress:', e);
+          polling = false;
+        }
+      }
+    }
+
     setApplyProgress(null);
     setPhase('done');
   };
