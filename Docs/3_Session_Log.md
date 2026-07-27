@@ -1252,4 +1252,43 @@ The original crop detector (ported from CropStudio_v34) scored **2 out of 14** o
 2. **Backup safety check:** Try one throwaway image end-to-end to confirm _Removed backup works with real Google Drive connection.
 3. **Polish:** Rework confidence labels if needed based on live feedback.
 
+---
+
+## V29 — Duplicate Detection: Color-Overlap Check
+*Completed: July 27, 2026*
+*Status: COMPLETE — deployed to production*
+
+### The Problem
+Ryan opened the Duplicate Review screen and found groups of photos that look nothing alike to a human (e.g. an industrial dock shot, a lit alley, and a night street scene all grouped as "near duplicates"). Root cause: the duplicate checker's perceptual hash (phash) only reads brightness LAYOUT — it shrinks a photo to a 9x8 grid and records whether each pixel is brighter than its right-hand neighbor. Two completely different photos sharing the same rough "dark frame, bright patch in the middle" shape hash almost identically, regardless of actual color or content.
+
+### What We Built
+**Backend (`backend/app.py`):**
+- New `palettes_overlap()` check (reuses the hue-based color-closeness logic already built for V24 color search) — requires two photos' actual color palettes to overlap by at least 50% (on both sides), ignoring near-black/white/gray entries which carry no hue information and would otherwise make any two dark photos "match."
+- Wired into all three places a duplicate gets decided:
+  1. Admin Duplicate Review scan (`find_duplicates()`)
+  2. Live upload/clip duplicate check (`_ingest_image()`, shared by `/api/upload` and `/api/clip`)
+  3. `duplicates_scan()` now also backfills any missing color palette (from the stored thumbnail, no Drive download needed) before comparing — same as it already did for phash — so the color check has real data to work with instead of silently deferring to phash alone.
+- Graceful degradation preserved: if either photo has no real color signal (true black & white, or palette not extracted yet), the color check steps aside and phash alone decides — matching the pattern V24 already used for pre-V24 rows.
+
+**Testing (`scripts/test_duplicate_color_check_locally.py`, new):**
+- Permanent regression test: builds two images with an identical brightness split but different colors, proves phash alone would call them duplicates (reproducing the original bug's precondition), then confirms the fix rejects them while still catching same-color near-duplicates (simulated resize/recompress) on both the upload path and the admin scan.
+- Existing `test_v25_clip_locally.py` re-run and still passes — no regression to upload/clip duplicate handling.
+
+### Design Decisions (Confirmed with Ryan)
+- ✅ Add a color-overlap check on top of phash, rather than just tightening the phash threshold (a tighter threshold alone couldn't distinguish "same layout, different color" — it's not the kind of error a brightness-only hash can fix by itself)
+- ✅ Fix all three duplicate-decision code paths, not just the review screen, since the live upload check had the identical bug
+- ✅ Backfill missing palettes in the scan (not just phash) so the new check isn't silently skipped for older photos
+- ✅ Add a permanent regression test rather than only spot-checking manually
+
+### Files Changed
+- `backend/app.py` — `palettes_overlap()`, `_chromatic_entries()`, wired into `find_duplicates()`, `_ingest_image()`, `duplicates_scan()`
+- `scripts/test_duplicate_color_check_locally.py` — new permanent regression test
+
+### Commits
+- `d4b4100` (V29: Duplicate detection now checks color, not just brightness shape)
+
+### Next Steps
+1. Next time the Duplicate Review screen is opened on the real library, confirm the three false-positive groups from this session are gone.
+2. No other work queued from this session — pick up wherever the next feature request comes from.
+
 All photo-integrity work complete for this version. Crop is now safe (backup-abort architecture) and accurate (12/14 on real images).
