@@ -4080,15 +4080,19 @@ def tags_selection_summary():
         only_value = next(iter(values)) if len(values) == 1 else None
         common_filmography[field] = only_value or None
 
+    total = len(image_ids)
+    # "Shared tags" means every selected image carries it, not just some of
+    # them — a tag on 4 of 12 selected photos isn't something a bulk-remove
+    # click should be able to touch. cnt == total is the actual intersection.
     return jsonify({
-        'total': len(image_ids),
+        'total': total,
         'tags': [{
             'category': row['category'],
             'value': row['value'],
             'catLabel': CAT_LABELS.get(row['category'], row['category']),
             'color': CAT_COLORS.get(row['category'], '#9c988d'),
             'count': row['cnt']
-        } for row in rows],
+        } for row in rows if row['cnt'] == total],
         'common_filmography': common_filmography
     })
 
@@ -4347,6 +4351,80 @@ def delete_image(image_id):
     return jsonify({'success': True,
                     'moved_to': REMOVED_FOLDER_NAME if user_id == 1 else None,
                     'filename': row['filename']})
+
+@app.route('/api/images/bulk-delete', methods=['POST'])
+def bulk_delete_images():
+    """Same rules as DELETE /api/images/<id> (owner-or-admin, admin's own
+    images move to Drive's _Removed), just batched. A failure on one photo
+    (e.g. a Drive permission hiccup) is skipped and reported — it does not
+    roll back or block the rest of the batch. The _Removed folder lookup is
+    cached per root folder so a 50-photo delete lists Drive for it once,
+    not 50 times."""
+    user_id = session['user_id']
+    data = request.get_json(force=True) or {}
+    image_ids = data.get('image_ids')
+    if not isinstance(image_ids, list) or not image_ids or \
+            not all(isinstance(i, int) for i in image_ids):
+        return jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    placeholders = ','.join('?' * len(image_ids))
+    rows = c.execute(
+        f'SELECT id, drive_file_id, filename, user_id FROM images WHERE id IN ({placeholders})',
+        image_ids
+    ).fetchall()
+    conn.close()
+
+    by_id = {r['id']: r for r in rows}
+    deleted = []  # (image_id, drive_file_id)
+    errors = []
+    removed_folder_cache = {}
+    service = get_drive_service() if user_id == 1 else None
+
+    for image_id in image_ids:
+        row = by_id.get(image_id)
+        if not row or (user_id != 1 and row['user_id'] != user_id):
+            errors.append({'id': image_id, 'error': 'Image not found'})
+            continue
+
+        if user_id == 1:
+            try:
+                file_id = row['drive_file_id']
+                f = service.files().get(fileId=file_id, fields='parents').execute()
+                prev_parents = ','.join(f.get('parents', []))
+                root_id = get_root_folder_id(1)
+                if root_id not in removed_folder_cache:
+                    removed_folder_cache[root_id] = get_or_create_removed_folder(service, root_id)
+                service.files().update(
+                    fileId=file_id,
+                    addParents=removed_folder_cache[root_id],
+                    removeParents=prev_parents,
+                    fields='id'
+                ).execute()
+            except Exception as e:
+                errors.append({'id': image_id, 'filename': row['filename'], 'error': str(e)})
+                continue
+
+        deleted.append((image_id, row['drive_file_id']))
+
+    if deleted:
+        deleted_ids = [d[0] for d in deleted]
+        conn = get_db()
+        c = conn.cursor()
+        ph = ','.join('?' * len(deleted_ids))
+        for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography', 'user_favorites', 'user_flags', 'image_views'):
+            c.execute(f'DELETE FROM {table} WHERE image_id IN ({ph})', deleted_ids)
+        c.execute(f'DELETE FROM images WHERE id IN ({ph})', deleted_ids)
+        if user_id != 1:
+            c.executemany(
+                'INSERT OR IGNORE INTO sync_exclusions (user_id, drive_file_id) VALUES (?, ?)',
+                [(user_id, d[1]) for d in deleted]
+            )
+        conn.commit()
+        conn.close()
+
+    return jsonify({'deleted': [d[0] for d in deleted], 'errors': errors})
 
 # ============================================================================
 # V18: CROP — replace an image with a cropped version of itself

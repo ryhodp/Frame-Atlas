@@ -1335,3 +1335,53 @@ Ryan asked for two things on the photo detail panel: (1) move the row of buttons
 ### Next Steps
 1. No other work queued from this session — pick up wherever the next feature request comes from.
 2. Note for next session: this repo currently has a V27 commit that landed the same day as V29 (color-overlap duplicate check) — if version numbers ever look out of sequence, check `git log` rather than assuming this doc's entry order is chronological; entries are append-only and this one was written after V29's entry even though V28 was committed earlier in the day.
+
+---
+
+## Test Reconciliation Session — Crop Test Suite Cleanup
+*Completed: July 28, 2026*
+*Status: COMPLETE — no code changes to app, tests only*
+
+### The Problem
+Two crop tests existed for different architectures:
+- `test_crop_locally.py` (282 lines): Built for V18–V26 synchronous endpoint (`POST /api/images/<id>/crop` returned 200/error immediately)
+- `test_crop_queue_locally.py` (250 lines): Built for V27+ async queue (endpoint returns `{queued: true}` immediately; real outcome on `GET /api/crop-progress` after worker finishes)
+
+V27 completely changed the architecture, making test_crop_locally.py incompatible. Running the full test suite showed 7/23 checks failing even on unmodified `main`, which was confusing and demoralizing.
+
+### What We Built
+**Reconciliation (not a new feature):**
+1. Identified which 4 error-path checks from the old test were valuable and not yet covered by the new test:
+   - Permission error (insufficientFilePermissions)
+   - Quota error (storageQuotaExceeded)
+   - Failed backup abort (Drive file protection)
+   - No OAuth client refusal
+2. Ported all 4 checks to `test_crop_queue_locally.py`, adapted for the queue architecture (errors surface in `failed[]` list on the progress endpoint, not as immediate HTTP responses)
+3. Extended the `FakeDrive` and `FakeUserDrive` mock classes to support error injection so tests can simulate all these failure modes
+4. Deleted `test_crop_locally.py` (282 lines of stale tech debt)
+
+### Design Decisions
+- ✅ Port the error-handling checks rather than delete them — these are safety-critical paths that should stay tested
+- ✅ Adapt them for the queue model (check `failed[]` list instead of HTTP status codes) rather than try to revert to synchronous
+- ✅ Delete the old test after porting — keeping a broken-on-main test is worse than eliminating confusion
+
+### Testing
+- Ran the updated `test_crop_queue_locally.py`: 21 checks pass (up from ~14 before additions)
+- Full test suite: all 23 tests pass (up from 7/23 before the fix)
+- No regressions in other tests
+
+### Files Changed
+- `scripts/test_crop_locally.py` — deleted
+- `scripts/test_crop_queue_locally.py` — enhanced with 4 error-path checks (~150 lines added)
+
+### Coverage Preserved
+- ✅ Permission error detection and messaging
+- ✅ Quota error detection and distinction from sharing errors
+- ✅ Failed backup abort (Drive file protection)
+- ✅ No OAuth client refusal
+- ✅ Regression guard: service account never calls `files().create()` (zero-quota invariant)
+- ✅ Job queue mechanics (immediate return, counter reaching 0, DB refresh, backup safety)
+
+### Next Steps
+1. No other work queued from this session — normal feature work resumes next time
+2. Test suite is now clean (23/23 passing on main) — no mental burden explaining "yes it's supposed to fail"

@@ -67,6 +67,7 @@ export default function TagModeBar({
   onExit,
   onBulkChanged, // (patchedIds, patchFn) — let Home.jsx update local image state
   onBulkMutated, // () — a bulk write (tag/filmography) just completed; re-sync active filters
+  onBulkDeleted, // (deletedIds) — the selected photos were removed from the library
   onCrop,        // V18: open the crop review modal for the current selection
 }) {
   // V18: Select Mode is open to everyone now (friends crop their own images
@@ -76,6 +77,9 @@ export default function TagModeBar({
   const [categories, setCategories] = useState([]);
   const [summary, setSummary] = useState({ total: 0, tags: [] });
   const [suggestions, setSuggestions] = useState([]);
+  const [tagSearch, setTagSearch] = useState('');
+  const [deleteMsg, setDeleteMsg] = useState('');
+  const deleteMsgTimer = useRef(null);
 
   // Apply-tag panel state
   const [tagName, setTagName] = useState('');
@@ -272,6 +276,49 @@ export default function TagModeBar({
     setConfirm({ kind: 'remove', category: tag.category, value: tag.value, catLabel: tag.catLabel });
   };
 
+  const openBulkDeleteConfirm = () => setConfirm({ kind: 'bulk-delete' });
+
+  const flashDeleteMsg = (msg) => {
+    setDeleteMsg(msg);
+    clearTimeout(deleteMsgTimer.current);
+    deleteMsgTimer.current = setTimeout(() => setDeleteMsg(''), 5000);
+  };
+
+  // Group the (already intersection-only) shared tags by category, in the
+  // same order as the fixed category list. When a search term is active,
+  // tags matching it float to the top within their category, and any
+  // category containing a match moves ahead of categories that don't —
+  // so "night" doesn't get lost under a Mood section sitting at the bottom.
+  const groupedSharedTags = (() => {
+    const q = tagSearch.trim().toLowerCase();
+    const byCategory = new Map();
+    for (const tag of summary.tags) {
+      if (!byCategory.has(tag.category)) byCategory.set(tag.category, []);
+      byCategory.get(tag.category).push(tag);
+    }
+    const catOrder = categories.map(c => c.key);
+    const orderedKeys = [...byCategory.keys()].sort((a, b) => {
+      if (q) {
+        const aHas = byCategory.get(a).some(t => t.value.toLowerCase().includes(q));
+        const bHas = byCategory.get(b).some(t => t.value.toLowerCase().includes(q));
+        if (aHas !== bHas) return aHas ? -1 : 1;
+      }
+      const ia = catOrder.indexOf(a), ib = catOrder.indexOf(b);
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    });
+    return orderedKeys.map(catKey => {
+      const tags = byCategory.get(catKey);
+      const sorted = q
+        ? [...tags].sort((a, b) => {
+            const am = a.value.toLowerCase().includes(q) ? 0 : 1;
+            const bm = b.value.toLowerCase().includes(q) ? 0 : 1;
+            return am - bm;
+          })
+        : tags;
+      return { catKey, tags: sorted };
+    });
+  })();
+
   // ── Set / clear filmography flow ───────────────────────────────────────────
   const canSetFilm = filmTitle.trim() || filmDirector.trim() || filmDp.trim() || filmYear.trim();
 
@@ -292,6 +339,30 @@ export default function TagModeBar({
     setBusy(true);
     const ids = Array.from(selectedIds);
     try {
+      if (confirm.kind === 'bulk-delete') {
+        const res = await fetch('/api/images/bulk-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_ids: ids })
+        });
+        const data = await res.json();
+        const deletedIds = data.deleted || [];
+        const failed = data.errors || [];
+        onBulkDeleted?.(deletedIds);
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          deletedIds.forEach(id => next.delete(id));
+          return next;
+        });
+        flashDeleteMsg(
+          failed.length > 0
+            ? `Deleted ${deletedIds.length}, ${failed.length} failed — ${failed[0].error}`
+            : `Deleted ${deletedIds.length} photo${deletedIds.length === 1 ? '' : 's'}`
+        );
+        setBusy(false);
+        setConfirm(null);
+        return;
+      }
       if (confirm.kind === 'filmography-set') {
         await fetch('/api/filmography/bulk-set', {
           method: 'POST',
@@ -410,6 +481,25 @@ export default function TagModeBar({
             >
               ✂ Crop {count}
             </button>
+          )}
+
+          {count > 0 && (
+            <button
+              onClick={openBulkDeleteConfirm}
+              title="Move the selected photos to Drive's _Removed folder and remove them from Frame Atlas"
+              style={{
+                background: 'rgba(255,180,171,0.14)',
+                border: '1px solid rgba(255,180,171,0.5)',
+                color: '#ffb4ab', borderRadius: '8px', padding: '7px 14px',
+                cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit'
+              }}
+            >
+              🗑 Delete {count}
+            </button>
+          )}
+
+          {deleteMsg && (
+            <span style={{ fontSize: '11.5px', color: '#b8cea1' }}>{deleteMsg}</span>
           )}
 
           <div style={{ flex: 1 }} />
@@ -561,42 +651,62 @@ export default function TagModeBar({
               </div>
             </div>
 
-            {/* Shared tags panel */}
-            <div style={{ minWidth: '260px', flex: '1 1 260px' }}>
-              <div style={sectionLabel()}>SHARED TAGS</div>
+            {/* Shared tags panel — only tags every selected image carries */}
+            <div style={{ minWidth: '260px', flex: '1 1 260px' }} data-tagmode-area>
+              <div style={sectionLabel()}>SHARED TAGS (ALL {summary.total})</div>
               {summary.tags.length === 0 ? (
                 <div style={{ fontSize: '11.5px', color: '#8e9099' }}>
-                  No tags shared across this selection yet.
+                  No tags shared across every image in this selection.
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {summary.tags.map(tag => (
-                    <span
-                      key={`${tag.category}:${tag.value}`}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: '6px',
-                        background: 'rgba(201,162,83,0.12)',
-                        border: '1px solid rgba(201,162,83,0.25)',
-                        borderRadius: '5px',
-                        padding: '4px 9px',
-                        fontSize: '11.5px', color: tag.color || '#dcbd76'
-                      }}
-                    >
-                      {tag.value}
-                      <span style={{ fontSize: '10px', color: '#8e9099' }}>
-                        {tag.count}/{summary.total}
-                      </span>
-                      <button
-                        onClick={() => openRemoveConfirm(tag)}
-                        title="Remove from selection"
-                        style={{
-                          background: 'none', border: 'none', color: '#ffb4ab',
-                          cursor: 'pointer', padding: 0, fontSize: '13px', lineHeight: 1
-                        }}
-                      >×</button>
-                    </span>
-                  ))}
-                </div>
+                <>
+                  {summary.tags.length > 6 && (
+                    <input
+                      value={tagSearch}
+                      onChange={e => setTagSearch(e.target.value)}
+                      placeholder="Search shared tags…"
+                      style={{ ...inputStyle(), marginBottom: '10px' }}
+                    />
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {groupedSharedTags.map(({ catKey, tags }) => (
+                      <div key={catKey}>
+                        <div style={{ fontSize: '10px', color: '#8e9099', marginBottom: '5px' }}>
+                          {catLabelFor(catKey)}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {tags.map(tag => {
+                            const isMatch = tagSearch.trim() &&
+                              tag.value.toLowerCase().includes(tagSearch.trim().toLowerCase());
+                            return (
+                              <span
+                                key={`${tag.category}:${tag.value}`}
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                  background: isMatch ? 'rgba(217,164,65,0.2)' : 'rgba(201,162,83,0.12)',
+                                  border: `1px solid ${isMatch ? 'rgba(217,164,65,0.7)' : 'rgba(201,162,83,0.25)'}`,
+                                  borderRadius: '5px',
+                                  padding: '4px 9px',
+                                  fontSize: '11.5px', color: tag.color || '#dcbd76'
+                                }}
+                              >
+                                {tag.value}
+                                <button
+                                  onClick={() => openRemoveConfirm(tag)}
+                                  title="Remove from selection"
+                                  style={{
+                                    background: 'none', border: 'none', color: '#ffb4ab',
+                                    cursor: 'pointer', padding: 0, fontSize: '13px', lineHeight: 1
+                                  }}
+                                >×</button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
 
@@ -734,15 +844,18 @@ export default function TagModeBar({
               : confirm.kind === 'filmography-set'
               ? <>Set {filmFieldSummary(confirm.touched)} on <strong>{count}</strong> image{count === 1 ? '' : 's'}?
                   Any other filmography field on those images stays as it already is.</>
-              : <>Clear filmography from <strong>{count}</strong> image{count === 1 ? '' : 's'}?</>
+              : confirm.kind === 'filmography-clear'
+              ? <>Clear filmography from <strong>{count}</strong> image{count === 1 ? '' : 's'}?</>
+              : <>Delete <strong>{count}</strong> photo{count === 1 ? '' : 's'}? Moved to Drive's _Removed folder.</>
           }
           confirmLabel={
             confirm.kind === 'apply' ? 'Apply'
             : confirm.kind === 'filmography-set' ? 'Set filmography'
             : confirm.kind === 'filmography-clear' ? 'Clear'
+            : confirm.kind === 'bulk-delete' ? 'Delete'
             : 'Remove'
           }
-          danger={confirm.kind === 'remove' || confirm.kind === 'filmography-clear'}
+          danger={confirm.kind === 'remove' || confirm.kind === 'filmography-clear' || confirm.kind === 'bulk-delete'}
           busy={busy}
           onConfirm={runConfirm}
           onCancel={() => !busy && setConfirm(null)}

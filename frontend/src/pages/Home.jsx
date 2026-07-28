@@ -552,6 +552,16 @@ export default function Home() {
     if (hasFilters) fetchPage(0, false);
   };
 
+  // A bulk delete in Select Mode already tells us exactly which ids are gone
+  // (unlike a tag edit, there's no need to re-run the search — a deleted
+  // photo can't match any filter).
+  const handleBulkDeleted = (ids) => {
+    const idSet = new Set(ids);
+    setImages(prev => prev.filter(img => !idSet.has(img.id)));
+    setTotal(t => Math.max(0, t - ids.length));
+    setSelectedImage(prev => (prev && idSet.has(prev.id)) ? null : prev);
+  };
+
   const DRAG_THRESHOLD = 4;
 
   const onGridMouseDown = (e) => {
@@ -1657,6 +1667,7 @@ export default function Home() {
           onExit={toggleTagMode}
           onBulkChanged={handleBulkTagsChanged}
           onBulkMutated={handleBulkMutated}
+          onBulkDeleted={handleBulkDeleted}
           onCrop={() => {
             const sel = images.filter(i => selectedIds.has(i.id));
             if (sel.length) setCropImages(sel);

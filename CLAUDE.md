@@ -170,6 +170,12 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - `merge_plural_tag_duplicates()` fixes what's already stored — write-time normalisation can't retroactively repair old rows. Only merges variants coexisting on the SAME photo in the SAME category; a lone plural is renamed, not deleted
 - "car (Location)" and "car (Objects)" appearing together is CORRECT, not a bug — the taxonomy has `car` as both a location type and a subject, and those are two different facts about a photo
 
+**Select Mode: shared-tag search + bulk delete (V31)**
+- "Shared tags" in the bulk tag panel now means the TRUE intersection — `tags_selection_summary()` only returns rows where `cnt == total` (every selected image carries it). Before V31 it returned every tag any selected image had, with a `count/total` fraction, which got unreadable once a selection got large
+- Shared tags are grouped by category (canonical order from `/api/tag-categories`) with a search box that appears once there are more than 6 tags. Typing reorders — matching tags float to the top of their category, and categories containing a match jump ahead of categories that don't. Deliberately reorder, not filter — nothing disappears from view
+- `POST /api/images/bulk-delete` batches the same rule `DELETE /api/images/<id>` already used (owner-or-admin; admin's own photos move to Drive's `_Removed`, friends' deletes are DB-only + a `sync_exclusions` row). The `_Removed` folder lookup is cached per root folder for the whole batch — a 50-photo delete lists Drive for it once, not 50 times
+- Failures are skip-and-continue, not all-or-nothing: one photo blocked by a Drive permission error is reported in `errors` while the rest of the batch still deletes. Ryan's explicit call — a single bad photo shouldn't hold the other 49 hostage
+
 **Web clipping (V25)**
 - Chrome extension lives in `/extension/` (MV3, load unpacked — see its README)
 - `POST /api/clip` takes a base64 data URL, not a URL to fetch: capture happens in the browser, where the page's own cookies and hotlink protection already apply, so images this server could never fetch still work — and video frames, which exist only as canvas pixels, work at all
