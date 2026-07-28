@@ -145,6 +145,31 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - Hue angle, not `color_distance()`, decides colour closeness. The weighted-RGB metric is green-heavy and rates brown (461) a closer match to red than pink (1633). Always guard on saturation when comparing hues: grey reports hue 0.0, identical to pure red
 - `backfill_palette_shares()` runs at boot, rebuilds any palette with a NULL share, and self-disables. Search falls back to hue-only matching for rows it hasn't reached yet
 
+**Duplicate detection (V29 colour gate; V30 fingerprint rewrite)**
+- Three gates, ALL must agree before two images are called near-duplicates — cheapest first: phash (fast pre-filter) → signature (does it actually look alike?) → palette (is it actually the same colour?). Same order in `find_duplicates()` and `_ingest_image()`, so the Duplicate Review screen and the live upload/clip check can never disagree
+- **phash alone is not evidence and never will be, at any grid size.** The difference-hash asks "is this pixel brighter than its right neighbour?" — on a soft, dark, letterboxed frame the answer is "no" almost everywhere, so the hash comes out nearly blank (measured on real moody stills: 5–12 of the old 64 bits set). Two mostly-blank fingerprints are MATHEMATICALLY FORCED to look alike — their distance can never exceed the bits they set between them. Widening to 16×16 did NOT fix this: those same frames set only 16 of 256 bits. That is why unrelated warm letterboxed frames kept grouping
+- `compute_signature()` is what actually decides: a contrast-normalised 16×16 grayscale that keeps ACTUAL values, not just their ordering, so a flat frame still describes itself. Measured over 19 of Ryan's real reference photos (171 unrelated pairs): re-saved copies scored 0.004–0.029, unrelated pairs 0.463+ — a 16× separation, cutoff at 0.15. Calibration result: **0 false positives, 0 missed duplicates across 38 duplicate cases**
+- phash threshold is deliberately GENEROUS (20/256) because it only nominates candidates. Don't tighten it to "help" — that just starts missing real duplicates while doing nothing about the flat-frame problem
+- Signatures are computed lazily and memoised, only for pairs phash nominated — never one per comparison
+- Old 64-bit hashes are 16 hex chars, new ones 64. `phash_distance()` reports mismatched lengths as maximally different rather than XOR-ing them into a meaningless (often small) number, so an un-migrated row degrades to "matches nothing", never to "matches the wrong thing". `backfill_phashes()` rebuilds them at boot and self-disables
+- Testing note: a flat two-tone fixture is an ADVERSARIAL input here and will make tests flaky — the split lands on a grid boundary and JPEG ringing flips a whole column by ~2 SD (signature 0.004 → 0.17, ~1 run in 8). Fix it with LOW-FREQUENCY shading, never per-pixel noise: JPEG discards high frequencies first, so pixel jitter is destroyed at low quality and randomises the phash instead (measured 23–24, breaking it the other way)
+
+**Sync-delete parity (V30)**
+- Sync used to only ever ADD. A photo deleted directly in Drive left a dead row (plus its tags/decks/favourites) forever. `sync_folder_worker()` now removes rows whose Drive file is gone — automatic, no confirmation (Ryan's call)
+- Guarded by one rule that must not be removed: if more than HALF the library would vanish in a single pass, skip and report instead. A partial/failed Drive listing is indistinguishable from a real mass-deletion, and this is the difference between "one stale row cleaned up" and "silently wiped every tag Ryan ever wrote"
+- Deliberately separate from `reconcile_drive_changes()`, which never deletes — reconciliation runs unattended at boot, deletion only when someone actually triggers a sync of their own folder
+
+**Stale-thumbnail repair (V30)**
+- `reconcile_drive_changes()` rebuilds thumbnail/aspect-ratio/phash/palette for any image whose stored `md5_checksum` no longer matches Drive's. Runs at boot (background thread) AND as step 3 of the duplicate scan
+- This exists because the V27 background crop worker wrote to `width`/`height`/`crop_box` — columns that have NEVER existed on `images` — and crashed AFTER overwriting the Drive file. Drive held the cropped image (so the full-res inspector looked right) while the DB kept the pre-crop thumbnail (so the home grid still looked uncropped). Fixed at the source in V30; this catches the backlog
+- MUST list each user's OWN folder. `get_root_folder_id()` falls back to the hardcoded default folder for anyone with no `sync_settings` row, so a single shared listing would compare a friend's photos against the admin's folder
+
+**Tag normalisation (V30)**
+- `normalize_tag_value()` lowercases AND collapses a trailing plural 's', applied at every tag-write site (Gemini tagger, manual editor, bulk apply). `subjects` is explicitly open-ended free text in the prompt, which is exactly where an LLM's singular/plural choice drifts run to run — "car" and "cars" were showing as separate suggestions
+- Conservative on purpose: only a bare trailing 's' (not 'es'/'ies', which usually change the stem), skipping `TAG_PLURAL_STRIP_EXCEPTIONS` where the plural IS the natural tag (glass, lens, hands, …)
+- `merge_plural_tag_duplicates()` fixes what's already stored — write-time normalisation can't retroactively repair old rows. Only merges variants coexisting on the SAME photo in the SAME category; a lone plural is renamed, not deleted
+- "car (Location)" and "car (Objects)" appearing together is CORRECT, not a bug — the taxonomy has `car` as both a location type and a subject, and those are two different facts about a photo
+
 **Web clipping (V25)**
 - Chrome extension lives in `/extension/` (MV3, load unpacked — see its README)
 - `POST /api/clip` takes a base64 data URL, not a URL to fetch: capture happens in the browser, where the page's own cookies and hotlink protection already apply, so images this server could never fetch still work — and video frames, which exist only as canvas pixels, work at all

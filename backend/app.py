@@ -93,6 +93,34 @@ CAT_LABELS = {
 # manual tag editor uses when no category is picked.
 MANUAL_TAG_CATEGORIES = ('misc', 'my_work')
 
+# V30: words where stripping a trailing 's' would be wrong — either it isn't
+# a plural at all (glass, lens, gas), or the plural is itself the natural
+# search term (hands: "two hands in frame" is a distinct, useful composition
+# detail from "a hand," not drift to collapse away).
+TAG_PLURAL_STRIP_EXCEPTIONS = {
+    'glass', 'glasses', 'sunglasses', 'grass', 'lens', 'bus', 'gas',
+    'dress', 'stairs', 'clothes', 'scissors', 'binoculars', 'headlights',
+    'hands', 'news', 'series', 'species',
+}
+
+def normalize_tag_value(value):
+    """Lowercase and (V30) collapse a trailing plural 's' so 'car' and 'cars'
+    land as the same searchable tag. Only the fixed-vocabulary categories
+    (mood, location_type, etc.) are truly closed lists — `subjects` is
+    explicitly open-ended free text in the tagging prompt, which is exactly
+    where an LLM's own singular/plural word choice drifts run to run. This
+    mirrors the lowercase-casing fix already applied at every tag-write site
+    for the same reason (Gemini's casing isn't consistent either).
+
+    Deliberately conservative: only strips a bare trailing 's' (not 'es'/
+    'ies', which usually change the stem and are more likely a genuinely
+    singular word that happens to end in 's') and skips a short exception
+    list where the plural is itself the natural tag."""
+    v = (value or '').strip().lower()
+    if len(v) > 3 and v.endswith('s') and not v.endswith('ss') and v not in TAG_PLURAL_STRIP_EXCEPTIONS:
+        return v[:-1]
+    return v
+
 def clear_ai_tags(cursor, image_id):
     """Delete an image's AI-written tags ahead of a re-tag, preserving every
     manually-applied category (see MANUAL_TAG_CATEGORIES)."""
@@ -150,8 +178,11 @@ def _process_crop_jobs():
             box = job['box']
             filename = job['filename']
 
+            # NOTE: in_progress was already incremented by crop_image() when the
+            # job was queued — incrementing again here (the original V27 bug)
+            # meant two increments against one decrement, so the counter never
+            # returned to 0 and CropModal's "wait until 0" poll spun forever.
             with _crop_lock:
-                _crop_progress['in_progress'] += 1
                 _crop_progress['active_jobs'][job_id] = {
                     'image_id': image_id,
                     'filename': filename,
@@ -235,24 +266,40 @@ def _process_crop_jobs():
 
                 # Overwrite original file
                 media = MediaIoBaseUpload(io.BytesIO(cropped_bytes), mimetype=mime)
-                service.files().update(
+                updated_file = service.files().update(
                     fileId=old_file_id, media_body=media, fields='id, md5Checksum'
                 ).execute()
 
-                # Update database with new dimensions
-                new_img = Image.open(io.BytesIO(cropped_bytes))
-                new_w, new_h = new_img.width, new_img.height
-                new_ar = new_w / new_h if new_h > 0 else 1.0
+                # Refresh everything derived from the pixels. The original V27
+                # worker wrote to width/height/crop_box — columns that have
+                # never existed on `images` — so this UPDATE always threw, and
+                # it threw AFTER the Drive file had already been overwritten:
+                # Drive held the cropped image (so the full-res inspector
+                # looked right) while the DB kept the stale pre-crop thumbnail
+                # (so the home grid still looked uncropped). It also dropped
+                # the thumbnail/md5/phash/palette refresh the V26 synchronous
+                # version did, which would have left the grid stale anyway.
+                thumbnail = generate_thumbnail(cropped_bytes)
+                if not thumbnail:
+                    raise ValueError(
+                        'Crop saved to Drive but the new thumbnail could not be '
+                        'generated. Run a duplicate scan to reconcile the library.')
+                aspect_ratio = get_image_aspect_ratio(cropped_bytes)
 
                 conn = get_db()
                 c = conn.cursor()
                 c.execute('''UPDATE images
-                    SET width = ?, height = ?, aspect_ratio = ?,
-                        crop_box = NULL
+                    SET thumbnail_blob = ?, aspect_ratio = ?,
+                        md5_checksum = ?, phash = ?
                     WHERE id = ?''',
-                    (new_w, new_h, new_ar, image_id))
+                    (thumbnail, aspect_ratio, updated_file.get('md5Checksum'),
+                     compute_phash(thumbnail), image_id))
                 conn.commit()
                 conn.close()
+
+                hexes = extract_palette(thumbnail)
+                if hexes:
+                    save_palette(image_id, owner_id, hexes)
 
                 with _crop_lock:
                     _crop_progress['completed'] += 1
@@ -1344,16 +1391,16 @@ def _run_tagging_job_inner(user_id=None):
             for category, values in data.get('tags', {}).items():
                 for val in values:
                     if val and val.strip():
-                        # Lowercase to match every other tag-writing path
-                        # (manual edit, bulk apply) — Gemini's casing isn't
-                        # consistent run to run, and SQLite string grouping
-                        # is case-sensitive, so "Tense" and "tense" would
-                        # otherwise sit as two separate-looking duplicates
+                        # normalize_tag_value: lowercase + plural-collapse, to
+                        # match every other tag-writing path (manual edit,
+                        # bulk apply) — Gemini's word choice isn't consistent
+                        # run to run, so "Tense"/"tense" or "car"/"cars" would
+                        # otherwise sit as separate-looking duplicates
                         # anywhere tags get grouped (autocomplete, detail
                         # panel, analytics).
                         c.execute(
                             "INSERT INTO tags (image_id, user_id, category, value) VALUES (?, ?, ?, ?)",
-                            (img_id, owner_id, category, val.strip().lower())
+                            (img_id, owner_id, category, normalize_tag_value(val))
                         )
 
             caption = data.get('caption', '')
@@ -1566,32 +1613,108 @@ def generate_thumbnail(image_data, width=800, quality=85):
     except Exception:
         return None
 
-def compute_phash(image_data):
-    """Perceptual 'difference hash' — a 64-bit visual fingerprint.
+# V30: the fingerprint grid. Was 8x8/64 bits through V29; see compute_phash.
+PHASH_GRID = 16
+PHASH_BITS = PHASH_GRID * PHASH_GRID   # 256
+PHASH_HEX_LEN = PHASH_BITS // 4        # 64 hex characters
 
-    Shrinks the image to a 9x8 grayscale grid and records, for each pixel,
+def compute_phash(image_data):
+    """Perceptual 'difference hash' — a 256-bit visual fingerprint.
+
+    Shrinks the image to a 17x16 grayscale grid and records, for each pixel,
     whether it's brighter than its right-hand neighbor. Two visually identical
     images (even resized, screenshotted, or re-saved) produce nearly identical
     fingerprints; counting differing bits (hamming distance) measures how
-    visually different they are."""
+    visually different they are.
+
+    V30 widened the grid from 8x8. This hash is now only a fast PRE-FILTER,
+    never the decider — see compute_signature() for why it cannot be trusted
+    alone no matter how fine the grid gets."""
     try:
         img = Image.open(io.BytesIO(image_data)).convert('L').resize(
-            (9, 8), Image.Resampling.LANCZOS)
+            (PHASH_GRID + 1, PHASH_GRID), Image.Resampling.LANCZOS)
         px = list(img.getdata())
         bits = 0
-        for row in range(8):
-            for col in range(8):
-                bits = (bits << 1) | (1 if px[row * 9 + col] > px[row * 9 + col + 1] else 0)
-        return f'{bits:016x}'
+        stride = PHASH_GRID + 1
+        for row in range(PHASH_GRID):
+            for col in range(PHASH_GRID):
+                bits = (bits << 1) | (1 if px[row * stride + col] > px[row * stride + col + 1] else 0)
+        return f'{bits:0{PHASH_HEX_LEN}x}'
     except Exception:
         return None
 
 def phash_distance(a, b):
+    """Differing bits between two fingerprints. Mismatched lengths mean one
+    side predates the V30 widening and hasn't been backfilled yet — report
+    them as maximally different rather than XOR-ing a 64-bit hash against a
+    256-bit one, which would produce a meaningless (and often small) number."""
+    if not a or not b or len(a) != len(b):
+        return PHASH_BITS + 1
     return bin(int(a, 16) ^ int(b, 16)).count('1')
 
-# At or below this many differing bits (out of 64), two images are considered
-# near-duplicates. 0 = pixel-identical layout; 6 tolerates resize/re-compress.
-PHASH_NEAR_DUP_THRESHOLD = 6
+# At or below this many differing bits (out of 256), two images MAY be
+# near-duplicates. Deliberately generous: measured on Ryan's real reference
+# photos, a resized + heavily recompressed copy scored at worst 13, while
+# genuinely unrelated pairs scored 47+. The gap is wide here, but it collapses
+# on flat frames (see compute_signature), so this only nominates candidates —
+# signature and colour still have to agree before anything is called a dupe.
+PHASH_NEAR_DUP_THRESHOLD = 20
+
+# ── V30: SIGNATURE — the check that actually decides ────────────────────────
+# The difference-hash asks "is this pixel brighter than its neighbour?" On a
+# soft, dark, letterboxed frame the answer is "no" almost everywhere, so the
+# hash comes out nearly blank — measured on real moody stills, only 5-12 of
+# the old 64 bits carried any signal. Two mostly-blank fingerprints are
+# MATHEMATICALLY FORCED to look alike: their distance can never exceed the
+# number of bits they set between them. That is why three unrelated warm,
+# letterboxed frames kept grouping as duplicates, and why widening the grid
+# alone does not fix it — at 16x16 those same frames set only 16 of 256 bits.
+#
+# The signature keeps ACTUAL brightness values instead of only their ordering,
+# so a flat frame still describes itself. Contrast-normalising (subtract mean,
+# divide by standard deviation) makes it immune to exposure and compression
+# shifts, which is what lets the cutoff sit so far from real duplicates.
+#
+# Measured over 19 of Ryan's real reference photos (171 unrelated pairs):
+#     resized 55% + JPEG q55 copies ... 0.004 - 0.029
+#     genuinely unrelated pairs ....... 0.463 - 2.0+
+# a 16x separation. The cutoff sits between, nearer the duplicate end.
+SIGNATURE_GRID = 16
+SIGNATURE_MAX_DISTANCE = 0.15
+
+def compute_signature(image_data):
+    """Contrast-normalised tiny grayscale. Returns a list of floats, or None."""
+    try:
+        img = Image.open(io.BytesIO(image_data)).convert('L').resize(
+            (SIGNATURE_GRID, SIGNATURE_GRID), Image.Resampling.LANCZOS)
+        px = list(img.getdata())
+        if not px:
+            return None
+        mean = sum(px) / len(px)
+        sd = (sum((p - mean) ** 2 for p in px) / len(px)) ** 0.5
+        if sd < 1e-6:
+            # A completely uniform frame (a solid colour card). It has no
+            # structure to compare, so give it a flat signature — the colour
+            # check is what will tell two solid cards apart.
+            return [0.0] * len(px)
+        return [(p - mean) / sd for p in px]
+    except Exception:
+        return None
+
+def signature_distance(a, b):
+    """RMS difference between two signatures. 0 = identical structure."""
+    if not a or not b or len(a) != len(b):
+        return None
+    return (sum((x - y) ** 2 for x, y in zip(a, b)) / len(a)) ** 0.5
+
+def signatures_match(a, b):
+    """Do two images actually look alike? Unlike the fingerprint this stays
+    meaningful on flat/dark/letterboxed frames. A missing signature (an
+    unreadable thumbnail) does not veto — phash and colour still apply."""
+    d = signature_distance(a, b)
+    if d is None:
+        return True
+    return d <= SIGNATURE_MAX_DISTANCE
 
 def get_root_folder_id(user_id):
     """The Drive folder being synced for this user — where their _Removed
@@ -2013,6 +2136,128 @@ def backfill_palette_shares():
     threading.Thread(target=_job, daemon=True).start()
 
 
+def backfill_phashes():
+    """V30 one-time self-heal: rebuild fingerprints that predate the 16x16
+    widening.
+
+    Pre-V30 hashes are 16 hex characters (64 bits); V30 ones are 64 (256
+    bits). phash_distance() reports mismatched lengths as maximally different
+    rather than XOR-ing them into a meaningless number, so until a row is
+    rebuilt it simply never matches anything — duplicate detection degrades
+    to "finds nothing", never to "finds the wrong thing".
+
+    Rebuilding from the stored thumbnails costs no Drive or Gemini calls.
+    Runs in a background thread so a large library can't delay boot, and
+    self-disables once every row is the new width."""
+    try:
+        conn = get_db()
+        pending = [r['id'] for r in conn.execute(
+            'SELECT id FROM images WHERE phash IS NOT NULL AND LENGTH(phash) != ?',
+            (PHASH_HEX_LEN,)
+        ).fetchall()]
+        conn.close()
+    except Exception as e:
+        print(f"[phash-backfill] Could not check for pending rows: {e}")
+        return
+
+    if not pending:
+        return
+
+    def _job():
+        done = failed = 0
+        for image_id in pending:
+            try:
+                conn = get_db()
+                row = conn.execute(
+                    'SELECT id, thumbnail_blob FROM images WHERE id = ?', (image_id,)
+                ).fetchone()
+                conn.close()
+                if not row or not row['thumbnail_blob']:
+                    continue
+                ph = compute_phash(row['thumbnail_blob'])
+                if ph:
+                    conn = get_db()
+                    conn.execute('UPDATE images SET phash = ? WHERE id = ?', (ph, image_id))
+                    conn.commit()
+                    conn.close()
+                    done += 1
+            except Exception as e:
+                failed += 1
+                print(f"[phash-backfill] Image {image_id} failed: {e}")
+        print(f"[phash-backfill] Rebuilt {done} fingerprint(s) at {PHASH_GRID}x{PHASH_GRID}"
+              + (f", {failed} failed" if failed else "") + ".")
+
+    print(f"[phash-backfill] {len(pending)} fingerprint(s) predate V30 — rebuilding in background.")
+    threading.Thread(target=_job, daemon=True).start()
+
+def merge_plural_tag_duplicates():
+    """V30 one-time cleanup: collapse existing plural/singular tag drift
+    (e.g. an image tagged 'cars' and another tagged 'car' for the same
+    subject) now that normalize_tag_value() stops new drift at write time.
+    This is what fixes what's already in the database; the write-time
+    normalization only prevents new drift, it can't retroactively fix rows
+    written before it existed.
+
+    Only ever merges tags that already coexist on the same photo, in the
+    same category — never touches two different photos' tags, and never
+    crosses categories (an image tagged 'car' under location_type and
+    'car' under subjects are two different facts and stay separate).
+
+    Runs once at boot; self-disables once nothing's left to merge (each
+    later boot's initial SELECT finds no drift and returns immediately)."""
+    try:
+        conn = get_db()
+        rows = conn.execute('SELECT id, image_id, category, value FROM tags').fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"[tag-merge] Could not scan tags: {e}")
+        return
+
+    by_image_cat = {}
+    for r in rows:
+        by_image_cat.setdefault((r['image_id'], r['category']), []).append(r)
+
+    to_delete = []      # tag ids to remove outright
+    to_rename = []      # (tag id, new value)
+    for group in by_image_cat.values():
+        buckets = {}
+        for r in group:
+            buckets.setdefault(normalize_tag_value(r['value']), []).append(r)
+        for normalized, variants in buckets.items():
+            if len(variants) == 1:
+                if variants[0]['value'] != normalized:
+                    to_rename.append((variants[0]['id'], normalized))
+                continue
+            # Multiple rows collapse onto the same normalized value on this
+            # photo (e.g. both 'car' and 'cars'). Keep one — preferring a row
+            # already spelled the normalized way — delete the rest.
+            keeper = next((r for r in variants if r['value'] == normalized), variants[0])
+            if keeper['value'] != normalized:
+                to_rename.append((keeper['id'], normalized))
+            to_delete.extend(r['id'] for r in variants if r['id'] != keeper['id'])
+
+    if not to_delete and not to_rename:
+        return
+
+    def _job():
+        try:
+            conn = get_db()
+            for tag_id, new_value in to_rename:
+                conn.execute('UPDATE tags SET value = ? WHERE id = ?', (new_value, tag_id))
+            for tag_id in to_delete:
+                conn.execute('DELETE FROM tags WHERE id = ?', (tag_id,))
+            conn.commit()
+            conn.close()
+            print(f"[tag-merge] Renamed {len(to_rename)} tag(s), removed "
+                  f"{len(to_delete)} duplicate(s) left behind by the merge.")
+        except Exception as e:
+            print(f"[tag-merge] Failed: {e}")
+
+    print(f"[tag-merge] {len(to_rename)} tag(s) need renaming, {len(to_delete)} duplicate(s) "
+          "to remove — merging in background.")
+    threading.Thread(target=_job, daemon=True).start()
+
+
 def save_palette(image_id, user_id, entries):
     """entries: list of (hex, share) from extract_palette. Bare hex strings are
     still accepted (share stored NULL) so any older caller keeps working."""
@@ -2275,6 +2520,41 @@ def sync_folder_worker(folder_id, user_id):
                 sync_state['processed'] += 1
                 continue
 
+        # V30: sync-delete parity. A photo deleted directly in Drive (not
+        # through the app) just vanishes from this listing — nothing else
+        # here would ever notice, so the library would carry a dead entry
+        # forever. Automatic, no confirmation (Ryan's call), but guarded
+        # against the one failure mode that makes "automatic" dangerous: a
+        # partial or broken Drive listing looking identical to a mass
+        # deletion. If more than half the library would vanish in one pass,
+        # that's almost certainly Drive/pagination trouble, not Ryan deleting
+        # half his library — skip and log instead of cascading the deletes.
+        current_drive_ids = {image['id'] for image in all_images}
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT id, drive_file_id, filename FROM images WHERE user_id = ?', (user_id,))
+        library_rows = c.fetchall()
+        conn.close()
+
+        missing_rows = [row for row in library_rows if row['drive_file_id'] not in current_drive_ids]
+        removed_count = 0
+        if library_rows and len(missing_rows) > len(library_rows) / 2:
+            sync_state['errors'].append(
+                f"Skipped removing {len(missing_rows)} image(s) that looked deleted from Drive — "
+                "that's more than half the library, which usually means Drive didn't fully list the "
+                "folder rather than a real mass-deletion. Nothing was removed; try syncing again.")
+        else:
+            for row in missing_rows:
+                conn = get_db()
+                c = conn.cursor()
+                for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography',
+                              'user_favorites', 'user_flags', 'image_views'):
+                    c.execute(f'DELETE FROM {table} WHERE image_id = ?', (row['id'],))
+                c.execute('DELETE FROM images WHERE id = ?', (row['id'],))
+                conn.commit()
+                conn.close()
+                removed_count += 1
+
         conn = get_db()
         c = conn.cursor()
         c.execute('''
@@ -2284,7 +2564,8 @@ def sync_folder_worker(folder_id, user_id):
         conn.commit()
         conn.close()
 
-        print(f"Sync complete. {new_count} new images added.")
+        print(f"Sync complete. {new_count} new images added"
+              + (f", {removed_count} removed (deleted from Drive)" if removed_count else "") + ".")
 
     except Exception as e:
         sync_state['errors'].append(f"Sync failed: {str(e)}")
@@ -3384,11 +3665,21 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
     img_phash = compute_phash(image_data)
     thumbnail = generate_thumbnail(image_data)
     new_palette = extract_palette(thumbnail) if thumbnail else []
+    new_signature = compute_signature(thumbnail) if thumbnail else None
 
     if not force and img_phash:
-        dup = next((r for r in existing
-                    if phash_distance(img_phash, r['phash']) <= PHASH_NEAR_DUP_THRESHOLD
-                    and palettes_overlap(new_palette, r['colors'])), None)
+        # Same three gates as the Duplicate Review scan, cheapest first: the
+        # fingerprint nominates, the signature and the palette confirm. The
+        # signature is only decoded for candidates the fingerprint nominated.
+        def _is_dup(r):
+            if phash_distance(img_phash, r['phash']) > PHASH_NEAR_DUP_THRESHOLD:
+                return False
+            if 'signature' not in r:
+                r['signature'] = compute_signature(r['thumbnail_blob'])
+            return (signatures_match(new_signature, r['signature'])
+                    and palettes_overlap(new_palette, r['colors']))
+
+        dup = next((r for r in existing if _is_dup(r)), None)
         if dup:
             return {
                 'filename': filename,
@@ -3428,7 +3719,7 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
             save_palette(new_id, 1, new_palette)
         existing.append({'id': new_id, 'filename': filename,
                          'thumbnail_blob': thumbnail, 'phash': img_phash,
-                         'colors': new_palette})
+                         'colors': new_palette, 'signature': new_signature})
 
     return {'filename': filename, 'status': 'uploaded', 'image_id': new_id}
 
@@ -3644,7 +3935,7 @@ def edit_tags(image_id):
     # dropdown, but renders fine everywhere via the existing .get(x, x)
     # fallbacks (label becomes literally "misc", color a neutral gray).
     category = (data.get('category') or '').strip() or 'misc'
-    value = (data.get('value') or '').strip().lower()
+    value = normalize_tag_value(data.get('value'))
     if not value:
         return jsonify({'error': 'value is required'}), 400
 
@@ -3683,7 +3974,7 @@ def _parse_bulk_tag_request(data):
     image_ids = data.get('image_ids')
     # Blank category -> misc, same as the single-image tag editor.
     category = (data.get('category') or '').strip() or 'misc'
-    value = (data.get('value') or '').strip().lower()
+    value = normalize_tag_value(data.get('value'))
 
     if not isinstance(image_ids, list) or not image_ids or \
             not all(isinstance(i, int) for i in image_ids):
@@ -4179,19 +4470,124 @@ def reset_crop_progress():
 # DAY 8 (V7): DUPLICATE DETECTION
 # ============================================================================
 
+def _users_with_synced_folders():
+    """Every user whose photos can legitimately be reconciled against a Drive
+    folder: the admin always (get_root_folder_id falls back to the hardcoded
+    default folder if they've never explicitly set one), plus anyone who has
+    actually connected their own folder. A friend with no sync_settings row
+    has no photos of their own to reconcile — their uploads/clips land in the
+    ADMIN's folder (see upload_images), not theirs — so skipping them here
+    isn't a gap, it's what keeps this from comparing their nonexistent folder
+    against the admin's by way of get_root_folder_id's fallback."""
+    conn = get_db()
+    ids = {r[0] for r in conn.execute('SELECT DISTINCT user_id FROM sync_settings').fetchall()}
+    conn.close()
+    ids.add(1)
+    return ids
+
+def reconcile_drive_changes():
+    """Self-heals every image whose Drive file no longer matches what the
+    database thinks it looks like. One folder listing per user (each user's
+    own folder — a friend's photos live in THEIR folder, not the admin's, so
+    this must never assume a single shared listing), then for any image
+    whose stored checksum differs from Drive's current one, the thumbnail,
+    aspect ratio, fingerprint and palette are rebuilt from the current file.
+
+    That mismatch is exactly what a crop leaves behind: the V27 background
+    crop worker overwrote the Drive file but crashed before updating the row,
+    so the grid kept showing the pre-crop thumbnail while the full-res
+    inspector (which reads straight from Drive) showed the cropped image.
+    Fixed going forward (V30), but already-affected rows still need this to
+    catch up — so it runs both at boot (self-heals without Ryan needing to
+    remember to open Duplicate Review) and as the first step of that scan.
+
+    Never deletes anything — a file missing from a listing here just means
+    "skip it," on purpose. Deletion-on-sync is a deliberately separate,
+    explicit decision that lives in sync_folder_worker() instead, tied to
+    the moment Ryan (or a friend) actually triggers a sync of their folder."""
+    try:
+        service = get_drive_service()
+    except Exception as e:
+        print(f"[reconcile] Drive reconciliation skipped: {e}")
+        return
+
+    backfilled = repaired = 0
+    for user_id in _users_with_synced_folders():
+        try:
+            files = list_images_in_folder(service, get_root_folder_id(user_id))
+            md5_map = {f['id']: f.get('md5Checksum') for f in files}
+        except Exception as e:
+            print(f"[reconcile] Could not list Drive folder for user {user_id}: {e}")
+            continue
+
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT id, user_id, drive_file_id, filename, md5_checksum '
+                  'FROM images WHERE user_id = ?', (user_id,))
+        rows = c.fetchall()
+        conn.close()
+
+        for r in rows:
+            drive_md5 = md5_map.get(r['drive_file_id'])
+            if not drive_md5 or drive_md5 == r['md5_checksum']:
+                continue
+
+            if r['md5_checksum'] is None:
+                # Never had a checksum — just record it. The stored thumbnail
+                # is still the right one, so nothing needs rebuilding.
+                conn = get_db()
+                conn.execute('UPDATE images SET md5_checksum = ? WHERE id = ?',
+                             (drive_md5, r['id']))
+                conn.commit()
+                conn.close()
+                backfilled += 1
+                continue
+
+            # The file in Drive changed under us (a crop). Rebuild from it.
+            try:
+                current_bytes = download_drive_file(service, r['drive_file_id'])
+                thumbnail = generate_thumbnail(current_bytes)
+                if not thumbnail:
+                    raise ValueError('thumbnail could not be generated')
+                conn = get_db()
+                conn.execute('''UPDATE images
+                    SET thumbnail_blob = ?, aspect_ratio = ?, md5_checksum = ?, phash = ?
+                    WHERE id = ?''',
+                    (thumbnail, get_image_aspect_ratio(current_bytes), drive_md5,
+                     compute_phash(thumbnail), r['id']))
+                conn.commit()
+                conn.close()
+                hexes = extract_palette(thumbnail)
+                if hexes:
+                    save_palette(r['id'], r['user_id'], hexes)
+                repaired += 1
+            except Exception as e:
+                print(f"[reconcile] Could not refresh {r['filename']}: {e}")
+
+    if backfilled or repaired:
+        print(f"[reconcile] Recorded {backfilled} checksum(s); "
+              f"refreshed {repaired} image(s) that changed in Drive.")
+
 @app.route('/api/duplicates/scan', methods=['POST'])
 @admin_required
 def duplicates_scan():
-    """Backfills fingerprints for any image missing them, then returns
-    duplicate groups. phash and color palette come from stored thumbnails
-    (instant); md5 comes from one Drive folder listing (a few seconds).
-    Backfilling the palette here matters now that the duplicate check needs
-    real color data to rule out false matches — an image missing one would
-    otherwise just fall back to phash-only, the exact failure mode this scan
-    exists to catch."""
+    """Self-heals the library's derived data, then returns duplicate groups.
+
+    Everything the duplicate check reads is rebuilt here first, because a
+    missing piece doesn't just weaken the check — it silently changes which
+    gates apply:
+
+      1. Fingerprints — missing ones, and (V30) ones still at the old 8x8
+         width, rebuilt from the stored thumbnail. Instant.
+      2. Colour palettes — missing ones, likewise from the thumbnail.
+      3. Drive reconciliation (see reconcile_drive_changes) — also runs at
+         boot now, but re-running it here means a click on this scan always
+         reflects the current state of Drive, not just whatever boot found.
+    """
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, thumbnail_blob FROM images WHERE phash IS NULL')
+    c.execute('SELECT id, thumbnail_blob FROM images WHERE phash IS NULL OR LENGTH(phash) != ?',
+              (PHASH_HEX_LEN,))
     for r in c.fetchall():
         ph = compute_phash(r['thumbnail_blob'])
         if ph:
@@ -4202,8 +4598,6 @@ def duplicates_scan():
         WHERE id NOT IN (SELECT DISTINCT image_id FROM colors)
     ''')
     missing_palette = c.fetchall()
-    c.execute('SELECT COUNT(*) FROM images WHERE md5_checksum IS NULL')
-    missing_md5 = c.fetchone()[0]
     conn.close()
 
     for r in missing_palette:
@@ -4211,22 +4605,7 @@ def duplicates_scan():
         if hexes:
             save_palette(r['id'], r['user_id'], hexes)
 
-    if missing_md5:
-        try:
-            service = get_drive_service()
-            files = list_images_in_folder(service, get_root_folder_id(1))
-            md5_map = {f['id']: f.get('md5Checksum') for f in files}
-            conn = get_db()
-            c = conn.cursor()
-            c.execute('SELECT id, drive_file_id FROM images WHERE md5_checksum IS NULL')
-            for r in c.fetchall():
-                m = md5_map.get(r['drive_file_id'])
-                if m:
-                    c.execute('UPDATE images SET md5_checksum = ? WHERE id = ?', (m, r['id']))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"[duplicates] md5 backfill failed: {e}")
+    reconcile_drive_changes()
 
     return find_duplicates()
 
@@ -4257,6 +4636,16 @@ def find_duplicates():
             i = parent[i]
         return i
 
+    # Signatures are decoded lazily and memoised: only images the fingerprint
+    # actually nominates get their thumbnail decoded, so this stays O(library)
+    # decodes at worst instead of one per comparison.
+    _sig_cache = {}
+
+    def signature_for(idx):
+        if idx not in _sig_cache:
+            _sig_cache[idx] = compute_signature(rows[idx]['thumbnail_blob'])
+        return _sig_cache[idx]
+
     exact_pairs = set()
     for i in range(n):
         for j in range(i + 1, n):
@@ -4264,8 +4653,12 @@ def find_duplicates():
             if a['md5_checksum'] and a['md5_checksum'] == b['md5_checksum']:
                 parent[find(i)] = find(j)
                 exact_pairs.add((i, j))
+            # Three gates, cheapest first. The fingerprint only nominates a
+            # candidate; the signature (does it actually look alike?) and the
+            # palette (is it actually the same colour?) both have to agree.
             elif (a['phash'] and b['phash']
                   and phash_distance(a['phash'], b['phash']) <= PHASH_NEAR_DUP_THRESHOLD
+                  and signatures_match(signature_for(i), signature_for(j))
                   and palettes_overlap(palette_map.get(a['id'], []), palette_map.get(b['id'], []))):
                 parent[find(i)] = find(j)
 
@@ -5293,6 +5686,9 @@ if __name__ == '__main__':
     init_db()
     load_embeddings_seed()
     backfill_palette_shares()
+    backfill_phashes()
+    merge_plural_tag_duplicates()
+    threading.Thread(target=reconcile_drive_changes, daemon=True).start()
     start_backup_scheduler()
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
@@ -5300,4 +5696,7 @@ if __name__ == '__main__':
 init_db()
 load_embeddings_seed()
 backfill_palette_shares()
+backfill_phashes()
+merge_plural_tag_duplicates()
+threading.Thread(target=reconcile_drive_changes, daemon=True).start()
 start_backup_scheduler()

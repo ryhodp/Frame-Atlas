@@ -66,20 +66,51 @@ class FakeDrive:
         return FakeFiles(self)
 
 
-def shape_bytes(mod, left_rgb, right_rgb=(10, 10, 10), size=(240, 160)):
-    """A JPEG with a hard brightness split down the middle: left_rgb fills
-    the left half, right_rgb the right half.
+def shape_bytes(mod, left_rgb, right_rgb=(10, 10, 10), size=(240, 160), quality=92):
+    """A JPEG with a brightness split down the middle: left_rgb fills the left
+    half, right_rgb the right half, over faint deterministic texture.
 
     The difference-hash only compares brightness between neighboring pixels,
     so any two images sharing this exact light/dark layout hash almost
     identically no matter what color fills each half — this reproduces the
-    shape of the original false-positive bug."""
-    img = mod.Image.new("RGB", size, right_rgb)
+    shape of the original false-positive bug.
+
+    The shading is not decoration. A perfectly flat two-tone frame is an
+    adversarial input for the V30 signature check: the split lands exactly on
+    a 16x16 grid boundary, so the ordinary JPEG ringing along that razor edge
+    is enough to flip one whole grid column's contrast-normalised value by
+    ~2 standard deviations. That alone moves the signature distance from
+    ~0.004 to ~0.17 — past the 0.15 cutoff — and made this test fail approx.
+    1 run in 8 for a reason that had nothing to do with what it checks.
+
+    It has to be LOW-FREQUENCY shading, not per-pixel noise: JPEG discards
+    high-frequency detail first, so pixel-level jitter is destroyed at
+    quality 55 and randomises the difference-hash's neighbour comparisons
+    across the flat regions (measured: phash distance 23-24, past the
+    threshold of 20 — it broke the test in the other direction). A smooth
+    gradient survives compression intact, gives every grid cell a stable
+    average to anchor on, and leaves the luminance LAYOUT — and so the
+    phash — identical between variants."""
     from PIL import ImageDraw
+
+    img = mod.Image.new("RGB", size, right_rgb)
     draw = ImageDraw.Draw(img)
     draw.rectangle([0, 0, size[0] // 2, size[1]], fill=left_rgb)
+
+    px = img.load()
+    for y in range(size[1]):
+        # smooth vertical falloff, plus a gentle horizontal tilt
+        vy = int(26 * (y / max(1, size[1] - 1)))
+        for x in range(size[0]):
+            vx = int(12 * (x / max(1, size[0] - 1)))
+            r, g, b = px[x, y]
+            d = vy + vx - 19
+            px[x, y] = (max(0, min(255, r + d)),
+                        max(0, min(255, g + d)),
+                        max(0, min(255, b + d)))
+
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=92)
+    img.save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
 
 
@@ -123,7 +154,10 @@ def main():
 
     # ── build the three test images ────────────────────────────────────────
     green_v1 = shape_bytes(mod, left_rgb=(0, 200, 0))     # green highlight, dark surround
-    green_v2 = shape_bytes(mod, left_rgb=(10, 190, 10))   # same shape, slightly different green (simulated re-save)
+    # The same photo re-saved at lower JPEG quality — the ordinary
+    # "duplicate" case (a re-compressed copy), rather than a hand-picked
+    # colour offset, so this asserts what actually happens in the library.
+    green_v2 = shape_bytes(mod, left_rgb=(0, 200, 0), quality=55)
     orange_v1 = shape_bytes(mod, left_rgb=(230, 140, 20)) # SAME shape, unrelated color
 
     # ── 0. sanity check: prove this scenario reproduces the original bug's

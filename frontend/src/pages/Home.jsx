@@ -541,6 +541,17 @@ export default function Home() {
     setSelectedImage(prev => (prev && idSet.has(prev.id)) ? patchFn(prev) : prev);
   };
 
+  // A bulk tag/filmography edit just landed on the server. handleBulkTagsChanged
+  // only patched each photo's own fields in local state — it never re-checks
+  // whether a photo still belongs in the currently active search filter (e.g.
+  // untagging "car" while filtered to car should drop that photo from the
+  // grid). Re-running the current search is what the server already does
+  // correctly, so route through it instead of re-implementing every filter
+  // (chips/nlChips/color/film/ar) client-side.
+  const handleBulkMutated = () => {
+    if (hasFilters) fetchPage(0, false);
+  };
+
   const DRAG_THRESHOLD = 4;
 
   const onGridMouseDown = (e) => {
@@ -1645,6 +1656,7 @@ export default function Home() {
           setSelectedIds={setSelectedIds}
           onExit={toggleTagMode}
           onBulkChanged={handleBulkTagsChanged}
+          onBulkMutated={handleBulkMutated}
           onCrop={() => {
             const sel = images.filter(i => selectedIds.has(i.id));
             if (sel.length) setCropImages(sel);

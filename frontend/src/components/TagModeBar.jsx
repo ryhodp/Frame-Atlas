@@ -66,6 +66,7 @@ export default function TagModeBar({
   setSelectedIds,
   onExit,
   onBulkChanged, // (patchedIds, patchFn) — let Home.jsx update local image state
+  onBulkMutated, // () — a bulk write (tag/filmography) just completed; re-sync active filters
   onCrop,        // V18: open the crop review modal for the current selection
 }) {
   // V18: Select Mode is open to everyone now (friends crop their own images
@@ -338,6 +339,13 @@ export default function TagModeBar({
           return { ...img, tags: (img.tags || []).filter(t => !(t.category === confirm.category && t.value === confirm.value)) };
         });
       }
+      // onBulkChanged only patches each photo's own fields in local state —
+      // it never re-checks whether a photo still belongs under the currently
+      // active search filters (e.g. a photo just untagged "car" while the
+      // grid is filtered to car). onBulkMutated tells Home.jsx a bulk write
+      // just happened so it can re-run the active search and drop anything
+      // that no longer qualifies, instead of leaving stale results on screen.
+      onBulkMutated?.();
       refetchSelectionData();
     } catch (e) {
       console.error('Bulk tag operation failed', e);
