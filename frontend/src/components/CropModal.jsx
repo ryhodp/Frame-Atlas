@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { detectCropTightened, tightenBox, isFullImageBox } from '../cropDetectV2';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useToast } from '../ToastContext';
 
 // ── CropModal — Frame Atlas V18 ───────────────────────────────────────────────
 // The CropStudio v34 review workflow, embedded as a full-screen modal:
@@ -50,6 +51,7 @@ function applySnapshot(item, snap) {
 export default function CropModal({ images, onClose, onImageCropped }) {
   const isMobile = useIsMobile();
   const [, force] = useReducer(x => x + 1, 0);
+  const showToast = useToast();
 
   // 'review' | 'detectAll' | 'summary' | 'applying' | 'done'
   const [phase, setPhase] = useState('review');
@@ -165,6 +167,93 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   useEffect(() => () => {
     itemsRef.current.forEach(item => { if (item.url) URL.revokeObjectURL(item.url); });
   }, []);
+
+  // Auto-start cropping when summary phase is reached with crops to do
+  const autoStartRef = useRef(false);
+  useEffect(() => {
+    if (phase !== 'summary') {
+      autoStartRef.current = false;
+      return;
+    }
+    if (autoStartRef.current) return; // Only run once
+
+    const targets = itemsRef.current.filter(i => i.decided === 'approved' && i.status === 'ready' && !isFullImageBox(i.cropBox, i.imgEl));
+    if (targets.length === 0) return;
+
+    autoStartRef.current = true;
+
+    // Show toast and close modal
+    showToast('✓ Cropping in the background…', 'success', 0);
+    onClose();
+
+    // Start cropping in background (no component state updates after this point)
+    (async () => {
+      const jobIds = [];
+      for (const item of targets) {
+        const iw = item.imgEl.naturalWidth, ih = item.imgEl.naturalHeight;
+        const b = item.cropBox;
+        try {
+          const res = await fetch(`/api/images/${item.fa.id}/crop`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              box: {
+                x: (b.x / iw) * 100,
+                y: (b.y / ih) * 100,
+                w: (b.w / iw) * 100,
+                h: (b.h / ih) * 100,
+              },
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Crop failed (HTTP ${res.status}).`);
+          if (data.job_id !== undefined) {
+            jobIds.push({ job_id: data.job_id, fa: item.fa });
+          }
+        } catch (e) {
+          console.error('Failed to queue crop:', e.message);
+        }
+      }
+
+      if (jobIds.length > 0) {
+        let polling = true;
+        while (polling) {
+          try {
+            const res = await fetch('/api/crop-progress');
+            const progress = await res.json();
+
+            if (progress.in_progress === 0 && progress.total > 0) {
+              polling = false;
+              const okCount = jobIds.length - (progress.failed?.length || 0);
+              const failCount = progress.failed?.length || 0;
+
+              if (failCount > 0) {
+                showToast(`✗ ${failCount} image${failCount === 1 ? '' : 's'} failed to crop`, 'error');
+              } else {
+                showToast(`✓ ${okCount} image${okCount === 1 ? '' : 's'} cropped!`, 'success');
+              }
+
+              // Update parent component with cropped images
+              for (const job of jobIds) {
+                onImageCropped?.(job.fa.id, {
+                  thumbnail: null,
+                  aspect_ratio: null,
+                  ar_label: null,
+                });
+              }
+
+              await fetch('/api/crop-progress/reset', { method: 'POST' });
+            } else if (progress.in_progress > 0) {
+              await new Promise(r => setTimeout(r, 500));
+            }
+          } catch (e) {
+            console.error('Failed to poll crop progress:', e);
+            polling = false;
+          }
+        }
+      }
+    })();
+  }, [phase]);
 
   // ── History helpers ────────────────────────────────────────────────────────
   const pushEdit = (index, before, after) => {

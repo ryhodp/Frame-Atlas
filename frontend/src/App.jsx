@@ -21,6 +21,7 @@ import ConnectGuidePage from './pages/ConnectGuidePage'
 import SettingsPage from './pages/SettingsPage'
 import InviteAcceptPage from './pages/InviteAcceptPage'
 import { AuthProvider, useAuth } from './AuthContext'
+import { ToastProvider } from './ToastContext'
 import './App.css'
 
 // Inner shell so we can read the current route (useLocation only works inside
@@ -167,7 +168,9 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <Shell />
+        <ToastProvider>
+          <Shell />
+        </ToastProvider>
       </AuthProvider>
     </Router>
   )
