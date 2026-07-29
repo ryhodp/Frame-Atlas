@@ -4,6 +4,7 @@ import base64
 import secrets
 import io
 import gzip
+import math
 import re
 import sqlite3
 import time
@@ -93,6 +94,17 @@ CAT_LABELS = {
 # manual tag editor uses when no category is picked.
 MANUAL_TAG_CATEGORIES = ('misc', 'my_work')
 
+# V32: how many `?` placeholders we're willing to put in one statement. SQLite
+# has a hard cap (999 on older builds), and "remove this tag from all 2,000
+# results" can now hand a query the whole filtered library in one go, so any
+# id list that could come from a select-all gets sliced into batches this big.
+SQL_PARAM_CHUNK = 400
+
+def chunked(seq, size=SQL_PARAM_CHUNK):
+    """Slice a list into batches small enough to pass as SQL placeholders."""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
 # V30: words where stripping a trailing 's' would be wrong — either it isn't
 # a plural at all (glass, lens, gas), or the plural is itself the natural
 # search term (hands: "two hands in frame" is a distinct, useful composition
@@ -175,7 +187,11 @@ def _process_crop_jobs():
             job_id = job['id']
             image_id = job['image_id']
             user_id = job['user_id']
-            box = job['box']
+            box = job.get('box')
+            # V32: present only on perspective jobs. .get() rather than [] so a
+            # job dict queued by older code (or any future caller that only
+            # knows about rectangles) still runs down the rectangle path.
+            corners = job.get('corners')
             filename = job['filename']
 
             # NOTE: in_progress was already incremented by crop_image() when the
@@ -191,21 +207,32 @@ def _process_crop_jobs():
                 }
 
             try:
-                # Extract crop coordinates
-                x_pct = float(box.get('x', 0))
-                y_pct = float(box.get('y', 0))
-                w_pct = float(box.get('w', 100))
-                h_pct = float(box.get('h', 100))
+                # Geometry is validated BEFORE anything is downloaded and long
+                # before anything is written — a bad selection must cost a
+                # failed job, never a half-finished Drive file.
+                if corners is not None:
+                    # V32 perspective. parse_perspective_corners rejects
+                    # bow-ties, degenerate and out-of-range quads.
+                    corners = parse_perspective_corners(corners)
+                    if perspective_is_whole_image(corners):
+                        raise ValueError('Corners cover the whole image')
+                else:
+                    # Extract crop coordinates
+                    box = box or {}
+                    x_pct = float(box.get('x', 0))
+                    y_pct = float(box.get('y', 0))
+                    w_pct = float(box.get('w', 100))
+                    h_pct = float(box.get('h', 100))
 
-                x_pct = min(max(x_pct, 0.0), 100.0)
-                y_pct = min(max(y_pct, 0.0), 100.0)
-                w_pct = min(max(w_pct, 0.0), 100.0 - x_pct)
-                h_pct = min(max(h_pct, 0.0), 100.0 - y_pct)
+                    x_pct = min(max(x_pct, 0.0), 100.0)
+                    y_pct = min(max(y_pct, 0.0), 100.0)
+                    w_pct = min(max(w_pct, 0.0), 100.0 - x_pct)
+                    h_pct = min(max(h_pct, 0.0), 100.0 - y_pct)
 
-                if w_pct < 1 or h_pct < 1:
-                    raise ValueError('Crop box is too small')
-                if w_pct >= 99.5 and h_pct >= 99.5:
-                    raise ValueError('Crop covers the whole image')
+                    if w_pct < 1 or h_pct < 1:
+                        raise ValueError('Crop box is too small')
+                    if w_pct >= 99.5 and h_pct >= 99.5:
+                        raise ValueError('Crop covers the whole image')
 
                 conn = get_db()
                 c = conn.cursor()
@@ -229,15 +256,25 @@ def _process_crop_jobs():
                 img = Image.open(io.BytesIO(original_bytes))
                 img = ImageOps.exif_transpose(img)
                 w_px, h_px = img.width, img.height
-                left = max(0, round(w_px * x_pct / 100.0))
-                top = max(0, round(h_px * y_pct / 100.0))
-                right = min(w_px, round(w_px * (x_pct + w_pct) / 100.0))
-                bottom = min(h_px, round(h_px * (y_pct + h_pct) / 100.0))
 
-                if right - left < 8 or bottom - top < 8:
-                    raise ValueError('Crop is too small to produce a usable image')
+                if corners is not None:
+                    # V32: four free corners straightened into a rectangle.
+                    # Everything downstream of here — backup, overwrite,
+                    # thumbnail, aspect ratio, phash, palette — is the SAME
+                    # code the rectangle path runs, on purpose: the V27
+                    # disaster was a crop path that overwrote Drive and then
+                    # refreshed the DB differently (in that case, not at all).
+                    cropped = perspective_correct(img, corners)
+                else:
+                    left = max(0, round(w_px * x_pct / 100.0))
+                    top = max(0, round(h_px * y_pct / 100.0))
+                    right = min(w_px, round(w_px * (x_pct + w_pct) / 100.0))
+                    bottom = min(h_px, round(h_px * (y_pct + h_pct) / 100.0))
 
-                cropped = img.crop((left, top, right, bottom))
+                    if right - left < 8 or bottom - top < 8:
+                        raise ValueError('Crop is too small to produce a usable image')
+
+                    cropped = img.crop((left, top, right, bottom))
 
                 mime = meta.get('mimeType') or 'image/jpeg'
                 fmt, save_kwargs = CROP_SAVE_FORMATS.get(mime, CROP_SAVE_FORMATS['image/jpeg'])
@@ -3100,27 +3137,38 @@ def tag_categories():
         'color': CAT_COLORS.get(key, '#9c988d')
     } for key in CAT_LABELS])
 
-@app.route('/api/search')
-def search():
-    chips_raw = request.args.get('chips', '').strip()
-    nl_raw = request.args.get('nl', '').strip()
-    color_raw = request.args.get('color', '').strip()
-    film_raw = request.args.get('film', '').strip()
-    ar_raw = request.args.get('ar', '').strip()  # V15: aspect-ratio bucket, e.g. "2.39:1"
+def build_search_filters(c, uid, args):
+    """Turn the search query params into (conditions, params, is_unfiltered)
+    for a WHERE clause over the `images` table.
+
+    V32: pulled out of search() so /api/search, /api/search/ids and the tag
+    removal preview all filter through ONE piece of code. A "select all 118
+    results" button that quietly disagreed with the 118 results on screen
+    would be worse than having no button at all, and a second hand-copied
+    version of five filter types (chips / natural language / colour /
+    aspect ratio / film) will drift apart the first time one of them changes.
+
+    Every condition here refers to plain `images` columns (`user_id`, `id`),
+    never a table alias, so callers can also drop the whole WHERE clause
+    inside a `SELECT id FROM images ...` subquery.
+    """
+    chips_raw = args.get('chips', '').strip()
+    nl_raw = args.get('nl', '').strip()
+    color_raw = args.get('color', '').strip()
+    film_raw = args.get('film', '').strip()
+    ar_raw = args.get('ar', '').strip()  # V15: aspect-ratio bucket, e.g. "2.39:1"
     # V24: color search knobs. Absent (old bookmarks, old clients) = the new
     # defaults, which is the agreed behaviour — a saved search returns fewer,
     # cleaner results than it used to rather than keeping the old noise.
     try:
-        prominence = float(request.args.get('prom', DEFAULT_PROMINENCE))
+        prominence = float(args.get('prom', DEFAULT_PROMINENCE))
     except ValueError:
         prominence = DEFAULT_PROMINENCE
     try:
-        exactness = float(request.args.get('exact', DEFAULT_EXACTNESS))
+        exactness = float(args.get('exact', DEFAULT_EXACTNESS))
     except ValueError:
         exactness = DEFAULT_EXACTNESS
     prominence = max(0.0, min(100.0, prominence))
-    page = int(request.args.get('page', 0))
-    per = int(request.args.get('per', 50))
     active_chips = [t.strip() for t in chips_raw.split(',') if t.strip()] if chips_raw else []
 
     # NL groups: JSON array of tag arrays. Image must match >=1 tag per group.
@@ -3131,10 +3179,6 @@ def search():
             nl_groups = [[str(t) for t in g] for g in parsed if isinstance(g, list) and g]
         except Exception:
             nl_groups = []
-
-    uid = session['user_id']
-    conn = get_db()
-    c = conn.cursor()
 
     conditions = ['user_id = ?']
     params = [uid]
@@ -3235,6 +3279,19 @@ def search():
             )''')
             params.extend([like, like, like])
 
+    is_unfiltered = not (active_chips or nl_groups or color_raw or film_raw or ar_raw)
+    return conditions, params, is_unfiltered
+
+@app.route('/api/search')
+def search():
+    page = int(request.args.get('page', 0))
+    per = int(request.args.get('per', 50))
+
+    uid = session['user_id']
+    conn = get_db()
+    c = conn.cursor()
+
+    conditions, params, is_unfiltered = build_search_filters(c, uid, request.args)
     where = 'WHERE ' + ' AND '.join(conditions)
 
     # V14: shuffled home feed. When the default (unfiltered) grid sends a seed,
@@ -3243,7 +3300,6 @@ def search():
     # so each visit leads with fresher inspiration. Any active filter switches
     # back to the normal newest-first ordering.
     seed = request.args.get('seed', '').strip()
-    is_unfiltered = not (active_chips or nl_groups or color_raw or film_raw or ar_raw)
     if seed and is_unfiltered:
         order_by = '''CASE WHEN EXISTS(
                 SELECT 1 FROM image_views iv
@@ -3267,6 +3323,32 @@ def search():
     conn.close()
 
     return jsonify({'images': images_out, 'total': total, 'page': page, 'per': per, 'has_more': (page + 1) * per < total})
+
+@app.route('/api/search/ids')
+def search_ids():
+    """Every image id matching the current filter — not just the page the
+    browser happens to have scrolled to (V32).
+
+    Select Mode's old "Select all loaded" only ever selected the thumbnails
+    already in the grid, so on a 118-result search that had loaded 60 it
+    silently grabbed 60 and said nothing. Sending ids instead of forcing the
+    grid to fetch every remaining page is what makes "select all" cheap: a
+    few kilobytes of numbers versus tens of megabytes of base64 thumbnails.
+
+    Takes exactly the same query params as /api/search and shares
+    build_search_filters() with it, so the ids returned here are precisely
+    the images on screen — they cannot drift apart. No `seed` handling:
+    ordering is irrelevant to a selection, and the shuffle only ever applies
+    to the unfiltered grid anyway."""
+    uid = session['user_id']
+    conn = get_db()
+    c = conn.cursor()
+    conditions, params, _ = build_search_filters(c, uid, request.args)
+    where = 'WHERE ' + ' AND '.join(conditions)
+    rows = c.execute(f'SELECT id FROM images {where} ORDER BY date_added DESC', params).fetchall()
+    conn.close()
+    ids = [r['id'] for r in rows]
+    return jsonify({'ids': ids, 'total': len(ids)})
 
 @app.route('/api/bookmarks', methods=['GET', 'POST'])
 def bookmarks():
@@ -3967,6 +4049,27 @@ def edit_tags(image_id):
     conn.close()
     return jsonify({'success': True, 'tags': tags})
 
+def count_tags_for_images(c, image_ids):
+    """{(category, value): how many of these images carry it}, highest first.
+
+    Shared by the selection summary and the suggestions endpoint — they were
+    running the identical query. Chunked (V32) because select-all can now put
+    a whole library's worth of ids in one selection, past what SQLite will
+    accept as placeholders in a single statement. Chunks are disjoint sets of
+    image ids, so adding the per-chunk counts gives the same answer one big
+    query would."""
+    counts = {}
+    for batch in chunked(image_ids):
+        placeholders = ','.join('?' * len(batch))
+        for row in c.execute(f'''
+            SELECT category, value, COUNT(DISTINCT image_id) as cnt
+            FROM tags WHERE image_id IN ({placeholders})
+            GROUP BY category, value
+        ''', batch).fetchall():
+            key = (row['category'], row['value'])
+            counts[key] = counts.get(key, 0) + row['cnt']
+    return dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
+
 def _parse_bulk_tag_request(data):
     """Shared validation for the bulk-apply/bulk-remove endpoints. Returns
     (image_ids, category, value, error_response). error_response is None
@@ -4034,14 +4137,90 @@ def bulk_remove_tags():
 
     conn = get_db()
     c = conn.cursor()
-    placeholders = ','.join('?' * len(image_ids))
-    c.execute(f'''
-        DELETE FROM tags WHERE image_id IN ({placeholders}) AND category = ? AND value = ?
-    ''', image_ids + [category, value])
-    removed = c.rowcount
+    # Chunked because V32's "remove this tag from every result" can hand this
+    # the whole filtered library at once, and SQLite caps how many `?`
+    # placeholders one statement may carry. The delete is scoped to the exact
+    # category+value pair either way — it can never touch another tag, and it
+    # never touches the images themselves.
+    removed = 0
+    for i in range(0, len(image_ids), SQL_PARAM_CHUNK):
+        batch = image_ids[i:i + SQL_PARAM_CHUNK]
+        placeholders = ','.join('?' * len(batch))
+        c.execute(f'''
+            DELETE FROM tags WHERE image_id IN ({placeholders}) AND category = ? AND value = ?
+        ''', batch + [category, value])
+        removed += c.rowcount
     conn.commit()
     conn.close()
     return jsonify({'removed': removed})
+
+# How many thumbnails the removal preview sends back per category. The COUNT
+# and the id list are always complete — this only caps the pictures, because
+# 600px base64 thumbnails are ~40KB each and a 2,000-photo preview would be
+# an 80MB response for a strip nobody scrolls to the end of.
+TAG_REMOVAL_PREVIEW_SAMPLES = 60
+
+@app.route('/api/tags/removal-preview')
+@admin_required
+def tag_removal_preview():
+    """Show which photos would lose a tag BEFORE removing it across a whole
+    filtered search (V32) — Ryan's explicit choice over a bare are-you-sure
+    box or an undo window: he wants to look at the photos first.
+
+    Results are grouped by tag category, never merged. 'car (Location)' and
+    'car (Objects)' are two different true facts about a photo (CLAUDE.md,
+    V30), so the person removing gets to pick which one they actually meant
+    instead of wiping both from one button.
+
+    Filtering goes through build_search_filters(), the same code /api/search
+    uses, so "110 photos would lose this" counts the same photos the grid is
+    showing. Read-only — this endpoint never writes anything."""
+    uid = session['user_id']
+    value = normalize_tag_value(request.args.get('value'))
+    if not value:
+        return jsonify({'error': 'value is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    conditions, params, _ = build_search_filters(c, uid, request.args)
+    where = 'WHERE ' + ' AND '.join(conditions)
+
+    # The filter clause goes in as a subquery so it stays byte-for-byte the
+    # clause /api/search runs, with no rewriting for the join.
+    rows = c.execute(f'''
+        SELECT t.category AS category, i.id AS id, i.filename AS filename,
+               i.thumbnail_blob AS thumbnail_blob, i.aspect_ratio AS aspect_ratio
+        FROM images i JOIN tags t ON t.image_id = i.id
+        WHERE t.value = ? AND i.id IN (SELECT id FROM images {where})
+        ORDER BY i.date_added DESC
+    ''', [value] + params).fetchall()
+    conn.close()
+
+    groups = {}
+    for row in rows:
+        g = groups.setdefault(row['category'], {'image_ids': [], 'samples': []})
+        g['image_ids'].append(row['id'])
+        if len(g['samples']) < TAG_REMOVAL_PREVIEW_SAMPLES:
+            ar_float = ar_float_from_str(row['aspect_ratio'] or '16:9')
+            g['samples'].append({
+                'id': row['id'],
+                'filename': row['filename'],
+                'thumbnail': 'data:image/jpeg;base64,' + base64.b64encode(row['thumbnail_blob']).decode('utf-8'),
+                'ar_float': round(ar_float, 4)
+            })
+
+    return jsonify({
+        'value': value,
+        'groups': [{
+            'category': cat,
+            'catLabel': CAT_LABELS.get(cat, cat),
+            'color': CAT_COLORS.get(cat, '#9c988d'),
+            'count': len(g['image_ids']),
+            'image_ids': g['image_ids'],
+            'samples': g['samples'],
+            'sample_limit': TAG_REMOVAL_PREVIEW_SAMPLES
+        } for cat, g in sorted(groups.items(), key=lambda kv: -len(kv[1]['image_ids']))]
+    })
 
 @app.route('/api/tags/selection-summary', methods=['POST'])
 @admin_required
@@ -4054,23 +4233,19 @@ def tags_selection_summary():
 
     conn = get_db()
     c = conn.cursor()
-    placeholders = ','.join('?' * len(image_ids))
-    rows = c.execute(f'''
-        SELECT category, value, COUNT(DISTINCT image_id) as cnt
-        FROM tags
-        WHERE image_id IN ({placeholders})
-        GROUP BY category, value
-        ORDER BY cnt DESC
-    ''', image_ids).fetchall()
+    tag_counts = count_tags_for_images(c, image_ids)
 
     # Filmography consensus: a field only counts as "common" when EVERY
     # selected image already agrees on the same non-empty value — missing
     # data on even one image breaks the consensus (so the bulk form doesn't
     # falsely imply a field's been verified across the whole selection).
-    film_rows = c.execute(f'''
-        SELECT image_id, title, director, dp, year FROM filmography
-        WHERE image_id IN ({placeholders})
-    ''', image_ids).fetchall()
+    film_rows = []
+    for batch in chunked(image_ids):
+        placeholders = ','.join('?' * len(batch))
+        film_rows += c.execute(f'''
+            SELECT image_id, title, director, dp, year FROM filmography
+            WHERE image_id IN ({placeholders})
+        ''', batch).fetchall()
     conn.close()
 
     film_by_image = {r['image_id']: r for r in film_rows}
@@ -4087,12 +4262,12 @@ def tags_selection_summary():
     return jsonify({
         'total': total,
         'tags': [{
-            'category': row['category'],
-            'value': row['value'],
-            'catLabel': CAT_LABELS.get(row['category'], row['category']),
-            'color': CAT_COLORS.get(row['category'], '#9c988d'),
-            'count': row['cnt']
-        } for row in rows if row['cnt'] == total],
+            'category': cat,
+            'value': val,
+            'catLabel': CAT_LABELS.get(cat, cat),
+            'color': CAT_COLORS.get(cat, '#9c988d'),
+            'count': cnt
+        } for (cat, val), cnt in tag_counts.items() if cnt == total],
         'common_filmography': common_filmography
     })
 
@@ -4107,17 +4282,8 @@ def tags_suggestions():
 
     conn = get_db()
     c = conn.cursor()
-    placeholders = ','.join('?' * len(image_ids))
-    rows = c.execute(f'''
-        SELECT category, value, COUNT(DISTINCT image_id) as cnt
-        FROM tags
-        WHERE image_id IN ({placeholders})
-        GROUP BY category, value
-        ORDER BY cnt DESC
-    ''', image_ids).fetchall()
-
     total = len(image_ids)
-    selection_tags = {(row['category'], row['value']): row['cnt'] for row in rows}
+    selection_tags = count_tags_for_images(c, image_ids)
 
     if not selection_tags:
         conn.close()
@@ -4369,11 +4535,13 @@ def bulk_delete_images():
 
     conn = get_db()
     c = conn.cursor()
-    placeholders = ','.join('?' * len(image_ids))
-    rows = c.execute(
-        f'SELECT id, drive_file_id, filename, user_id FROM images WHERE id IN ({placeholders})',
-        image_ids
-    ).fetchall()
+    rows = []
+    for batch in chunked(image_ids):
+        placeholders = ','.join('?' * len(batch))
+        rows += c.execute(
+            f'SELECT id, drive_file_id, filename, user_id FROM images WHERE id IN ({placeholders})',
+            batch
+        ).fetchall()
     conn.close()
 
     by_id = {r['id']: r for r in rows}
@@ -4412,10 +4580,11 @@ def bulk_delete_images():
         deleted_ids = [d[0] for d in deleted]
         conn = get_db()
         c = conn.cursor()
-        ph = ','.join('?' * len(deleted_ids))
-        for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography', 'user_favorites', 'user_flags', 'image_views'):
-            c.execute(f'DELETE FROM {table} WHERE image_id IN ({ph})', deleted_ids)
-        c.execute(f'DELETE FROM images WHERE id IN ({ph})', deleted_ids)
+        for batch in chunked(deleted_ids):
+            ph = ','.join('?' * len(batch))
+            for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography', 'user_favorites', 'user_flags', 'image_views'):
+                c.execute(f'DELETE FROM {table} WHERE image_id IN ({ph})', batch)
+            c.execute(f'DELETE FROM images WHERE id IN ({ph})', batch)
         if user_id != 1:
             c.executemany(
                 'INSERT OR IGNORE INTO sync_exclusions (user_id, drive_file_id) VALUES (?, ?)',
@@ -4464,34 +4633,278 @@ CROP_SAVE_FORMATS = {
     'image/gif': ('GIF', {}),
 }
 
+# ============================================================================
+# V32: PERSPECTIVE CROP — de-skew a four-cornered selection into a rectangle
+# ============================================================================
+# Ryan photographs monitors, posters and projected images that sit on an
+# angle. A rectangle can't extract those, so crop mode gained a second shape:
+# four independently-dragged corners, straightened back into a rectangle.
+#
+# Everything below is an ADDITION alongside the rectangle path, never a
+# replacement. A request with no `corners` field behaves exactly as it did
+# before — same validation, same worker branch, same output.
+
+# The quad has to cover at least this much of the frame (percent of the whole
+# image area). Same spirit as the rectangle path's "w >= 1% and h >= 1%":
+# a stray double-click that collapses the quad to a speck should be refused
+# with a readable message, not turned into an 8-pixel file in Drive.
+PERSPECTIVE_MIN_AREA_PCT = 1.0
+
+# Two corners closer together than this (in percent-of-frame units) are
+# treated as the same point — a degenerate "triangle" quad, which has no
+# unique perspective solution and makes the 8x8 solve singular.
+PERSPECTIVE_MIN_CORNER_GAP_PCT = 0.5
+
+
+def _quad_signed_area(pts):
+    """Shoelace area of a polygon. The sign tells you which way the points
+    wind; the magnitude is the area in whatever units the points are in."""
+    total = 0.0
+    n = len(pts)
+    for i in range(n):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % n]
+        total += x1 * y2 - x2 * y1
+    return total / 2.0
+
+
+def parse_perspective_corners(raw):
+    """Validate the four corner points the browser sends and hand back
+    [(x, y), ...] in percent (0-100), in the order the caller gave them:
+    top-left, top-right, bottom-right, bottom-left.
+
+    Raises ValueError with a message written for Ryan, not for a log file.
+
+    Why this is stricter than the rectangle path, which just clamps: clamping
+    a rectangle is harmless — it stays a rectangle in the same place. Clamping
+    ONE corner of a quadrilateral silently changes the SHAPE of the correction,
+    so the file Drive ends up holding would not be the one the preview showed.
+    Every check below has to fail HERE, before the destructive write, because a
+    crop overwrites the Drive file in place and there is no undo.
+    """
+    if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+        raise ValueError('Perspective correction needs exactly four corner points.')
+
+    pts = []
+    for p in raw:
+        if isinstance(p, dict):
+            cx, cy = p.get('x'), p.get('y')
+        elif isinstance(p, (list, tuple)) and len(p) == 2:
+            cx, cy = p
+        else:
+            raise ValueError('Each corner must be a point with numeric x and y percentages.')
+        try:
+            cx = float(cx)
+            cy = float(cy)
+        except (TypeError, ValueError):
+            raise ValueError('Each corner must be a point with numeric x and y percentages.')
+        if not (math.isfinite(cx) and math.isfinite(cy)):
+            raise ValueError('Corner points must be real numbers.')
+        # Rejected, not clamped — see the docstring.
+        if not (0.0 <= cx <= 100.0) or not (0.0 <= cy <= 100.0):
+            raise ValueError('Corner points must sit inside the image (0-100%).')
+        pts.append((cx, cy))
+
+    # Two corners on top of each other collapse the quad to a triangle, which
+    # has no unique perspective solution (the 8x8 system below goes singular).
+    for i in range(4):
+        for j in range(i + 1, 4):
+            if math.dist(pts[i], pts[j]) < PERSPECTIVE_MIN_CORNER_GAP_PCT:
+                raise ValueError('Two corner points are on top of each other — drag them apart.')
+
+    # Convexity, checked as "every turn goes the same way". This is the
+    # bow-tie guard: drag the top-left handle past the top-right one and the
+    # edges cross, one cross product flips sign, and we refuse. It also
+    # rejects concave quads, which is correct rather than merely convenient —
+    # a rectangle photographed from ANY angle is always convex, so a dented
+    # quad is not a perspective view of anything and the transform would fold
+    # the picture over itself.
+    signs = []
+    for i in range(4):
+        ax, ay = pts[i]
+        bx, by = pts[(i + 1) % 4]
+        cx, cy = pts[(i + 2) % 4]
+        cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx)
+        if abs(cross) < 1e-9:
+            raise ValueError('Those four corners are in a straight line — they do not enclose an area.')
+        signs.append(cross > 0)
+    if len(set(signs)) != 1:
+        raise ValueError('Those corners cross over each other. Drag them so the outline is a simple four-sided shape.')
+
+    # Winding direction is deliberately NOT pinned. A flipped quad produces a
+    # mirrored result, which is exactly what the on-screen preview shows, so
+    # it stays the user's call rather than a confusing rejection.
+
+    if abs(_quad_signed_area(pts)) < PERSPECTIVE_MIN_AREA_PCT:
+        raise ValueError('That selection is too small — it must cover at least 1% of the image.')
+
+    return pts
+
+
+def perspective_is_whole_image(pts, tolerance=0.5):
+    """True when the quad is (within a hair of) the untouched image corners —
+    a no-op. Mirrors the rectangle path's "covers the whole image" refusal so
+    a stray Apply can't burn a destructive Drive rewrite doing nothing."""
+    want = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]
+    return all(abs(p[0] - q[0]) <= tolerance and abs(p[1] - q[1]) <= tolerance
+               for p, q in zip(pts, want))
+
+
+def solve_linear_system(matrix, rhs):
+    """Gaussian elimination with partial pivoting. Returns the solution vector.
+
+    Deliberately hand-written: numpy would do this in one line, but numpy is
+    NOT in requirements.txt, and adding it costs every Railway deploy an extra
+    few minutes forever in exchange for one 8x8 solve that fits in 20 lines.
+    """
+    n = len(rhs)
+    # Work on copies — callers reuse their coefficient rows.
+    a = [list(row) + [rhs[i]] for i, row in enumerate(matrix)]
+
+    for col in range(n):
+        # Partial pivoting: swap the largest remaining magnitude into place.
+        # Without it a perfectly legitimate quad whose diagonal entry happens
+        # to be zero — an exactly axis-aligned corner, which is the COMMON
+        # case here since the handles are seeded from a rectangle — divides
+        # by zero instead of solving.
+        pivot = max(range(col, n), key=lambda r: abs(a[r][col]))
+        if abs(a[pivot][col]) < 1e-12:
+            raise ValueError('Those four corners do not describe a valid perspective.')
+        a[col], a[pivot] = a[pivot], a[col]
+
+        inv = 1.0 / a[col][col]
+        for r in range(col + 1, n):
+            factor = a[r][col] * inv
+            if factor == 0.0:
+                continue
+            for k in range(col, n + 1):
+                a[r][k] -= factor * a[col][k]
+
+    out = [0.0] * n
+    for row in range(n - 1, -1, -1):
+        acc = a[row][n] - sum(a[row][k] * out[k] for k in range(row + 1, n))
+        out[row] = acc / a[row][row]
+    return out
+
+
+def solve_perspective_coeffs(from_pts, to_pts):
+    """The eight numbers Pillow's Image.PERSPECTIVE wants.
+
+    A perspective map is  X = (a*x + b*y + c) / (g*x + h*y + 1)
+                          Y = (d*x + e*y + f) / (g*x + h*y + 1)
+    Multiplying out gives two linear equations per corner; four corners make
+    an 8x8 system in (a, b, c, d, e, f, g, h).
+
+    IMPORTANT DIRECTION NOTE: Pillow's transform walks the OUTPUT pixels and
+    asks where each one came FROM, so the coefficients must map
+    output -> input. Call this with from_pts = the destination rectangle and
+    to_pts = the quad in the source photo. Getting this backwards warps the
+    picture the wrong way instead of raising, so it is worth the paragraph.
+    """
+    matrix = []
+    rhs = []
+    for (x, y), (tx, ty) in zip(from_pts, to_pts):
+        matrix.append([x, y, 1, 0, 0, 0, -tx * x, -tx * y])
+        rhs.append(tx)
+        matrix.append([0, 0, 0, x, y, 1, -ty * x, -ty * y])
+        rhs.append(ty)
+    return solve_linear_system(matrix, rhs)
+
+
+def perspective_output_size(src_px):
+    """Pixel size of the de-skewed rectangle, derived from the quad's own edges.
+
+    Each side of the output is the AVERAGE of the two OPPOSITE edges of the
+    quad. Picking one edge instead would bake the perspective back into the
+    result: on a monitor shot from the left, the near (right) edge is much
+    longer than the far one, so sizing off the near edge stretches the whole
+    image and sizing off the far edge squashes it. The average lands between
+    the two and keeps the subject's proportions roughly true, which is what
+    "de-skew" should mean. It also can't invent detail — the output is never
+    larger than the longest edge the photo actually contains.
+    """
+    tl, tr, br, bl = src_px
+    top = math.dist(tl, tr)
+    bottom = math.dist(bl, br)
+    left = math.dist(tl, bl)
+    right = math.dist(tr, br)
+    return int(round((top + bottom) / 2.0)), int(round((left + right) / 2.0))
+
+
+def perspective_correct(img, corners_pct):
+    """Straighten the quadrilateral `corners_pct` (percentages, TL/TR/BR/BL)
+    out of `img` into a plain rectangle. Returns a new PIL image."""
+    w_px, h_px = img.width, img.height
+    # Percent -> pixels happens HERE and only here, which is what lets the same
+    # four numbers mean the same selection whether the browser was looking at a
+    # 600px preview or the 6000px original.
+    src = [(x / 100.0 * w_px, y / 100.0 * h_px) for x, y in corners_pct]
+
+    out_w, out_h = perspective_output_size(src)
+    # Same floor the rectangle path uses — below this there is no usable
+    # picture left and the downstream thumbnail/palette work gets silly.
+    if out_w < 8 or out_h < 8:
+        raise ValueError('Perspective selection is too small to produce a usable image')
+
+    dst = [(0, 0), (out_w, 0), (out_w, out_h), (0, out_h)]
+    coeffs = solve_perspective_coeffs(dst, src)
+    return img.transform((out_w, out_h), Image.PERSPECTIVE, coeffs, resample=Image.BICUBIC)
+
 @app.route('/api/images/<int:image_id>/crop', methods=['POST'])
 def crop_image(image_id):
     """Queue a crop job to run in the background (V27).
 
-    The browser sends the crop box as percentages of the image (0-100).
+    The browser sends the selection as percentages of the image (0-100), so it
+    means the same thing at any resolution. Two shapes are accepted:
+
+      · `box`     {x, y, w, h}          — the original axis-aligned rectangle
+      · `corners` [{x,y} x4]  (V32)     — four free corners, de-skewed into a
+                                          straight rectangle
+
+    `corners` wins if both are present. A request with no `corners` field takes
+    exactly the path it always did, byte for byte, so old clients and anything
+    already sitting in the queue keep working.
+
     Instead of blocking, this queues the job and returns immediately so the
     user can navigate away. A progress endpoint tracks the queue.
     """
     global _crop_job_counter
     user_id = session['user_id']
     data = request.get_json(silent=True) or {}
-    box = data.get('box') or {}
-    try:
-        x_pct = float(box['x'])
-        y_pct = float(box['y'])
-        w_pct = float(box['w'])
-        h_pct = float(box['h'])
-    except (KeyError, TypeError, ValueError):
-        return jsonify({'error': 'Crop box must include numeric x, y, w, h percentages.'}), 400
+    raw_corners = data.get('corners')
 
-    x_pct = min(max(x_pct, 0.0), 100.0)
-    y_pct = min(max(y_pct, 0.0), 100.0)
-    w_pct = min(max(w_pct, 0.0), 100.0 - x_pct)
-    h_pct = min(max(h_pct, 0.0), 100.0 - y_pct)
-    if w_pct < 1 or h_pct < 1:
-        return jsonify({'error': 'Crop box is too small — it must cover at least 1% of the image.'}), 400
-    if w_pct >= 99.5 and h_pct >= 99.5:
-        return jsonify({'error': 'Crop box covers the whole image — nothing to crop.'}), 400
+    box = None
+    corners = None
+    if raw_corners is not None:
+        # V32 perspective path. Validated here AND again in the worker: this
+        # gives Ryan an immediate, readable 400 instead of a failure that only
+        # surfaces minutes later in the progress panel, while the worker's own
+        # check is what actually stands between a bad quad and the Drive write.
+        try:
+            corners = parse_perspective_corners(raw_corners)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        if perspective_is_whole_image(corners):
+            return jsonify({'error': 'The corners cover the whole image — nothing to correct.'}), 400
+    else:
+        box = data.get('box') or {}
+        try:
+            x_pct = float(box['x'])
+            y_pct = float(box['y'])
+            w_pct = float(box['w'])
+            h_pct = float(box['h'])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({'error': 'Crop box must include numeric x, y, w, h percentages.'}), 400
+
+        x_pct = min(max(x_pct, 0.0), 100.0)
+        y_pct = min(max(y_pct, 0.0), 100.0)
+        w_pct = min(max(w_pct, 0.0), 100.0 - x_pct)
+        h_pct = min(max(h_pct, 0.0), 100.0 - y_pct)
+        if w_pct < 1 or h_pct < 1:
+            return jsonify({'error': 'Crop box is too small — it must cover at least 1% of the image.'}), 400
+        if w_pct >= 99.5 and h_pct >= 99.5:
+            return jsonify({'error': 'Crop box covers the whole image — nothing to crop.'}), 400
+        box = {'x': x_pct, 'y': y_pct, 'w': w_pct, 'h': h_pct}
 
     conn = get_db()
     c = conn.cursor()
@@ -4511,7 +4924,10 @@ def crop_image(image_id):
         'id': job_id,
         'image_id': image_id,
         'user_id': user_id,
-        'box': {'x': x_pct, 'y': y_pct, 'w': w_pct, 'h': h_pct},
+        'box': box,
+        # Absent (not just empty) on rectangle jobs, so the worker's
+        # `job.get('corners')` branch can never be tripped by an old job dict.
+        'corners': corners,
         'filename': row['filename']
     }
     _crop_queue.put(job)

@@ -62,8 +62,11 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
 
 export default function TagModeBar({
   images,
+  totalResults = 0,   // V32: how many images the current search matches in total,
+                      // not just how many thumbnails the grid has loaded
   selectedIds,
   setSelectedIds,
+  onSelectAllResults, // V32: async () => {ok, count} — selects EVERY match, via the server
   onExit,
   onBulkChanged, // (patchedIds, patchFn) — let Home.jsx update local image state
   onBulkMutated, // () — a bulk write (tag/filmography) just completed; re-sync active filters
@@ -109,6 +112,28 @@ export default function TagModeBar({
   const addDeckMsgTimer = useRef(null);
 
   const count = selectedIds.size;
+
+  // ── Select all results (V32) ───────────────────────────────────────────────
+  const [selectingAll, setSelectingAll] = useState(false);
+  const [selectMsg, setSelectMsg] = useState('');
+  const everythingLoaded = !totalResults || images.length >= totalResults;
+  const allLoadedAndSelected = everythingLoaded && count > 0 && count >= images.length;
+
+  const selectAll = async () => {
+    if (selectingAll) return;
+    setSelectMsg('');
+    // Everything's already on screen — no round trip needed.
+    if (everythingLoaded || !onSelectAllResults) {
+      setSelectedIds(new Set(images.map(i => i.id)));
+      return;
+    }
+    setSelectingAll(true);
+    const result = await onSelectAllResults();
+    setSelectingAll(false);
+    // Never silently select fewer than asked — saying nothing is the exact
+    // failure this button was built to fix.
+    if (!result?.ok) setSelectMsg("Couldn't reach the server — nothing selected.");
+  };
 
   // ── Load fixed category list once ──────────────────────────────────────────
   useEffect(() => {
@@ -461,12 +486,27 @@ export default function TagModeBar({
             {count} selected
           </span>
 
-          <button onClick={() => setSelectedIds(new Set(images.map(i => i.id)))} style={ghostBtn()}>
-            Select all loaded
+          {/* V32: "Select all loaded" used to grab only the thumbnails the
+              grid had scrolled far enough to load — 60 of 118 results, with
+              nothing on screen saying so. Now the button always means every
+              match, and the count in the label is the real one. */}
+          <button
+            onClick={selectAll}
+            disabled={selectingAll || allLoadedAndSelected}
+            title={everythingLoaded
+              ? 'Select every image in these results'
+              : 'Select every image these filters match — including the ones further down that haven\'t loaded yet'}
+            style={{ ...ghostBtn(), opacity: selectingAll ? 0.6 : 1 }}
+          >
+            {selectingAll ? 'Selecting…' : `Select all ${totalResults || images.length}`}
           </button>
           <button onClick={() => setSelectedIds(new Set())} style={ghostBtn()}>
             Clear selection
           </button>
+
+          {selectMsg && (
+            <span style={{ fontSize: '11.5px', color: '#ffb4ab' }}>{selectMsg}</span>
+          )}
 
           {count > 0 && onCrop && (
             <button
@@ -654,9 +694,25 @@ export default function TagModeBar({
             {/* Shared tags panel — only tags every selected image carries */}
             <div style={{ minWidth: '260px', flex: '1 1 260px' }} data-tagmode-area>
               <div style={sectionLabel()}>SHARED TAGS (ALL {summary.total})</div>
+              {/* V32: this list is a strict intersection, and before now it
+                  never said so. Looking for a tag that plainly IS on some of
+                  your photos and not finding it here is baffling unless the
+                  rule is written down — the rule itself is right, because a
+                  Remove button must not be able to touch a photo that never
+                  had the tag. Say it every time, not just when empty. */}
+              {summary.total > 1 && (
+                <div style={{ fontSize: '11px', color: '#8e9099', marginBottom: '9px', lineHeight: 1.5 }}>
+                  Only tags that are on <strong>all {summary.total}</strong> selected photos show up here,
+                  so removing one can never touch a photo that didn't have it.
+                </div>
+              )}
               {summary.tags.length === 0 ? (
-                <div style={{ fontSize: '11.5px', color: '#8e9099' }}>
-                  No tags shared across every image in this selection.
+                <div style={{ fontSize: '11.5px', color: '#8e9099', lineHeight: 1.55 }}>
+                  {summary.total === 1
+                    ? 'This photo has no tags yet.'
+                    : `There isn't a single tag that all ${summary.total} of these photos have in common. ` +
+                      'Select fewer photos to find one — or, to clear a tag out of your whole library, ' +
+                      'search for that tag and use the “Remove tag from all…” button above the grid.'}
                 </div>
               ) : (
                 <>

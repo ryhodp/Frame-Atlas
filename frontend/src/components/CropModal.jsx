@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { detectCropTightened, tightenBox, isFullImageBox } from '../cropDetectV2';
+import {
+  cornersFromBox, cornersToPercent, drawPerspectivePreview,
+  isConvexQuad, isIdentityQuad,
+} from '../perspective';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useToast } from '../ToastContext';
 
@@ -22,6 +26,11 @@ import { useToast } from '../ToastContext';
 const PREFETCH_AHEAD = 2;
 const HANDLE_CORNERS = ['tl', 'tr', 'bl', 'br', 'tc', 'bc', 'lc', 'rc'];
 
+// V32: perspective mode's four free corners, in the order the API expects.
+// Index in this array IS the corner's identity — the server reads them as
+// top-left, top-right, bottom-right, bottom-left.
+const QUAD_LABELS = ['↖', '↗', '↘', '↙'];
+
 const CONFIDENCE_STYLES = {
   high:   { color: '#b8cea1', border: 'rgba(184,206,161,0.45)', bg: 'rgba(184,206,161,0.12)' },
   medium: { color: '#dcbd76', border: 'rgba(201,162,83,0.45)',  bg: 'rgba(201,162,83,0.12)' },
@@ -31,6 +40,11 @@ const CONFIDENCE_STYLES = {
 function snapshotItem(item) {
   return {
     cropBox: item.cropBox ? { ...item.cropBox } : null,
+    // V32: mode and corners ride along in the same snapshot as everything
+    // else, so switching to perspective and dragging a corner are ordinary
+    // undo steps rather than a second, separate history.
+    mode: item.mode,
+    corners: item.corners ? item.corners.map(p => ({ ...p })) : null,
     confidence: item.confidence,
     isFallback: item.isFallback,
     decided: item.decided,
@@ -41,11 +55,47 @@ function snapshotItem(item) {
 
 function applySnapshot(item, snap) {
   item.cropBox = snap.cropBox ? { ...snap.cropBox } : null;
+  item.mode = snap.mode;
+  item.corners = snap.corners ? snap.corners.map(p => ({ ...p })) : null;
   item.confidence = snap.confidence;
   item.isFallback = snap.isFallback;
   item.decided = snap.decided;
   item.redetectLevel = snap.redetectLevel;
   item.tightenLevel = snap.tightenLevel;
+}
+
+// "This image would come out of the pipeline unchanged" — the shared test
+// behind the summary counts and the apply list. Rectangle mode asks
+// cropDetectV2; perspective mode asks whether the quad is still the untouched
+// image bounds. Kept in one place so the two screens can't drift apart.
+function isNoOpSelection(item) {
+  if (item.status !== 'ready') return true;
+  return item.mode === 'perspective'
+    ? isIdentityQuad(item.corners, item.imgEl)
+    : isFullImageBox(item.cropBox, item.imgEl);
+}
+
+// The POST body for one image. Percentages, never pixels — that is what lets
+// the same numbers describe the same selection at any resolution, and it is
+// the property both shapes have to keep.
+//
+// A rectangle sends `box` and NOTHING else, byte-identical to what the modal
+// sent before V32, so nothing about the existing path depends on the new code.
+function buildCropBody(item) {
+  const img = item.imgEl;
+  if (item.mode === 'perspective') {
+    return { corners: cornersToPercent(item.corners, img) };
+  }
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const b = item.cropBox;
+  return {
+    box: {
+      x: (b.x / iw) * 100,
+      y: (b.y / ih) * 100,
+      w: (b.w / iw) * 100,
+      h: (b.h / ih) * 100,
+    },
+  };
 }
 
 export default function CropModal({ images, onClose, onImageCropped }) {
@@ -67,6 +117,10 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       url: null,
       imgEl: null,
       cropBox: null,
+      // V32: 'rect' is and stays the default. Perspective is opt-in per image
+      // — some frames in a batch are tilted screens, most are not.
+      mode: 'rect',        // 'rect' | 'perspective'
+      corners: null,       // 4 points in natural pixels, only in perspective mode
       confidence: 0,
       isFallback: false,
       decided: null,       // null | 'approved' | 'skipped'
@@ -177,7 +231,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     }
     if (autoStartRef.current) return; // Only run once
 
-    const targets = itemsRef.current.filter(i => i.decided === 'approved' && i.status === 'ready' && !isFullImageBox(i.cropBox, i.imgEl));
+    const targets = itemsRef.current.filter(i => i.decided === 'approved' && i.status === 'ready' && !isNoOpSelection(i));
     if (targets.length === 0) return;
 
     autoStartRef.current = true;
@@ -190,20 +244,11 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     (async () => {
       const jobIds = [];
       for (const item of targets) {
-        const iw = item.imgEl.naturalWidth, ih = item.imgEl.naturalHeight;
-        const b = item.cropBox;
         try {
           const res = await fetch(`/api/images/${item.fa.id}/crop`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              box: {
-                x: (b.x / iw) * 100,
-                y: (b.y / ih) * 100,
-                w: (b.w / iw) * 100,
-                h: (b.h / ih) * 100,
-              },
-            }),
+            body: JSON.stringify(buildCropBody(item)),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || `Crop failed (HTTP ${res.status}).`);
@@ -298,6 +343,9 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     const item = items[current];
     if (!item) return;
     if (wasApproved && item.status !== 'ready') return; // can't approve an unloaded/broken image
+    // A crossed quad has no valid transform; the server would reject it, so
+    // don't let the keyboard shortcut sneak it past the disabled button.
+    if (wasApproved && item.mode === 'perspective' && !isConvexQuad(item.corners)) return;
     historyRef.current.push({
       type: 'decision',
       index: current,
@@ -350,10 +398,88 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     force();
   };
 
+  // ── Perspective mode (V32) ────────────────────────────────────────────────
+  // Switching modes is one undo step. Turning perspective ON seeds the four
+  // corners from whatever rectangle is on screen — detection's box if it found
+  // one, the full image if it didn't — so the handles start somewhere sensible.
+  // Ryan explicitly did NOT ask for quadrilateral auto-detection, and there
+  // isn't any: the corners only ever move because he drags them.
+  //
+  // Turning it back OFF leaves cropBox exactly as it was. The rectangle path
+  // is never modified by anything perspective mode does.
+  const togglePerspective = () => {
+    const item = items[current];
+    if (!item || item.status !== 'ready') return;
+    const before = snapshotItem(item);
+    if (item.mode === 'perspective') {
+      item.mode = 'rect';
+    } else {
+      item.mode = 'perspective';
+      if (!item.corners) item.corners = cornersFromBox(item.cropBox, item.imgEl);
+    }
+    pushEdit(current, before, snapshotItem(item));
+  };
+
+  const resetCorners = () => {
+    const item = items[current];
+    if (!item || item.status !== 'ready' || item.mode !== 'perspective') return;
+    const before = snapshotItem(item);
+    item.corners = cornersFromBox(item.cropBox, item.imgEl);
+    pushEdit(current, before, snapshotItem(item));
+  };
+
+  const onCornerPointerDown = (e, idx) => {
+    const item = items[current];
+    if (!item || item.status !== 'ready' || !item.corners) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const rect = origImgRef.current.getBoundingClientRect();
+    dragRef.current = {
+      cornerIndex: idx,
+      startX: e.clientX,
+      startY: e.clientY,
+      startPoint: { ...item.corners[idx] },
+      before: snapshotItem(item),
+      index: current,
+      sx: item.imgEl.naturalWidth / rect.width,
+      sy: item.imgEl.naturalHeight / rect.height,
+    };
+  };
+
+  const onCornerPointerMove = (e) => {
+    const d = dragRef.current;
+    if (!d || d.cornerIndex === undefined) return;
+    const item = items[d.index];
+    const iw = item.imgEl.naturalWidth, ih = item.imgEl.naturalHeight;
+    // Clamped to the image, because the SERVER REJECTS out-of-range corners
+    // rather than clamping them — a corner dragged off-frame would come back
+    // as an error after Apply instead of just stopping at the edge here.
+    const nx = Math.min(iw, Math.max(0, d.startPoint.x + (e.clientX - d.startX) * d.sx));
+    const ny = Math.min(ih, Math.max(0, d.startPoint.y + (e.clientY - d.startY) * d.sy));
+    const next = item.corners.map(p => ({ ...p }));
+    next[d.cornerIndex] = { x: nx, y: ny };
+    item.corners = next;
+    force();
+  };
+
+  const onCornerPointerUp = () => {
+    const d = dragRef.current;
+    if (!d || d.cornerIndex === undefined) return;
+    dragRef.current = null;
+    const item = items[d.index];
+    const p0 = d.startPoint, p1 = item.corners[d.cornerIndex];
+    if (p0.x !== p1.x || p0.y !== p1.y) pushEdit(d.index, d.before, snapshotItem(item));
+  };
+
   // ── Tighten / Redetect (ported semantics) ─────────────────────────────────
+  // Both are rectangle-only: they come from cropDetectV2, which reasons about
+  // axis-aligned lines and has no concept of a tilted quad. The buttons are
+  // disabled in perspective mode; these guards make the keyboard shortcuts
+  // agree with the buttons.
   const doTighten = () => {
     const item = items[current];
-    if (!item || item.status !== 'ready' || !item.cropBox) return;
+    if (!item || item.status !== 'ready' || item.mode !== 'rect' || !item.cropBox) return;
     const before = snapshotItem(item);
     const level = (item.tightenLevel || 0) + 1;
     const { box, changed } = tightenBox(item.imgEl, item.cropBox, level);
@@ -366,7 +492,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
 
   const doRedetect = () => {
     const item = items[current];
-    if (!item || item.status !== 'ready') return;
+    if (!item || item.status !== 'ready' || item.mode !== 'rect') return;
     const before = snapshotItem(item);
     const level = (item.redetectLevel || 0) + 1;
     let result = null;
@@ -398,7 +524,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   // ── Handle dragging (pointer events → works for both mouse and touch) ─────
   const onHandlePointerDown = (e, corner) => {
     const item = items[current];
-    if (!item || item.status !== 'ready' || !item.cropBox) return;
+    if (!item || item.status !== 'ready' || item.mode !== 'rect' || !item.cropBox) return;
     e.preventDefault();
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -417,7 +543,10 @@ export default function CropModal({ images, onClose, onImageCropped }) {
 
   const onHandlePointerMove = (e) => {
     const d = dragRef.current;
-    if (!d) return;
+    // `corner` is the rectangle drag's field; a perspective drag stores
+    // `cornerIndex` instead. Checking for it keeps the two drags from ever
+    // reading each other's half-filled state.
+    if (!d || d.corner === undefined) return;
     const item = items[d.index];
     const iw = item.imgEl.naturalWidth, ih = item.imgEl.naturalHeight;
     const dx = (e.clientX - d.startX) * d.sx;
@@ -449,7 +578,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
 
   const onHandlePointerUp = () => {
     const d = dragRef.current;
-    if (!d) return;
+    if (!d || d.corner === undefined) return;
     dragRef.current = null;
     const item = items[d.index];
     const b0 = d.before.cropBox, b1 = item.cropBox;
@@ -462,7 +591,19 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     if (phase !== 'review') return;
     const item = items[current];
     const canvas = previewCanvasRef.current;
-    if (!canvas || !item || item.status !== 'ready' || !item.cropBox) return;
+    if (!canvas || !item || item.status !== 'ready') return;
+    if (item.mode === 'perspective') {
+      // V32: the result panel has to show the DE-SKEWED picture, not the
+      // rectangle that ignores the tilt — otherwise the preview promises
+      // something the server won't deliver. A crossed outline has no valid
+      // transform, so the panel is left holding the last good frame while
+      // the on-image outline turns red.
+      if (item.corners && isConvexQuad(item.corners)) {
+        drawPerspectivePreview(canvas, item.imgEl, item.corners);
+      }
+      return;
+    }
+    if (!item.cropBox) return;
     const b = item.cropBox;
     canvas.width = b.w;
     canvas.height = b.h;
@@ -483,6 +624,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       else if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); redo(); }
       else if (e.key === 't' || e.key === 'T') { e.preventDefault(); doTighten(); }
       else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); doRedetect(); }
+      else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); togglePerspective(); }
       else if (e.key === 'Escape') { e.preventDefault(); tryClose(); }
     };
     document.addEventListener('keydown', onKey);
@@ -491,7 +633,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
 
   // ── Apply: sequential crop calls against the live endpoint ────────────────
   const cropTargets = () =>
-    items.filter(i => i.decided === 'approved' && i.status === 'ready' && !isFullImageBox(i.cropBox, i.imgEl));
+    items.filter(i => i.decided === 'approved' && i.status === 'ready' && !isNoOpSelection(i));
 
   const applyCrops = async () => {
     const targets = cropTargets();
@@ -502,20 +644,11 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     // V27: Queue all crops immediately instead of waiting for each one
     const jobIds = [];
     for (const item of targets) {
-      const iw = item.imgEl.naturalWidth, ih = item.imgEl.naturalHeight;
-      const b = item.cropBox;
       try {
         const res = await fetch(`/api/images/${item.fa.id}/crop`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            box: {
-              x: (b.x / iw) * 100,
-              y: (b.y / ih) * 100,
-              w: (b.w / iw) * 100,
-              h: (b.h / ih) * 100,
-            },
-          }),
+          body: JSON.stringify(buildCropBody(item)),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `Crop failed (HTTP ${res.status}).`);
@@ -601,7 +734,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   const skippedCount = items.filter(i => i.decided === 'skipped').length;
   const summaryToCrop = phase === 'summary' ? cropTargets().length : 0;
   const summaryUnchanged = phase === 'summary'
-    ? items.filter(i => i.decided === 'approved' && (i.status !== 'ready' || isFullImageBox(i.cropBox, i.imgEl))).length
+    ? items.filter(i => i.decided === 'approved' && isNoOpSelection(i)).length
     : 0;
   const okResults = resultsRef.current.filter(r => r.ok);
   const failedResults = resultsRef.current.filter(r => !r.ok);
@@ -628,6 +761,15 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   const handleSize = isMobile ? 22 : 12;
 
   const confStyle = item && CONFIDENCE_STYLES[item.confidence];
+
+  // V32 derived state. `quadValid` is the same convexity test the server runs,
+  // so a crossed outline is refused on screen (red, Approve disabled) instead
+  // of coming back as a 400 after Ryan has already hit Apply.
+  const isPerspective = item?.mode === 'perspective';
+  const quadValid = !isPerspective || isConvexQuad(item.corners);
+  const quadPoints = isPerspective && item.corners
+    ? item.corners.map(p => `${(p.x / item.imgEl.naturalWidth) * 100},${(p.y / item.imgEl.naturalHeight) * 100}`).join(' ')
+    : '';
 
   const tightenLabel = item?.tightenNote === 'tight'
     ? '✓ Already tight'
@@ -678,22 +820,47 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             <button onClick={goBack} disabled={current <= 0} style={ghostBtn()} title="View previous image (←)">
               ← Back
             </button>
+            {/* V32 mode switch. Rectangle is the default and stays selected
+                unless Ryan turns this on for this one image. */}
             <button
-              onClick={doRedetect}
-              disabled={item?.status !== 'ready' || item?.redetectNote === 'exhausted'}
-              style={ghostBtn()}
-              title="Re-run detection with stricter evidence (R)"
+              onClick={togglePerspective}
+              disabled={item?.status !== 'ready'}
+              style={isPerspective
+                ? { ...ghostBtn('#d9a441', 'rgba(217,164,65,0.55)'), background: 'rgba(217,164,65,0.12)' }
+                : ghostBtn()}
+              title="Switch between a straight rectangle and four free corners for an angled screen or poster (P)"
             >
-              {redetectLabel}
+              {isPerspective ? '◈ Perspective' : '▭ Rectangle'}
             </button>
-            <button
-              onClick={doTighten}
-              disabled={item?.status !== 'ready' || item?.tightenNote === 'tight'}
-              style={ghostBtn()}
-              title="Trim any remaining flat border (T)"
-            >
-              {tightenLabel}
-            </button>
+            {isPerspective ? (
+              <button
+                onClick={resetCorners}
+                disabled={item?.status !== 'ready'}
+                style={ghostBtn()}
+                title="Put the four corners back on the detected rectangle"
+              >
+                ⟲ Reset corners
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={doRedetect}
+                  disabled={item?.status !== 'ready' || item?.redetectNote === 'exhausted'}
+                  style={ghostBtn()}
+                  title="Re-run detection with stricter evidence (R)"
+                >
+                  {redetectLabel}
+                </button>
+                <button
+                  onClick={doTighten}
+                  disabled={item?.status !== 'ready' || item?.tightenNote === 'tight'}
+                  style={ghostBtn()}
+                  title="Trim any remaining flat border (T)"
+                >
+                  {tightenLabel}
+                </button>
+              </>
+            )}
             <button onClick={undo} disabled={!historyRef.current.length} style={ghostBtn()} title="Undo last action (Z)">
               ↩
             </button>
@@ -709,14 +876,14 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             </button>
             <button
               onClick={() => recordAndAdvance(true)}
-              disabled={item?.status !== 'ready'}
+              disabled={item?.status !== 'ready' || !quadValid}
               style={{
                 background: '#d9a441', color: '#3d2f00', border: 'none',
                 borderRadius: '8px', padding: '7px 16px', fontSize: '12.5px',
                 fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                opacity: item?.status === 'ready' ? 1 : 0.4,
+                opacity: item?.status === 'ready' && quadValid ? 1 : 0.4,
               }}
-              title="Approve this crop (Space)"
+              title={quadValid ? 'Approve this crop (Space)' : 'Fix the crossed corners first'}
             >
               Approve
             </button>
@@ -744,7 +911,9 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             {/* Original + handles */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#4a4a52', minWidth: 0, minHeight: 0 }}>
               <div style={panelLabel()}>
-                ORIGINAL — DRAG HANDLES TO ADJUST
+                {isPerspective
+                  ? 'ORIGINAL — DRAG EACH CORNER ONTO THE REAL CORNER'
+                  : 'ORIGINAL — DRAG HANDLES TO ADJUST'}
               </div>
               <div style={{
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -763,7 +932,53 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                         objectFit: 'contain', userSelect: 'none',
                       }}
                     />
-                    {item.cropBox && (
+                    {/* V32: four free corners. Rendered INSTEAD of the
+                        rectangle overlay, never alongside it, so there is
+                        never a question about which shape is being applied.
+                        The outline is an SVG polygon because a div can only
+                        ever be a rectangle. */}
+                    {isPerspective && item.corners && (
+                      <div style={{ position: 'absolute', inset: 0 }}>
+                        <svg
+                          viewBox="0 0 100 100"
+                          preserveAspectRatio="none"
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+                        >
+                          <polygon
+                            points={quadPoints}
+                            fill={quadValid ? 'rgba(217,164,65,0.10)' : 'rgba(207,113,82,0.16)'}
+                            stroke={quadValid ? '#d9a441' : '#cf7152'}
+                            strokeWidth="0.4"
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        </svg>
+                        {item.corners.map((p, idx) => (
+                          <div
+                            key={idx}
+                            onPointerDown={e => onCornerPointerDown(e, idx)}
+                            onPointerMove={onCornerPointerMove}
+                            onPointerUp={onCornerPointerUp}
+                            onPointerCancel={onCornerPointerUp}
+                            title={`Corner ${QUAD_LABELS[idx]} — drag onto the real corner of the screen or poster`}
+                            style={{
+                              position: 'absolute',
+                              left: `${(p.x / item.imgEl.naturalWidth) * 100}%`,
+                              top: `${(p.y / item.imgEl.naturalHeight) * 100}%`,
+                              width: `${handleSize + 4}px`, height: `${handleSize + 4}px`,
+                              background: quadValid ? '#d9a441' : '#cf7152',
+                              border: '2px solid rgba(0,0,0,0.45)',
+                              borderRadius: '50%',
+                              transform: 'translate(-50%, -50%)',
+                              cursor: 'move',
+                              touchAction: 'none',
+                              zIndex: 10,
+                              boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {!isPerspective && item.cropBox && (
                       <div style={{ position: 'absolute', inset: 0 }}>
                         <div style={{
                           position: 'absolute',
@@ -820,8 +1035,20 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             {/* Cropped result */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#4a4a52', minWidth: 0, minHeight: 0 }}>
               <div style={{ ...panelLabel(), color: '#d9a441', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                CROPPED RESULT
-                {item?.status === 'ready' && !item.isFallback && confStyle && (
+                {isPerspective ? 'STRAIGHTENED RESULT' : 'CROPPED RESULT'}
+                {isPerspective && !quadValid && (
+                  <span style={{
+                    fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
+                    borderRadius: '3px', padding: '1px 6px',
+                    color: '#cf7152', background: 'rgba(207,113,82,0.12)', border: '1px solid rgba(207,113,82,0.45)',
+                  }}>
+                    ⚠ CORNERS CROSS OVER — UNCROSS THEM
+                  </span>
+                )}
+                {/* Confidence describes the RECTANGLE detector's certainty, so
+                    it says nothing about a hand-placed quad — hidden rather
+                    than shown as a stale number from before the switch. */}
+                {!isPerspective && item?.status === 'ready' && !item.isFallback && confStyle && (
                   <span style={{
                     fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
                     borderRadius: '3px', padding: '1px 6px', letterSpacing: '0.06em',
@@ -831,7 +1058,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                     {item.confidence}
                   </span>
                 )}
-                {item?.status === 'ready' && item.isFallback && (
+                {!isPerspective && item?.status === 'ready' && item.isFallback && (
                   <span style={{
                     fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
                     borderRadius: '3px', padding: '1px 6px',
@@ -866,7 +1093,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           }}>
             {!isMobile && (
               <span style={{ fontSize: '11px', color: '#65625a' }}>
-                <Kbd>Space</Kbd> approve · <Kbd>⌫</Kbd> skip · <Kbd>←</Kbd> back · <Kbd>Z</Kbd> undo · <Kbd>⇧Z</Kbd> redo · <Kbd>T</Kbd> tighten · <Kbd>R</Kbd> redetect
+                <Kbd>Space</Kbd> approve · <Kbd>⌫</Kbd> skip · <Kbd>←</Kbd> back · <Kbd>Z</Kbd> undo · <Kbd>⇧Z</Kbd> redo · <Kbd>T</Kbd> tighten · <Kbd>R</Kbd> redetect · <Kbd>P</Kbd> perspective
               </span>
             )}
             <div style={{ flex: 1 }} />
@@ -1093,7 +1320,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
 // of the JSX so the counting logic (which mirrors the summary screen) stays
 // in one readable place.
 function summaryUnchangedText(items) {
-  const n = items.filter(i => i.decided === 'approved' && (i.status !== 'ready' || isFullImageBox(i.cropBox, i.imgEl))).length;
+  const n = items.filter(i => i.decided === 'approved' && isNoOpSelection(i)).length;
   return n > 0 ? `${n} approved with no crop needed · ` : '';
 }
 

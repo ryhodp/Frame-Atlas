@@ -5,8 +5,10 @@ import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
 import UploadProgressBadge from '../components/UploadProgressBadge';
 import TagModeBar from '../components/TagModeBar';
+import TagRemovalPreview from '../components/TagRemovalPreview';
 import CropModal from '../components/CropModal';
 import { useAuth } from '../AuthContext';
+import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
 
 const PRESET_SWATCHES = [
@@ -73,11 +75,17 @@ export default function Home() {
   const [tagMode, setTagMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
 
+  // ── V32: library-wide tag cleanup — the chip whose tag is being removed
+  //         from every result of the current search, or null ─────────────────
+  const [removingTag, setRemovingTag] = useState(null);
+  const [tagRemovalMsg, setTagRemovalMsg] = useState('');
+
   // ── V18: crop review modal — array of images to crop, or null ──────────────
   const [cropImages, setCropImages] = useState(null);
   const [dragRect, setDragRect] = useState(null); // {left, top, width, height} in viewport coords, or null
   const tileRefs = useRef(new Map()); // image id -> tile DOM node
   const dragStateRef = useRef(null); // { startX, startY, dragging, baseSelected }
+  const rangeAnchorRef = useRef(null); // last tile clicked — the far end of a shift-click range
   const justDraggedRef = useRef(false); // true for the brief window between mouseup-after-drag and the resulting click
 
   const searchRef = useRef(null);
@@ -115,6 +123,26 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [prom, exact]);
 
+  // ── The active filter, as query params ─────────────────────────────────────
+  // One place builds this. The grid, the "select all N results" button and the
+  // tag-removal preview all ask the server the SAME question, and if each one
+  // assembled its own params they would drift — a select-all that grabs a
+  // different set of photos than the grid is showing would be worse than
+  // having no select-all at all.
+  const buildFilterParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (chips.length) params.set('chips', chips.join(','));
+    if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
+    if (color) {
+      params.set('color', color);
+      params.set('prom', promApplied);
+      params.set('exact', exactApplied);
+    }
+    if (film) params.set('film', film);
+    if (ar) params.set('ar', ar);
+    return params;
+  }, [chips, nlChips, color, film, ar, promApplied, exactApplied]);
+
   // ── Fetch one page of results; append=true keeps existing images ───────────
   const fetchPage = useCallback(async (pageNum, append) => {
     // Only appends need the in-flight guard — that's what stops infinite
@@ -127,16 +155,7 @@ export default function Home() {
     const reqId = ++searchRequestId.current;
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (chips.length) params.set('chips', chips.join(','));
-      if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
-      if (color) {
-        params.set('color', color);
-        params.set('prom', promApplied);
-        params.set('exact', exactApplied);
-      }
-      if (film) params.set('film', film);
-      if (ar) params.set('ar', ar);
+      const params = buildFilterParams();
       // No filters → default browse view → ask the server for this visit's shuffle
       if (!chips.length && !nlChips.length && !color && !film && !ar) {
         params.set('seed', shuffleSeedRef.current);
@@ -158,7 +177,7 @@ export default function Home() {
         fetchingRef.current = false;
       }
     }
-  }, [chips, nlChips, color, film, ar, promApplied, exactApplied]);
+  }, [buildFilterParams, chips, nlChips, color, film, ar]);
 
   // Filters changed → reset to page 0 (skip while in Find Similar mode)
   useEffect(() => {
@@ -526,13 +545,54 @@ export default function Home() {
     });
   };
 
-  const toggleTileSelection = (id) => {
+  // Shift-click adds a whole run of photos at once (see selectionRange.js for
+  // why the run follows server order, not screen position). Shift only ever
+  // ADDS; it never unselects, so a mis-aimed shift-click can't quietly wipe a
+  // selection you spent a minute building.
+  const toggleTileSelection = (id, extendRange) => {
+    if (extendRange) {
+      const rangeIds = rangeIdsBetween(images, rangeAnchorRef.current, id);
+      if (rangeIds.length) {
+        setSelectedIds(prev => new Set([...prev, ...rangeIds]));
+        rangeAnchorRef.current = id;
+        return;
+      }
+    }
     setSelectedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+    rangeAnchorRef.current = id;
   };
+
+  // Select every image the current filter matches, not just the pages the
+  // browser has scrolled far enough to load. Asking the server for the id
+  // list is what makes this cheap and honest: a few kilobytes of numbers
+  // instead of force-loading every remaining page of thumbnails, and it comes
+  // from the same filter code the grid's own results do.
+  const selectAllResults = useCallback(async () => {
+    // Find Similar doesn't go through /api/search and always returns its whole
+    // result set in one shot, so everything is already on screen.
+    if (similarTo) {
+      setSelectedIds(new Set(images.map(i => i.id)));
+      return { ok: true, count: images.length };
+    }
+    try {
+      const res = await fetch(`/api/search/ids?${buildFilterParams()}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'failed');
+      const ids = data.ids || [];
+      setSelectedIds(new Set(ids));
+      return { ok: true, count: ids.length };
+    } catch (e) {
+      console.error('Select all results failed', e);
+      // Deliberately leave the selection untouched rather than quietly
+      // falling back to "the loaded ones" — silently selecting a smaller set
+      // than asked for is the exact trap this feature exists to fix.
+      return { ok: false, count: 0 };
+    }
+  }, [similarTo, images, buildFilterParams]);
 
   // Apply a bulk patch to any currently-loaded images that were part of the bulk op
   const handleBulkTagsChanged = (ids, patchFn) => {
@@ -1174,8 +1234,12 @@ export default function Home() {
                 >×</button>
               </span>
             )}
+            {/* Exact-tag chips. The # and the tooltip exist because these look
+                almost identical to the natural-language chips below them, and
+                not knowing which kind you had is what made a bulk tag edit
+                come up empty — the two find completely different photos. */}
             {chips.map(chip => (
-              <span key={chip} style={{
+              <span key={chip} title={`Exact tag — showing only photos actually tagged “${chip}”`} style={{
                 display: 'inline-flex', alignItems: 'center', gap: '6px',
                 background: 'rgba(201,162,83,0.12)',
                 border: '1px solid rgba(201,162,83,0.35)',
@@ -1183,7 +1247,7 @@ export default function Home() {
                 padding: '4px 8px 4px 9px',
                 fontSize: '12.5px', color: '#c9a253', fontWeight: 500
               }}>
-                {chip}
+                <span style={{ opacity: 0.65 }}>#</span>{chip}
                 <button
                   onClick={() => removeChip(chip)}
                   style={{
@@ -1200,7 +1264,7 @@ export default function Home() {
             {nlChips.map(nl => (
               <span
                 key={nl.phrase}
-                title={`Interpreted as: ${nl.tags.join(', ')}`}
+                title={`Describe-it search — finds photos tagged any of: ${nl.tags.join(', ')}`}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '6px',
                   background: 'rgba(139,124,246,0.12)',
@@ -1237,6 +1301,32 @@ export default function Home() {
             >
               Clear all
             </button>
+          </div>
+        )}
+
+        {/* The search bar has two modes that used to look the same: picking a
+            tag from the dropdown filters by that exact tag, while typing a
+            phrase and pressing Enter looks for photos that FEEL like it. The
+            second one returns photos that don't carry the word you typed,
+            which is bewildering if nobody tells you — so say it out loud
+            whenever a describe-it search is on. */}
+        {nlChips.length > 0 && (
+          <div style={{
+            display: 'flex', gap: '8px', marginTop: '10px',
+            padding: '8px 12px',
+            background: 'rgba(139,124,246,0.07)',
+            border: '1px solid rgba(139,124,246,0.22)',
+            borderRadius: '7px',
+            fontSize: '11.5px', color: '#a99bf7', lineHeight: 1.55
+          }}>
+            <span style={{ flexShrink: 0 }}>ⓘ</span>
+            <span>
+              The dashed violet {nlChips.length === 1 ? 'chip is a' : 'chips are'} <strong>describe-it
+              {nlChips.length === 1 ? ' search' : ' searches'}</strong> — {nlChips.length === 1 ? 'it looks' : 'they look'} for
+              photos that feel like {nlChips.length === 1 ? 'that phrase' : 'those phrases'}, so the results may not carry that
+              exact tag. To filter by a real tag instead, type it and pick it from the dropdown list —
+              those chips are gold and start with a #.
+            </span>
           </div>
         )}
 
@@ -1296,6 +1386,32 @@ export default function Home() {
             display: 'inline-block',
             animation: 'spin 0.7s linear infinite'
           }} />
+        )}
+
+        {/* V32: clean a bad tag out of the whole library without clicking each
+            photo. Only offered for exact-tag chips — a describe-it search
+            matches photos that were never tagged the word you typed, so there
+            would be nothing there to remove. Amber, and worded around the
+            tag, so it can't be mistaken for the red Delete in Select Mode:
+            this takes a label off, that moves the picture out of the library. */}
+        {isAdmin && !similarTo && total > 0 && chips.map(chip => (
+          <button
+            key={`cleanup-${chip}`}
+            onClick={() => setRemovingTag(chip)}
+            title={`Take the tag “${chip}” off every photo in these results. The photos themselves are not touched.`}
+            style={{
+              background: 'rgba(217,164,65,0.10)',
+              border: '1px solid rgba(217,164,65,0.35)',
+              color: '#dcbd76', borderRadius: '7px', padding: '5px 11px',
+              cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
+            }}
+          >
+            Remove tag “{chip}” from all {total}…
+          </button>
+        ))}
+
+        {tagRemovalMsg && (
+          <span style={{ fontSize: '11.5px', color: '#b8cea1' }}>{tagRemovalMsg}</span>
         )}
 
         <div style={{ flex: 1 }} />
@@ -1469,11 +1585,11 @@ export default function Home() {
                       tileRefs.current.delete(img.id);
                     }
                   }}
-                  onClick={() => {
+                  onClick={(e) => {
                     if (tagMode) {
                       // Don't toggle if this click was the tail end of a drag
                       if (justDraggedRef.current) return;
-                      toggleTileSelection(img.id);
+                      toggleTileSelection(img.id, e.shiftKey);
                     } else {
                       setSelectedImage(img);
                     }
@@ -1650,6 +1766,28 @@ export default function Home() {
         />
       )}
 
+      {/* V32: preview-then-remove a tag across every result of this search */}
+      {removingTag && (
+        <TagRemovalPreview
+          value={removingTag}
+          filterParams={buildFilterParams().toString()}
+          onClose={() => setRemovingTag(null)}
+          onRemoved={(removed, failedBatches) => {
+            setRemovingTag(null);
+            setTagRemovalMsg(
+              failedBatches > 0
+                ? `Removed the tag from ${removed} photos — ${failedBatches} batch${failedBatches === 1 ? '' : 'es'} didn't go through, try again.`
+                : `Removed the tag from ${removed} photo${removed === 1 ? '' : 's'}.`
+            );
+            setTimeout(() => setTagRemovalMsg(''), 6000);
+            // Re-run the search rather than patching state here: photos that
+            // just lost the very tag we're filtered by no longer belong on
+            // screen, and the server already knows how to work that out.
+            handleBulkMutated();
+          }}
+        />
+      )}
+
       {/* Duplicate review modal */}
       {showDuplicates && (
         <DuplicateReview
@@ -1662,8 +1800,10 @@ export default function Home() {
       {tagMode && (
         <TagModeBar
           images={images}
+          totalResults={similarTo ? images.length : total}
           selectedIds={selectedIds}
           setSelectedIds={setSelectedIds}
+          onSelectAllResults={selectAllResults}
           onExit={toggleTagMode}
           onBulkChanged={handleBulkTagsChanged}
           onBulkMutated={handleBulkMutated}
