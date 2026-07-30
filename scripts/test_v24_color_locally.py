@@ -259,7 +259,7 @@ def main():
         return n
 
     assert null_share_count() > 0, "expected the nulled rows from check 13"
-    mod.backfill_palette_shares()
+    mod.backfill_palettes()
     for _ in range(100):
         time.sleep(0.05)
         if null_share_count() == 0:
@@ -274,7 +274,7 @@ def main():
     conn = sqlite3.connect(db_path)
     before = conn.execute("SELECT id, image_id, hex, share FROM colors ORDER BY id").fetchall()
     conn.close()
-    mod.backfill_palette_shares()
+    mod.backfill_palettes()
     time.sleep(0.4)
     conn = sqlite3.connect(db_path)
     after = conn.execute("SELECT id, image_id, hex, share FROM colors ORDER BY id").fetchall()

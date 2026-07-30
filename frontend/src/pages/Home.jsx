@@ -25,11 +25,30 @@ const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP' };
 const DEFAULT_PROM = 6;    // percent of frame
 const DEFAULT_EXACT = 60;  // 0 = any nearby hue, 100 = near-identical hue
 
-// Coverage runs on a log scale (0.5%–40%): most of the useful range sits low,
-// so a linear slider would bunch every meaningful setting into its first inch.
-const PROM_MIN = 0.5, PROM_SPAN = 80;
+// V33: the slider runs 0.5%–95%, not 0.5%–40%. The old 40% ceiling was
+// arbitrary — a real photo's biggest single color reaches 96% of the frame,
+// and 16 of 19 of Ryan's reference shots have a color over 40%. Capping at 40
+// meant "orange is the whole shot" was a question you literally could not ask.
+// Log scale because most of the useful range sits low: a linear slider would
+// bunch every meaningful setting into its first inch.
+const PROM_MIN = 0.5, PROM_SPAN = 190;   // 0.5 * 190 = 95% at the top
 const posToProm = (pos) => +(PROM_MIN * Math.pow(PROM_SPAN, pos / 100)).toFixed(1);
 const promToPos = (p) => Math.round(100 * Math.log(p / PROM_MIN) / Math.log(PROM_SPAN));
+
+// The slider asks "how much does this color OWN the frame", so it's labelled
+// the way Ryan described it rather than as a bare percentage: low means a red
+// shirt or red lipstick, high means a red backdrop. Above 50% the color is
+// automatically the largest thing in frame — nothing else has room to beat it
+// — which is why no separate "dominant color" toggle was needed.
+const promLabel = (p) =>
+  p < 3  ? 'a small accent' :
+  p < 10 ? 'a noticeable part' :
+  p < 25 ? 'a major element' :
+  p < 50 ? 'most of the frame' :
+           'fills the frame';
+
+// V33: exactness now controls hue AND brightness together, because brown is
+// not its own hue — brown IS dark orange. See EXACTNESS_TIGHT_VAL in app.py.
 const exactLabel = (e) => (e < 25 ? 'very loose' : e < 50 ? 'loose' : e < 75 ? 'close' : 'exact');
 
 export default function Home() {
@@ -1096,10 +1115,14 @@ export default function Home() {
           )}
         </div>
 
-        {/* V24: coverage + hue-match sliders. Only meaningful with a color
+        {/* V24: dominance + shade-match sliders. Only meaningful with a color
             picked, so they stay out of the way until then. The live match
             count is the whole point — it turns "is 6% right?" into something
-            you can see instead of guess. */}
+            you can see instead of guess.
+            V33 renamed both: "coverage" read as a bare percentage nobody could
+            picture, and "hue match" promised something hue alone cannot deliver
+            (brown and orange are the same hue, so only brightness separates
+            them). The words now describe what the knobs actually do. */}
         {color && (
           <div style={{
             display: 'flex', alignItems: 'center', flexWrap: 'wrap',
@@ -1112,19 +1135,22 @@ export default function Home() {
             {[
               {
                 key: 'prom',
-                label: 'COVERAGE',
-                value: `at least ${prom}% of frame`,
+                label: 'DOMINANCE',
+                value: `${promLabel(prom)} · ${prom}%`,
                 pos: promToPos(prom),
                 onChange: (pos) => setProm(posToProm(pos)),
-                hint: 'How much of the frame this color has to fill'
+                hint: 'How much this color owns the shot — drag left for an '
+                    + 'accent like a red shirt, right for a red backdrop'
               },
               {
                 key: 'exact',
-                label: 'HUE MATCH',
+                label: 'SHADE MATCH',
                 value: exactLabel(exact),
                 pos: exact,
                 onChange: (pos) => setExact(pos),
-                hint: 'How close the shade has to be to the one you picked'
+                hint: 'How close the shade has to be to the one you picked, in '
+                    + 'both color and brightness — drag right to stop dark '
+                    + 'brown counting as orange'
               }
             ].map(s => (
               <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
@@ -1142,7 +1168,7 @@ export default function Home() {
                 />
                 <span style={{
                   fontSize: '11.5px', color: '#9c988d', whiteSpace: 'nowrap',
-                  minWidth: s.key === 'prom' ? '128px' : '62px'
+                  minWidth: s.key === 'prom' ? '152px' : '62px'
                 }}>{s.value}</span>
               </div>
             ))}

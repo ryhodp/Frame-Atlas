@@ -844,6 +844,18 @@ def init_db():
     except Exception:
         pass
 
+    # V33: which build of extract_palette() produced this row. NULL = before
+    # versioning existed. backfill_palettes() rebuilds anything older than
+    # PALETTE_VERSION, so an algorithm change can't leave the library half-old
+    # and half-new — which would make colour search silently inconsistent
+    # between two photos that look the same.
+    try:
+        c.execute("ALTER TABLE colors ADD COLUMN palette_version INTEGER")
+        conn.commit()
+        print("[migration] Added palette_version column to colors")
+    except Exception:
+        pass
+
     c.execute("""
         INSERT INTO users (id, username, password_hash)
         SELECT 1, 'ryan', ''
@@ -2030,6 +2042,35 @@ def hydrate_image_rows(c, rows):
         for r in rows
     ]
 
+# ── V33: PALETTE MERGE GUARDS ──────────────────────────────────────────────
+# A palette entry means "this color FAMILY", and merged-away shades donate
+# their share to the family (V24). That is what makes a wall split into
+# dark/mid/bright red read as one big red. It is also what made colour search
+# lie: nothing stopped a family from absorbing something it had no business
+# absorbing, and the search only ever tests the family's stored representative.
+#
+# PALETTE_DARK_V matches the near-black guard in color_matches() on purpose.
+# Below it, hue is numerically unstable and physically meaningless — the
+# difference between #020100 and #000102 is one bit of sensor noise but a
+# 180-degree swing in reported hue. Anything under this is shadow, whatever
+# its nominal saturation says.
+PALETTE_DARK_V = 0.12
+PALETTE_GRAY_S = 0.16        # same cut the binning step uses
+PALETTE_MERGE_HUE_TOL = 0.09  # 32 degrees — a family may span a real gradient
+
+
+def _is_shadow_or_gray(s, v):
+    """Is this HSV triple one whose hue carries no usable information?"""
+    return s < PALETTE_GRAY_S or v < PALETTE_DARK_V
+
+
+# Bumped whenever extract_palette()'s output would change for the same input.
+# backfill_palettes() rebuilds anything stamped older than this, so a change
+# to the algorithm can't leave the library half-old and half-new. NULL means
+# "extracted before versioning existed" and is always rebuilt.
+PALETTE_VERSION = 2
+
+
 def extract_palette(image_data, num_colors=10):
     """Vibrance-weighted palette. Colors are scored by area x saturation, so a
     small patch of vivid red outranks a large gray wall. Binning happens in HSV,
@@ -2075,20 +2116,34 @@ def extract_palette(image_data, num_colors=10):
             # dark green == dark brown and white == pale sage. Colors from
             # different hue families never merge unless nearly identical.
             # Returns the index of the color that absorbs this one, else None.
+            #
+            # V33: a bin may only join a family it actually belongs to. HSV
+            # saturation is meaningless once a color is nearly black — #020100
+            # reports saturation 1.0 and hue 30, arithmetically indistinguish-
+            # able from a vivid orange — so the old "both saturated" branch
+            # happily merged pure shadow into a dark warm entry, and the
+            # shadow then DONATED its share to it. Measured on Flex 3.jpg:
+            # search reported 54% orange where only 9.5% of the frame was
+            # orange, the gap being a #020100 bin covering 39% of the frame.
+            # Classify by the same rule the binning step above uses, and never
+            # merge across that divide in either direction.
             h1, s1, v1 = colorsys.rgb_to_hsv(rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0)
+            n1 = _is_shadow_or_gray(s1, v1)
             for i, c in enumerate(chosen):
                 h2, s2, v2 = colorsys.rgb_to_hsv(c[0]/255.0, c[1]/255.0, c[2]/255.0)
+                if _is_shadow_or_gray(s2, v2) != n1:
+                    continue
+                if n1:
+                    if abs(v1 - v2) < 0.25:  # spread neutrals across brightness
+                        return i
+                    continue
                 d = _dist(rgb, c)
                 if d < 120:  # nearly identical regardless of hue
                     return i
-                if s1 > 0.16 and s2 > 0.16:
-                    hd = abs(h1 - h2)
-                    hd = min(hd, 1 - hd)  # hue wraps around the color wheel
-                    if d < 450 and hd < 0.09:
-                        return i
-                elif s1 <= 0.16 and s2 <= 0.16:
-                    if abs(v1 - v2) < 0.25:  # spread neutrals across brightness
-                        return i
+                hd = abs(h1 - h2)
+                hd = min(hd, 1 - hd)  # hue wraps around the color wheel
+                if d < 450 and hd < PALETTE_MERGE_HUE_TOL:
+                    return i
             return None
 
         chromatic.sort(reverse=True)
@@ -2122,22 +2177,30 @@ def extract_palette(image_data, num_colors=10):
     except Exception:
         return []
 
-def backfill_palette_shares():
-    """V24 one-time self-heal: give pre-V24 palettes their coverage numbers.
+def backfill_palettes():
+    """Self-heal any palette older than PALETTE_VERSION (V24 shares, V33 merge
+    fix). Rebuilding from the stored thumbnails costs no Drive or Gemini calls
+    and runs at roughly 20ms an image.
 
-    extract_palette() always knew what fraction of the frame each colour
-    covered, but nothing stored it until V24, so every palette extracted
-    before this release has share NULL and the coverage slider has nothing
-    to filter on. Rebuilding from the stored thumbnails costs no Drive or
-    Gemini calls and runs at roughly 20ms an image.
+    V24 gave every entry a `share`; rows from before that have share NULL.
+    V33 stopped shadow bins from donating their share to a colour family, so
+    every palette stored before it OVERSTATES how much of the frame its warm
+    colours cover — the numbers are wrong, not merely missing, which is why
+    this keys off a version stamp instead of a NULL check.
 
     Runs in a background thread so a large library can't delay boot, and
-    self-disables: once every row has a share, the query finds nothing and
-    this returns immediately on all later boots."""
+    self-disables: once every row is stamped current the query finds nothing
+    and this returns immediately on all later boots."""
     try:
         conn = get_db()
+        # `share IS NULL` is redundant against a correctly-stamped row —
+        # save_palette() always writes both together — but it keeps the V24
+        # guarantee that no share-less row can survive a boot, even if some
+        # future code path writes one without a version.
         pending = [r['image_id'] for r in conn.execute(
-            'SELECT DISTINCT image_id FROM colors WHERE share IS NULL'
+            'SELECT DISTINCT image_id FROM colors'
+            ' WHERE palette_version IS NULL OR palette_version < ? OR share IS NULL',
+            (PALETTE_VERSION,)
         ).fetchall()]
         conn.close()
     except Exception as e:
@@ -2148,7 +2211,7 @@ def backfill_palette_shares():
         return
 
     def _job():
-        done = failed = 0
+        done = failed = unrepairable = 0
         for image_id in pending:
             try:
                 conn = get_db()
@@ -2156,20 +2219,30 @@ def backfill_palette_shares():
                     'SELECT id, user_id, thumbnail_blob FROM images WHERE id = ?', (image_id,)
                 ).fetchone()
                 conn.close()
+                # No thumbnail, or one Pillow can't read, means this palette can
+                # never be rebuilt — and it will be retried on every future boot
+                # forever. Count it out loud: silently skipping is what made the
+                # pre-V33 blind spot invisible in the logs.
                 if not row or not row['thumbnail_blob']:
+                    unrepairable += 1
                     continue
                 entries = extract_palette(row['thumbnail_blob'])
-                if entries:
-                    save_palette(row['id'], row['user_id'], entries)
-                    done += 1
+                if not entries:
+                    unrepairable += 1
+                    continue
+                save_palette(row['id'], row['user_id'], entries)
+                done += 1
             except Exception as e:
                 failed += 1
                 print(f"[palette-backfill] Image {image_id} failed: {e}")
-        print(f"[palette-backfill] Rebuilt {done} palette(s) with coverage data"
+        print(f"[palette-backfill] Rebuilt {done} palette(s) to v{PALETTE_VERSION}"
               + (f", {failed} failed" if failed else "")
-              + ". Colour search coverage is now live.")
+              + (f", {unrepairable} unrepairable (no usable thumbnail)"
+                 if unrepairable else "")
+              + ". Colour search is now reading corrected coverage.")
 
-    print(f"[palette-backfill] {len(pending)} palette(s) predate V24 — rebuilding in background.")
+    print(f"[palette-backfill] {len(pending)} palette(s) older than "
+          f"v{PALETTE_VERSION} — rebuilding in background.")
     threading.Thread(target=_job, daemon=True).start()
 
 
@@ -2307,8 +2380,9 @@ def save_palette(image_id, user_id, entries):
         else:
             hex_color, share = entry, None
         c.execute(
-            'INSERT INTO colors (image_id, user_id, hex, rank, share) VALUES (?, ?, ?, ?, ?)',
-            (image_id, user_id, hex_color, rank, share)
+            'INSERT INTO colors (image_id, user_id, hex, rank, share, palette_version)'
+            ' VALUES (?, ?, ?, ?, ?, ?)',
+            (image_id, user_id, hex_color, rank, share, PALETTE_VERSION)
         )
     conn.commit()
     conn.close()
@@ -2342,6 +2416,22 @@ EXACTNESS_TIGHT_DEG = 6.0    # exactness = 100
 DEFAULT_EXACTNESS = 60.0     # ~15 deg: keeps crimson/brick/burgundy, drops brown/rust
 DEFAULT_PROMINENCE = 6.0     # percent of frame
 
+# V33: the exactness slider also controls a BRIGHTNESS tolerance, because for
+# warm colors hue alone physically cannot do the job. Brown is not its own
+# hue — brown IS dark orange, sitting within a couple of degrees of it on the
+# wheel (measured: picked orange #E08840 at 27 deg, mid brown #8B5A2B at 29,
+# near-black brown #241205 at 25). Dragging exactness to maximum therefore
+# used to discard bright amber and pale gold — colors Ryan would call orange —
+# while keeping every brown down to brightness 0.14. That is backwards.
+#
+# This is deliberately NOT a third slider. Hue-tightness and brightness-
+# tightness point the same direction for every warm color, and the control
+# already reads as "be pickier", so folding them keeps two knobs instead of
+# three. The V24 red calibration is unaffected: red's neighbours differ in
+# hue, so the hue test was already doing the work there.
+EXACTNESS_LOOSE_VAL = 0.90   # exactness = 0   -> effectively unconstrained
+EXACTNESS_TIGHT_VAL = 0.22   # exactness = 100 -> must be about as bright
+
 
 def _hsv(hex_color):
     import colorsys
@@ -2356,8 +2446,19 @@ def exactness_to_hue_tol(exactness):
     return deg / 360.0
 
 
-def color_matches(picked_hex, candidate_hex, hue_tol):
-    """Does one palette entry count as the picked color?"""
+def exactness_to_value_tol(exactness):
+    """0-100 slider -> allowed brightness difference (HSV value, 0-1)."""
+    e = max(0.0, min(100.0, float(exactness)))
+    return EXACTNESS_LOOSE_VAL - (e / 100.0) * (EXACTNESS_LOOSE_VAL - EXACTNESS_TIGHT_VAL)
+
+
+def color_matches(picked_hex, candidate_hex, hue_tol, value_tol=None):
+    """Does one palette entry count as the picked color?
+
+    value_tol is the V33 brightness rule. It defaults to None = no brightness
+    constraint beyond the hard near-black floor, which keeps every non-search
+    caller (notably the duplicate-detection color gate, calibrated in V29/V30
+    to 0 false positives across 38 cases) behaving exactly as before."""
     try:
         hp, sp, vp = _hsv(picked_hex)
         hc, sc, vc = _hsv(candidate_hex)
@@ -2375,8 +2476,13 @@ def color_matches(picked_hex, candidate_hex, hue_tol):
     # however close its nominal hue reads.
     if sc < 0.22:
         return False
-    # Near-black entries have unstable hue; don't let them count.
-    if vc < 0.12:
+    # Near-black entries have unstable hue; don't let them count. This floor
+    # is physical, not a preference, so it applies at every slider setting.
+    if vc < PALETTE_DARK_V:
+        return False
+    # V33: brightness distance. Symmetric on purpose — picking a bright orange
+    # rejects dark brown, and picking a dark brown rejects bright orange.
+    if value_tol is not None and abs(vp - vc) > value_tol:
         return False
 
     hd = abs(hp - hc)
@@ -2394,7 +2500,7 @@ def color_matches(picked_hex, candidate_hex, hue_tol):
     return abs(sp - sc) <= 0.55
 
 
-def color_match_share(picked_hex, entries, hue_tol):
+def color_match_share(picked_hex, entries, hue_tol, value_tol=None):
     """Summed share of every palette entry matching the picked color.
 
     entries: list of (hex, share). A wall extracted as dark/mid/bright red
@@ -2405,7 +2511,7 @@ def color_match_share(picked_hex, entries, hue_tol):
     for hex_color, share in entries:
         if share is None:
             continue
-        if color_matches(picked_hex, hex_color, hue_tol):
+        if color_matches(picked_hex, hex_color, hue_tol, value_tol):
             total += share
     return total
 
@@ -3204,6 +3310,7 @@ def build_search_filters(c, uid, args):
         # sized patch of red is a real red, but it's ~1% of the frame, so it
         # only survives at a low prominence setting.
         hue_tol = exactness_to_hue_tol(exactness)
+        value_tol = exactness_to_value_tol(exactness)
         min_share = prominence / 100.0
 
         entries_by_image = {}
@@ -3217,7 +3324,7 @@ def build_search_filters(c, uid, args):
 
         matched_ids = set()
         for image_id, entries in entries_by_image.items():
-            if color_match_share(color_raw, entries, hue_tol) >= min_share:
+            if color_match_share(color_raw, entries, hue_tol, value_tol) >= min_share:
                 matched_ids.add(image_id)
                 continue
             # Graceful degradation: palettes extracted before V24 have no
@@ -3225,7 +3332,8 @@ def build_search_filters(c, uid, args):
             # search go silently empty until the backfill runs, fall back to
             # the old hue-only test on the top ranks for those images.
             if image_id in legacy_rank_hits and any(
-                s is None and color_matches(color_raw, h, hue_tol) for h, s in entries
+                s is None and color_matches(color_raw, h, hue_tol, value_tol)
+                for h, s in entries
             ):
                 matched_ids.add(image_id)
 
@@ -6179,7 +6287,7 @@ def serve(path):
 if __name__ == '__main__':
     init_db()
     load_embeddings_seed()
-    backfill_palette_shares()
+    backfill_palettes()
     backfill_phashes()
     merge_plural_tag_duplicates()
     threading.Thread(target=reconcile_drive_changes, daemon=True).start()
@@ -6189,7 +6297,7 @@ if __name__ == '__main__':
 
 init_db()
 load_embeddings_seed()
-backfill_palette_shares()
+backfill_palettes()
 backfill_phashes()
 merge_plural_tag_duplicates()
 threading.Thread(target=reconcile_drive_changes, daemon=True).start()
