@@ -1819,6 +1819,7 @@ export default function Home() {
         <DuplicateReview
           onClose={() => setShowDuplicates(false)}
           onImageDeleted={handleImageDeleted}
+          onResync={() => fetchPage(0, false)}
         />
       )}
 

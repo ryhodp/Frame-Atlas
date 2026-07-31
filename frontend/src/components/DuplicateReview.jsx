@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useToast } from '../ToastContext';
 
-export default function DuplicateReview({ onClose, onImageDeleted }) {
+export default function DuplicateReview({ onClose, onImageDeleted, onResync }) {
   const [groups, setGroups] = useState(null);   // null = scanning
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [confirmBulk, setConfirmBulk] = useState(false);
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [resultMsg, setResultMsg] = useState(null);
+  const { showToast, dismissToast } = useToast();
 
   useEffect(() => {
     // Scan backfills fingerprints for any new images, then returns the groups
@@ -41,48 +41,58 @@ export default function DuplicateReview({ onClose, onImageDeleted }) {
     });
   };
 
-  const deleteSelected = async () => {
+  // Closes the modal immediately and finishes the delete as a background job
+  // reported through a toast, so Ryan isn't stuck waiting on a big batch —
+  // same pattern CropModal.jsx uses for its background crop queue.
+  const confirmDelete = () => {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
-    setBulkBusy(true);
-    setError(null);
-    setResultMsg(null);
-    try {
-      const res = await fetch('/api/images/bulk-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_ids: ids })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Delete failed');
-        setBulkBusy(false);
-        setConfirmBulk(false);
-        return;
+
+    onClose();
+    ids.forEach(id => onImageDeleted?.(id));
+
+    const inProgressToastId = showToast(
+      `Deleting ${ids.length} photo${ids.length === 1 ? '' : 's'} in the background…`,
+      'success', 0
+    );
+    const safetyTimeout = setTimeout(() => dismissToast(inProgressToastId), 30000);
+
+    // No component state touched below — this modal is already closing/closed.
+    (async () => {
+      try {
+        const res = await fetch('/api/images/bulk-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_ids: ids })
+        });
+        const data = await res.json().catch(() => ({}));
+        clearTimeout(safetyTimeout);
+        dismissToast(inProgressToastId);
+
+        if (!res.ok) {
+          onResync?.();
+          showToast(data.error || 'Delete failed', 'error');
+          return;
+        }
+
+        const deletedCount = (data.deleted || []).length;
+        const failed = data.errors || [];
+        if (failed.length > 0) {
+          // We optimistically removed every selected photo up front; a few
+          // didn't actually delete, so resync with the server to bring them
+          // back into view instead of leaving the grid lying about them.
+          onResync?.();
+          showToast(`Deleted ${deletedCount}, ${failed.length} failed — ${failed[0].error}`, 'error');
+        } else {
+          showToast(`Deleted ${deletedCount} photo${deletedCount === 1 ? '' : 's'}`, 'success');
+        }
+      } catch {
+        clearTimeout(safetyTimeout);
+        dismissToast(inProgressToastId);
+        onResync?.();
+        showToast('Delete failed — check your connection and try again.', 'error');
       }
-      const deletedIds = new Set(data.deleted || []);
-      const failed = data.errors || [];
-      // Drop deleted images from their groups; groups with one image left disappear
-      setGroups(prev => prev
-        .map(g => ({ ...g, images: g.images.filter(img => !deletedIds.has(img.id)) }))
-        .filter(g => g.images.length > 1)
-      );
-      setSelected(prev => {
-        const next = new Set(prev);
-        deletedIds.forEach(id => next.delete(id));
-        return next;
-      });
-      deletedIds.forEach(id => onImageDeleted?.(id));
-      setResultMsg(
-        failed.length > 0
-          ? `Deleted ${deletedIds.size}, ${failed.length} failed — ${failed[0].error}`
-          : `Deleted ${deletedIds.size} photo${deletedIds.size === 1 ? '' : 's'}`
-      );
-    } catch {
-      setError('Delete failed — check your connection and try again.');
-    }
-    setBulkBusy(false);
-    setConfirmBulk(false);
+    })();
   };
 
   const selectedCount = selected.size;
@@ -129,7 +139,7 @@ export default function DuplicateReview({ onClose, onImageDeleted }) {
             {groups !== null && groups.length > 0 && !confirmBulk && (
               <button
                 onClick={() => setConfirmBulk(true)}
-                disabled={selectedCount === 0 || bulkBusy}
+                disabled={selectedCount === 0}
                 style={{
                   background: selectedCount === 0 ? 'rgba(207,113,82,0.15)' : 'rgba(207,113,82,0.85)',
                   border: '1px solid rgba(207,113,82,1)',
@@ -149,22 +159,19 @@ export default function DuplicateReview({ onClose, onImageDeleted }) {
                   Delete {selectedCount} photo{selectedCount === 1 ? '' : 's'}?
                 </span>
                 <button
-                  onClick={deleteSelected}
-                  disabled={bulkBusy}
+                  onClick={confirmDelete}
                   style={{
                     background: 'rgba(207,113,82,0.85)',
                     border: '1px solid rgba(207,113,82,1)',
                     color: '#efeadd', borderRadius: '6px',
                     padding: '7px 14px', fontSize: '11.5px', fontWeight: 600,
-                    cursor: 'pointer', fontFamily: 'inherit',
-                    opacity: bulkBusy ? 0.6 : 1
+                    cursor: 'pointer', fontFamily: 'inherit'
                   }}
                 >
-                  {bulkBusy ? 'Deleting…' : 'Yes, delete'}
+                  Yes, delete
                 </button>
                 <button
                   onClick={() => setConfirmBulk(false)}
-                  disabled={bulkBusy}
                   style={{
                     background: 'none',
                     border: '1px solid rgba(255,255,255,0.15)',
@@ -194,16 +201,6 @@ export default function DuplicateReview({ onClose, onImageDeleted }) {
             borderBottom: '1px solid rgba(207,113,82,0.25)'
           }}>
             {error}
-          </div>
-        )}
-
-        {resultMsg && (
-          <div style={{
-            padding: '10px 22px', fontSize: '11.5px', color: '#9c988d',
-            background: 'rgba(217,164,65,0.06)',
-            borderBottom: '1px solid rgba(217,164,65,0.2)'
-          }}>
-            {resultMsg}
           </div>
         )}
 
@@ -272,15 +269,14 @@ export default function DuplicateReview({ onClose, onImageDeleted }) {
                           position: 'absolute', top: '6px', left: '6px',
                           display: 'flex', alignItems: 'center',
                           background: 'rgba(0,0,0,0.55)', borderRadius: '5px',
-                          padding: '4px 5px', cursor: bulkBusy ? 'default' : 'pointer'
+                          padding: '4px 5px', cursor: 'pointer'
                         }}
                       >
                         <input
                           type="checkbox"
                           checked={selected.has(img.id)}
                           onChange={() => toggleSelected(img.id)}
-                          disabled={bulkBusy}
-                          style={{ accentColor: '#d9a441', width: '16px', height: '16px', cursor: bulkBusy ? 'default' : 'pointer' }}
+                          style={{ accentColor: '#d9a441', width: '16px', height: '16px', cursor: 'pointer' }}
                         />
                       </label>
                     </div>
