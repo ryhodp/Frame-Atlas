@@ -5,31 +5,36 @@ const ToastContext = createContext(null);
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
   const showToast = useCallback((message, type = 'info', duration = 4000) => {
     const id = Math.random().toString(36).slice(2);
     setToasts(prev => [...prev, { id, message, type }]);
     if (duration) {
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id));
-      }, duration);
+      setTimeout(() => dismissToast(id), duration);
     }
     return id;
-  }, []);
+  }, [dismissToast]);
 
   return (
-    <ToastContext.Provider value={{ showToast, toasts }}>
+    <ToastContext.Provider value={{ showToast, dismissToast, toasts }}>
       {children}
       <ToastContainer toasts={toasts} />
     </ToastContext.Provider>
   );
 }
 
+// Duration 0 means "stays until something explicitly dismisses it" (e.g. a
+// long-running background job) — pass the returned id to dismissToast once
+// that job resolves, otherwise it never goes away.
 export function useToast() {
   const context = useContext(ToastContext);
   if (!context) {
     throw new Error('useToast must be used within ToastProvider');
   }
-  return context.showToast;
+  return { showToast: context.showToast, dismissToast: context.dismissToast };
 }
 
 function ToastContainer({ toasts }) {

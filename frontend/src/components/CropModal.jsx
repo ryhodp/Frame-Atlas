@@ -101,7 +101,7 @@ function buildCropBody(item) {
 export default function CropModal({ images, onClose, onImageCropped }) {
   const isMobile = useIsMobile();
   const [, force] = useReducer(x => x + 1, 0);
-  const showToast = useToast();
+  const { showToast, dismissToast } = useToast();
 
   // 'review' | 'detectAll' | 'summary' | 'applying' | 'done'
   const [phase, setPhase] = useState('review');
@@ -236,8 +236,10 @@ export default function CropModal({ images, onClose, onImageCropped }) {
 
     autoStartRef.current = true;
 
-    // Show toast and close modal
-    showToast('✓ Cropping in the background…', 'success', 0);
+    // Show toast and close modal. This one has duration 0 (stays until we
+    // explicitly dismiss it below) — without that dismiss, it would sit on
+    // screen forever and stack up with every batch cropped afterward.
+    const inProgressToastId = showToast('✓ Cropping in the background…', 'success', 0);
     onClose();
 
     // Start cropping in background (no component state updates after this point)
@@ -272,6 +274,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               const okCount = jobIds.length - (progress.failed?.length || 0);
               const failCount = progress.failed?.length || 0;
 
+              dismissToast(inProgressToastId);
               if (failCount > 0) {
                 showToast(`✗ ${failCount} image${failCount === 1 ? '' : 's'} failed to crop`, 'error');
               } else {
@@ -293,9 +296,16 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             }
           } catch (e) {
             console.error('Failed to poll crop progress:', e);
+            dismissToast(inProgressToastId);
+            showToast('✗ Lost track of the crop job — check the photos to confirm.', 'error');
             polling = false;
           }
         }
+      } else {
+        // Every queue request failed before we even got a job id — nothing
+        // will ever come along to clear the in-progress toast.
+        dismissToast(inProgressToastId);
+        showToast('✗ Failed to start cropping — nothing was queued', 'error');
       }
     })();
   }, [phase]);
@@ -517,7 +527,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     item.redetectLevel = level;
     item.tightenLevel = 0;
     item.tightenNote = null;
-    item.redetectNote = (regressed || level >= 6) ? 'exhausted' : null;
+    item.redetectNote = regressed ? 'exhausted' : null;
     pushEdit(current, before, snapshotItem(item));
   };
 
@@ -845,7 +855,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               <>
                 <button
                   onClick={doRedetect}
-                  disabled={item?.status !== 'ready' || item?.redetectNote === 'exhausted'}
+                  disabled={item?.status !== 'ready'}
                   style={ghostBtn()}
                   title="Re-run detection with stricter evidence (R)"
                 >
