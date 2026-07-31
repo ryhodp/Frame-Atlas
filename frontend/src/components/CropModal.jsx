@@ -242,27 +242,39 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     const inProgressToastId = showToast('✓ Cropping in the background…', 'success', 0);
     onClose();
 
+    // Safety timeout: if the async work hasn't cleared this toast in 30s
+    // (e.g. due to a hang in polling), force-clear it. This is a defensive
+    // backstop; the normal path should dismiss it much sooner.
+    const safetyTimeout = setTimeout(() => dismissToast(inProgressToastId), 30000);
+
     // Start cropping in background (no component state updates after this point)
     (async () => {
-      const jobIds = [];
-      for (const item of targets) {
-        try {
-          const res = await fetch(`/api/images/${item.fa.id}/crop`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildCropBody(item)),
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || `Crop failed (HTTP ${res.status}).`);
-          if (data.job_id !== undefined) {
-            jobIds.push({ job_id: data.job_id, fa: item.fa });
+      try {
+        const jobIds = [];
+        for (const item of targets) {
+          try {
+            const res = await fetch(`/api/images/${item.fa.id}/crop`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(buildCropBody(item)),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Crop failed (HTTP ${res.status}).`);
+            if (data.job_id !== undefined) {
+              jobIds.push({ job_id: data.job_id, fa: item.fa });
+            }
+          } catch (e) {
+            console.error('Failed to queue crop:', e.message);
           }
-        } catch (e) {
-          console.error('Failed to queue crop:', e.message);
         }
-      }
 
-      if (jobIds.length > 0) {
+        if (jobIds.length === 0) {
+          clearTimeout(safetyTimeout);
+          dismissToast(inProgressToastId);
+          showToast('✗ Failed to start cropping — nothing was queued', 'error');
+          return;
+        }
+
         let polling = true;
         while (polling) {
           try {
@@ -270,6 +282,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             const progress = await res.json();
 
             if (progress.in_progress === 0 && progress.total > 0) {
+              clearTimeout(safetyTimeout);
               polling = false;
               const okCount = jobIds.length - (progress.failed?.length || 0);
               const failCount = progress.failed?.length || 0;
@@ -295,17 +308,17 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               await new Promise(r => setTimeout(r, 500));
             }
           } catch (e) {
+            clearTimeout(safetyTimeout);
             console.error('Failed to poll crop progress:', e);
             dismissToast(inProgressToastId);
             showToast('✗ Lost track of the crop job — check the photos to confirm.', 'error');
             polling = false;
           }
         }
-      } else {
-        // Every queue request failed before we even got a job id — nothing
-        // will ever come along to clear the in-progress toast.
+      } catch (e) {
+        clearTimeout(safetyTimeout);
         dismissToast(inProgressToastId);
-        showToast('✗ Failed to start cropping — nothing was queued', 'error');
+        console.error('Unexpected error in crop workflow:', e);
       }
     })();
   }, [phase]);
@@ -529,6 +542,55 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     item.tightenNote = null;
     item.redetectNote = regressed ? 'exhausted' : null;
     pushEdit(current, before, snapshotItem(item));
+  };
+
+  const doRotate = () => {
+    const item = items[current];
+    if (!item || item.status !== 'ready' || !item.imgEl) return;
+    const before = snapshotItem(item);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = item.imgEl;
+    const w = img.naturalWidth, h = img.naturalHeight;
+    canvas.width = h;
+    canvas.height = w;
+    ctx.translate(h, 0);
+    ctx.rotate(Math.PI / 2);
+    ctx.drawImage(img, 0, 0);
+    canvas.toBlob(blob => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const rotated = new Image();
+        rotated.onload = () => {
+          item.imgEl = rotated;
+          item.cropBox = { x: 0, y: 0, w: rotated.naturalWidth, h: rotated.naturalHeight };
+          item.confidence = 0;
+          item.isFallback = true;
+          item.tightenLevel = 0;
+          item.redetectLevel = 0;
+          item.tightenNote = null;
+          item.redetectNote = null;
+          item.mode = 'rect';
+          item.corners = null;
+          force();
+          pushEdit(current, before, snapshotItem(item));
+        };
+        rotated.src = reader.result;
+      };
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  const doDelete = () => {
+    const item = items[current];
+    if (!item) return;
+    items.splice(current, 1);
+    if (items.length === 0) {
+      onClose();
+      return;
+    }
+    if (current >= items.length) setCurrent(items.length - 1);
+    force();
   };
 
   // ── Handle dragging (pointer events → works for both mouse and touch) ─────
@@ -868,6 +930,22 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                   title="Trim any remaining flat border (T)"
                 >
                   {tightenLabel}
+                </button>
+                <button
+                  onClick={doRotate}
+                  disabled={item?.status !== 'ready'}
+                  style={ghostBtn()}
+                  title="Rotate image 90° clockwise"
+                >
+                  ↻ Rotate
+                </button>
+                <button
+                  onClick={doDelete}
+                  disabled={item?.status !== 'ready'}
+                  style={{ ...ghostBtn('#e07a55', 'rgba(224,122,85,0.55)') }}
+                  title="Remove this image from the batch"
+                >
+                  ✕ Delete
                 </button>
               </>
             )}
