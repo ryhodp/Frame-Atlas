@@ -6276,6 +6276,23 @@ def analytics_users():
     conn.close()
     return jsonify({'aggregate': aggregate, 'users': per_user})
 
+@app.route('/api/maintenance/clear-embeddings', methods=['POST'])
+@admin_required
+def clear_embeddings():
+    """TEMPORARY: Clear all CLIP embeddings to free up disk space when
+    /app/data is full. Embeddings are not actively used in search, so this
+    is safe to do. They can be regenerated later if needed."""
+    conn = get_db()
+    c = conn.cursor()
+    count_before = c.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+    c.execute("DELETE FROM embeddings")
+    conn.commit()
+    conn.close()
+    return jsonify({
+        'success': True,
+        'message': f'Cleared {count_before} embeddings vectors. You can now redeploy to update embeddings without running out of disk space.'
+    })
+
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
