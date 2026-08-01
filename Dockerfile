@@ -11,8 +11,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install Python dependencies
-COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements_v2.txt ./
+RUN pip install --no-cache-dir -r requirements_v2.txt
 
 # Copy backend code
 COPY backend/ ./
@@ -24,4 +24,4 @@ COPY --from=frontend-build /app/frontend/dist ./static/
 EXPOSE ${PORT:-5000}
 
 # Start the Flask app
-CMD ["python", "app.py"]
+CMD ["python", "app_v2.py"]
