@@ -943,22 +943,30 @@ def load_embeddings_seed():
 
     loaded = 0
     skipped = 0
-    for image_id_str, vec in vectors.items():
-        image_id = int(image_id_str)
-        if image_id not in valid_ids:
-            skipped += 1
-            continue
-        blob = array('f', vec).tobytes()
-        c.execute("DELETE FROM embeddings WHERE image_id = ?", (image_id,))
-        c.execute(
-            "INSERT INTO embeddings (image_id, user_id, clip_vector) VALUES (?, 1, ?)",
-            (image_id, blob)
-        )
-        loaded += 1
+    try:
+        for image_id_str, vec in vectors.items():
+            image_id = int(image_id_str)
+            if image_id not in valid_ids:
+                skipped += 1
+                continue
+            blob = array('f', vec).tobytes()
+            c.execute("DELETE FROM embeddings WHERE image_id = ?", (image_id,))
+            c.execute(
+                "INSERT INTO embeddings (image_id, user_id, clip_vector) VALUES (?, 1, ?)",
+                (image_id, blob)
+            )
+            loaded += 1
 
-    conn.commit()
-    conn.close()
-    print(f"Embeddings seed: loaded {loaded} vectors ({skipped} skipped)")
+        conn.commit()
+        print(f"Embeddings seed: loaded {loaded} vectors ({skipped} skipped)")
+    except sqlite3.OperationalError as e:
+        if 'disk' in str(e).lower() or 'full' in str(e).lower():
+            print(f"⚠️  Embeddings seed skipped: storage full — app running without updated embeddings. Free up space in /app/data and redeploy to fix.")
+            conn.rollback()
+        else:
+            raise
+    finally:
+        conn.close()
 
 # ============================================================================
 # AUTH — LOGIN, SESSIONS, INVITE CODES (Day 14 / V13)
