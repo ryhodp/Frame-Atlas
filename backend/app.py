@@ -6286,7 +6286,14 @@ def clear_embeddings():
         conn = get_db()
         c = conn.cursor()
         count_before = c.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
-        c.execute("DELETE FROM embeddings")
+        c.execute("DROP TABLE IF EXISTS embeddings")
+        c.execute('''
+            CREATE TABLE embeddings (
+                image_id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                clip_vector BLOB
+            )
+        ''')
         conn.commit()
         conn.close()
         return jsonify({
