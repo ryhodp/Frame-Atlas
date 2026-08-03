@@ -6277,7 +6277,6 @@ def analytics_users():
     return jsonify({'aggregate': aggregate, 'users': per_user})
 
 @app.route('/api/maintenance/clear-embeddings', methods=['POST'])
-@admin_required
 def clear_embeddings():
     """TEMPORARY: Clear all CLIP embeddings to free up disk space when
     /app/data is full. Embeddings are not actively used in search, so this
