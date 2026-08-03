@@ -985,7 +985,6 @@ PUBLIC_API_ROUTES = {
     '/api/auth/reset-password',
     '/api/setup',
     '/api/setup/status',
-    '/api/maintenance/clear-embeddings',
 }
 
 def _adopt_session_from_header():
@@ -6276,32 +6275,6 @@ def analytics_users():
 
     conn.close()
     return jsonify({'aggregate': aggregate, 'users': per_user})
-
-@app.route('/api/maintenance/clear-embeddings', methods=['POST'])
-def clear_embeddings():
-    """TEMPORARY: Clear all CLIP embeddings to free up disk space when
-    /app/data is full. Embeddings are not actively used in search, so this
-    is safe to do. They can be regenerated later if needed."""
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        count_before = c.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
-        c.execute("DROP TABLE IF EXISTS embeddings")
-        c.execute('''
-            CREATE TABLE embeddings (
-                image_id INTEGER PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                clip_vector BLOB
-            )
-        ''')
-        conn.commit()
-        conn.close()
-        return jsonify({
-            'success': True,
-            'message': f'Cleared {count_before} embeddings vectors. You can now redeploy to update embeddings without running out of disk space.'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
