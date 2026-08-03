@@ -3411,19 +3411,20 @@ def search():
     where = 'WHERE ' + ' AND '.join(conditions)
 
     # V14: shuffled home feed. When the default (unfiltered) grid sends a seed,
-    # order by a seeded shuffle instead of newest-first. Images the user has
-    # scrolled past in the last 7 days sink below ones they haven't seen lately,
-    # so each visit leads with fresher inspiration. Any active filter switches
-    # back to the normal newest-first ordering.
+    # order by a seeded shuffle instead of newest-first. Any active filter
+    # switches back to the normal newest-first ordering.
+    #
+    # V35: dropped the "seen in the last 7 days sinks to the bottom" bucket.
+    # Once most of the library has been viewed recently (Ryan's case: 3496 of
+    # 3499 images), that bucket swallows almost everything and only the tiny
+    # unseen leftover ever occupies the top of the feed — so the "shuffle"
+    # stops looking random, since day to day the same few unseen images keep
+    # winning the top slots. A straight seeded shuffle stays fresh regardless
+    # of view history.
     seed = request.args.get('seed', '').strip()
     if seed and is_unfiltered:
-        order_by = '''CASE WHEN EXISTS(
-                SELECT 1 FROM image_views iv
-                WHERE iv.user_id = ? AND iv.image_id = images.id
-                  AND iv.last_seen_at > datetime('now', '-7 days')
-            ) THEN 1 ELSE 0 END,
-            shuffle_key(?, images.id)'''
-        order_params = [uid, seed]
+        order_by = 'shuffle_key(?, images.id)'
+        order_params = [seed]
     else:
         order_by = 'date_added DESC'
         order_params = []
