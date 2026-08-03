@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SIDEBAR_WIDTH } from './Sidebar';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAuth } from '../AuthContext';
+import { useToast } from '../ToastContext';
 
 // ── Confirm step — small inline modal, dark panel look ────────────────────────
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -78,12 +79,11 @@ export default function TagModeBar({
   // and add to their decks); the tag/filmography panels stay admin-only
   // because their backend endpoints are.
   const { isAdmin } = useAuth();
+  const { showToast, dismissToast } = useToast();
   const [categories, setCategories] = useState([]);
   const [summary, setSummary] = useState({ total: 0, tags: [] });
   const [suggestions, setSuggestions] = useState([]);
   const [tagSearch, setTagSearch] = useState('');
-  const [deleteMsg, setDeleteMsg] = useState('');
-  const deleteMsgTimer = useRef(null);
 
   // Apply-tag panel state
   const [tagName, setTagName] = useState('');
@@ -304,10 +304,59 @@ export default function TagModeBar({
 
   const openBulkDeleteConfirm = () => setConfirm({ kind: 'bulk-delete' });
 
-  const flashDeleteMsg = (msg) => {
-    setDeleteMsg(msg);
-    clearTimeout(deleteMsgTimer.current);
-    deleteMsgTimer.current = setTimeout(() => setDeleteMsg(''), 5000);
+  // V35: closes the confirm modal immediately and finishes the delete as a
+  // background job reported through a toast, instead of blocking Select Mode
+  // on the fetch — same pattern DuplicateReview.jsx/CropModal.jsx already
+  // use. Optimistically clears the selected photos and the selection right
+  // away so Ryan can keep tagging/selecting while a big batch deletes; if
+  // anything in the batch didn't actually go through, onResync brings it
+  // back into view instead of leaving the grid lying about it.
+  const confirmBulkDelete = () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    setConfirm(null);
+    onBulkDeleted?.(ids);
+    setSelectedIds(new Set());
+
+    const inProgressToastId = showToast(
+      `Deleting ${ids.length} photo${ids.length === 1 ? '' : 's'} in the background…`,
+      'success', 0
+    );
+    const safetyTimeout = setTimeout(() => dismissToast(inProgressToastId), 30000);
+
+    (async () => {
+      try {
+        const res = await fetch('/api/images/bulk-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_ids: ids })
+        });
+        const data = await res.json().catch(() => ({}));
+        clearTimeout(safetyTimeout);
+        dismissToast(inProgressToastId);
+
+        if (!res.ok) {
+          onResync?.();
+          showToast(data.error || 'Delete failed', 'error');
+          return;
+        }
+
+        const deletedCount = (data.deleted || []).length;
+        const failed = data.errors || [];
+        if (failed.length > 0) {
+          onResync?.();
+          showToast(`Deleted ${deletedCount}, ${failed.length} failed — ${failed[0].error}`, 'error');
+        } else {
+          showToast(`Deleted ${deletedCount} photo${deletedCount === 1 ? '' : 's'}`, 'success');
+        }
+      } catch {
+        clearTimeout(safetyTimeout);
+        dismissToast(inProgressToastId);
+        onResync?.();
+        showToast('Delete failed — check your connection and try again.', 'error');
+      }
+    })();
   };
 
   // Group the (already intersection-only) shared tags by category, in the
@@ -365,46 +414,6 @@ export default function TagModeBar({
     setBusy(true);
     const ids = Array.from(selectedIds);
     try {
-      if (confirm.kind === 'bulk-delete') {
-        // Its own try/catch, not the shared one below: a network hiccup or a
-        // slow response here can throw AFTER the server has already moved
-        // the files in Drive and deleted the DB rows — the generic catch
-        // used to just log that and leave the stale selection on screen, so
-        // "9 selected" persisted even though the photos were already gone
-        // (Ryan hit this: files sitting in _Removed, grid/selection unmoved).
-        // Since we can't tell from here which ids actually succeeded, resync
-        // the grid from the server and drop the whole selection rather than
-        // risk it pointing at photos that no longer exist.
-        try {
-          const res = await fetch('/api/images/bulk-delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_ids: ids })
-          });
-          const data = await res.json();
-          const deletedIds = data.deleted || [];
-          const failed = data.errors || [];
-          onBulkDeleted?.(deletedIds);
-          setSelectedIds(prev => {
-            const next = new Set(prev);
-            deletedIds.forEach(id => next.delete(id));
-            return next;
-          });
-          flashDeleteMsg(
-            failed.length > 0
-              ? `Deleted ${deletedIds.length}, ${failed.length} failed — ${failed[0].error}`
-              : `Deleted ${deletedIds.length} photo${deletedIds.length === 1 ? '' : 's'}`
-          );
-        } catch (e) {
-          console.error('Bulk delete: response failed, resyncing to find out what actually happened', e);
-          flashDeleteMsg("Lost track of that delete — refreshing to check what went through.");
-          setSelectedIds(new Set());
-          onResync?.();
-        }
-        setBusy(false);
-        setConfirm(null);
-        return;
-      }
       if (confirm.kind === 'filmography-set') {
         await fetch('/api/filmography/bulk-set', {
           method: 'POST',
@@ -553,10 +562,6 @@ export default function TagModeBar({
             >
               🗑 Delete {count}
             </button>
-          )}
-
-          {deleteMsg && (
-            <span style={{ fontSize: '11.5px', color: '#b8cea1' }}>{deleteMsg}</span>
           )}
 
           <div style={{ flex: 1 }} />
@@ -930,7 +935,7 @@ export default function TagModeBar({
           }
           danger={confirm.kind === 'remove' || confirm.kind === 'filmography-clear' || confirm.kind === 'bulk-delete'}
           busy={busy}
-          onConfirm={runConfirm}
+          onConfirm={confirm.kind === 'bulk-delete' ? confirmBulkDelete : runConfirm}
           onCancel={() => !busy && setConfirm(null)}
         />
       )}
