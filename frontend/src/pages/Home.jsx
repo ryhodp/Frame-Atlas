@@ -1835,6 +1835,7 @@ export default function Home() {
           onBulkChanged={handleBulkTagsChanged}
           onBulkMutated={handleBulkMutated}
           onBulkDeleted={handleBulkDeleted}
+          onResync={() => fetchPage(0, false)}
           onCrop={() => {
             const sel = images.filter(i => selectedIds.has(i.id));
             if (sel.length) setCropImages(sel);

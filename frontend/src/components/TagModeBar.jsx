@@ -71,6 +71,7 @@ export default function TagModeBar({
   onBulkChanged, // (patchedIds, patchFn) — let Home.jsx update local image state
   onBulkMutated, // () — a bulk write (tag/filmography) just completed; re-sync active filters
   onBulkDeleted, // (deletedIds) — the selected photos were removed from the library
+  onResync,      // () — re-run the active search; used when a delete's outcome is unknown
   onCrop,        // V18: open the crop review modal for the current selection
 }) {
   // V18: Select Mode is open to everyone now (friends crop their own images
@@ -365,25 +366,41 @@ export default function TagModeBar({
     const ids = Array.from(selectedIds);
     try {
       if (confirm.kind === 'bulk-delete') {
-        const res = await fetch('/api/images/bulk-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_ids: ids })
-        });
-        const data = await res.json();
-        const deletedIds = data.deleted || [];
-        const failed = data.errors || [];
-        onBulkDeleted?.(deletedIds);
-        setSelectedIds(prev => {
-          const next = new Set(prev);
-          deletedIds.forEach(id => next.delete(id));
-          return next;
-        });
-        flashDeleteMsg(
-          failed.length > 0
-            ? `Deleted ${deletedIds.length}, ${failed.length} failed — ${failed[0].error}`
-            : `Deleted ${deletedIds.length} photo${deletedIds.length === 1 ? '' : 's'}`
-        );
+        // Its own try/catch, not the shared one below: a network hiccup or a
+        // slow response here can throw AFTER the server has already moved
+        // the files in Drive and deleted the DB rows — the generic catch
+        // used to just log that and leave the stale selection on screen, so
+        // "9 selected" persisted even though the photos were already gone
+        // (Ryan hit this: files sitting in _Removed, grid/selection unmoved).
+        // Since we can't tell from here which ids actually succeeded, resync
+        // the grid from the server and drop the whole selection rather than
+        // risk it pointing at photos that no longer exist.
+        try {
+          const res = await fetch('/api/images/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_ids: ids })
+          });
+          const data = await res.json();
+          const deletedIds = data.deleted || [];
+          const failed = data.errors || [];
+          onBulkDeleted?.(deletedIds);
+          setSelectedIds(prev => {
+            const next = new Set(prev);
+            deletedIds.forEach(id => next.delete(id));
+            return next;
+          });
+          flashDeleteMsg(
+            failed.length > 0
+              ? `Deleted ${deletedIds.length}, ${failed.length} failed — ${failed[0].error}`
+              : `Deleted ${deletedIds.length} photo${deletedIds.length === 1 ? '' : 's'}`
+          );
+        } catch (e) {
+          console.error('Bulk delete: response failed, resyncing to find out what actually happened', e);
+          flashDeleteMsg("Lost track of that delete — refreshing to check what went through.");
+          setSelectedIds(new Set());
+          onResync?.();
+        }
         setBusy(false);
         setConfirm(null);
         return;
