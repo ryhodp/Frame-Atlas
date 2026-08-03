@@ -1842,17 +1842,23 @@ def run_db_backup():
             print("[db-backup] Skipped — admin hasn't connected Google.")
             return False
 
-        tmp_path = DB_PATH + '.backup-tmp'
+        # V35: backs up through RAM (Connection.serialize(), Python 3.11+),
+        # never through a scratch file on the /app/data volume. That file
+        # (library.db.backup-tmp) is what crashed the app on 2026-07-31: the
+        # live database is 283MB on a 434MB volume, so a temp copy of it
+        # can't fit alongside the original with any room to spare, and if the
+        # backup dies partway (as it does whenever the volume is already
+        # tight) the scratch file is never cleaned up and silently eats the
+        # rest of the disk until something else — like a bulk delete needing
+        # a moment's SQLite journal space — starts failing with "database or
+        # disk is full" too.
         src = sqlite3.connect(DB_PATH)
-        dst = sqlite3.connect(tmp_path)
+        dst = sqlite3.connect(':memory:')
         with dst:
             src.backup(dst)
         src.close()
+        db_bytes = dst.serialize()
         dst.close()
-
-        with open(tmp_path, 'rb') as f:
-            db_bytes = f.read()
-        os.remove(tmp_path)
 
         compressed = gzip.compress(db_bytes)
         stamp = datetime.now().strftime('%Y-%m-%d')
