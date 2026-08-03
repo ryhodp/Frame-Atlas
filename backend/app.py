@@ -985,6 +985,7 @@ PUBLIC_API_ROUTES = {
     '/api/auth/reset-password',
     '/api/setup',
     '/api/setup/status',
+    '/api/maintenance/clear-embeddings',
 }
 
 def _adopt_session_from_header():
