@@ -4700,6 +4700,7 @@ def bulk_delete_images():
                     fields='id'
                 ).execute()
             except Exception as e:
+                print(f"[bulk-delete] image {image_id} ({row['filename']}) failed: {e}")
                 errors.append({'id': image_id, 'filename': row['filename'], 'error': str(e)})
                 continue
 
@@ -4722,6 +4723,7 @@ def bulk_delete_images():
         conn.commit()
         conn.close()
 
+    print(f"[bulk-delete] requested {len(image_ids)}, deleted {len(deleted)}, failed {len(errors)}")
     return jsonify({'deleted': [d[0] for d in deleted], 'errors': errors})
 
 # ============================================================================
