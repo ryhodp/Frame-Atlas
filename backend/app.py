@@ -1656,6 +1656,12 @@ def list_images_in_folder(service, folder_id, page_token=None):
 def generate_thumbnail(image_data, width=800, quality=85):
     try:
         img = Image.open(io.BytesIO(image_data))
+        # Phones store rotation as an EXIF tag, not in the pixels themselves.
+        # Bake it in now (V36) — otherwise the re-saved JPEG below has no
+        # orientation tag left and the thumbnail comes out sideways, even
+        # though the untouched original (served straight from Drive) still
+        # carries the tag and displays upright. Same fix as the crop path.
+        img = ImageOps.exif_transpose(img)
         aspect_ratio = img.width / img.height if img.height > 0 else 1
         # Never upscale — a source narrower than the target stays at native size
         if img.width > width:
