@@ -132,9 +132,15 @@ function peelAxis(size, madAt, flatMad) {
 }
 
 // ── PUBLIC: detectCrop ────────────────────────────────────────────────────────
-// Same contract as cropDetect.js's detectCrop: returns { box, confidence } in
-// natural pixel coordinates, or null when there is nothing worth cropping (the
+// Same contract as cropDetect.js's detectCrop: returns { box } in natural
+// pixel coordinates, or null when there is nothing worth cropping (the
 // caller falls back to a full-image box).
+//
+// (A per-edge "confidence" score used to ride along here too, but it was
+// removed: it measured local contrast at the boundary, which reads as "low"
+// on a dark/moody frame regardless of whether the crop itself is correct —
+// exactly the material this app is full of. Rather than ship a number that
+// was actively misleading on Ryan's most common content, it's gone.)
 //
 // `level` is the Redetect strictness dial. Unlike the v34 engine — where
 // higher levels demanded a DARKER, flatter bar and so shrank the crop — flat
@@ -185,18 +191,6 @@ export function detectCropAtFlatMad(img, flatMad) {
   // Nothing meaningful to cut — let the caller show the untouched frame.
   if (w >= W * 0.995 && h >= H * 0.995) return null;
 
-  // Confidence reflects how decisively the picture starts. A hard seam (flat
-  // chrome butting straight onto textured content) is the case worth trusting;
-  // a soft one usually means the bar shaded into the image and the boundary is
-  // a judgement call.
-  const edgeMads = [];
-  if (top > 0) edgeMads.push(rowMad(top, left, right));
-  if (bottom < H) edgeMads.push(rowMad(bottom - 1, left, right));
-  if (left > 0) edgeMads.push(colMad(left, top, bottom));
-  if (right < W) edgeMads.push(colMad(right - 1, top, bottom));
-  const weakest = edgeMads.length ? Math.min(...edgeMads) : 0;
-  const confidence = weakest >= 6 ? 'high' : weakest >= 3 ? 'medium' : 'low';
-
   if (scale < 1) {
     const inv = 1 / scale;
     return {
@@ -204,10 +198,9 @@ export function detectCropAtFlatMad(img, flatMad) {
         x: Math.round(x * inv), y: Math.round(y * inv),
         w: Math.round(w * inv), h: Math.round(h * inv),
       },
-      confidence,
     };
   }
-  return { box: { x, y, w, h }, confidence };
+  return { box: { x, y, w, h } };
 }
 
 // ── TIGHTEN ──────────────────────────────────────────────────────────────────
@@ -335,7 +328,7 @@ export function detectCropTightened(img, level = 0) {
     bottom: b.y + b.h < img.naturalHeight,
   };
   const t = tightenBox(img, b, 0, edges);
-  return t.changed ? { box: t.box, confidence: det.confidence } : det;
+  return t.changed ? { box: t.box } : det;
 }
 
 export { FLAT_MAD_BASE, MAX_EDGE_PEEL, TIGHTEN_CAP_BASE };

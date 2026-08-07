@@ -91,7 +91,6 @@ for (const f of FILES) {
   rows.push({
     f, size: `${W}×${H}`,
     box: `${b.x},${b.y},${b.w},${b.h}`,
-    conf: done ? done.confidence : '-',
     dL: b.x - rb.x, dT: b.y - rb.y,
     dR: (rb.x + rb.w) - (b.x + b.w), dB: (rb.y + rb.h) - (b.y + b.h),
     m0: sweep(0), m1: sweep(1), m2: sweep(2),
@@ -103,17 +102,17 @@ for (const f of FILES) {
   el.innerHTML = `<div class="p" style="height:${H * sc}px"><img src="${DIR + encodeURIComponent(f)}">
     <div class="b" style="left:${b.x * sc}px;top:${b.y * sc}px;width:${b.w * sc}px;height:${b.h * sc}px"></div></div>
     <div class="n" title="${f}">${f}</div>
-    <div class="v">${done ? ((1 - (b.w * b.h) / (W * H)) * 100).toFixed(0) + '% · ' + done.confidence : 'no crop'}</div>`;
+    <div class="v">${done ? ((1 - (b.w * b.h) / (W * H)) * 100).toFixed(0) + '% cropped' : 'no crop'}</div>`;
   g.appendChild(el);
 }
 
 const cls = v => v === 0 ? 'zero' : (v > 10 ? 'big' : 'moved');
 document.getElementById('t').innerHTML =
-  '<table><tr><th>file</th><th>size</th><th>final box</th><th>conf</th>' +
+  '<table><tr><th>file</th><th>size</th><th>final box</th>' +
   '<th colspan="4">tighten Δ (L/T/R/B)</th><th>MAD≤0</th><th>MAD≤1</th><th>MAD≤2</th></tr>' +
   rows.map(r => r.missing
-    ? `<tr><td class="f">${r.f}</td><td colspan="10" style="text-align:left;color:#e07a55">not found — is "Test Photos/To Crop/" present?</td></tr>`
-    : `<tr><td class="f">${r.f}</td><td>${r.size}</td><td>${r.box}</td><td>${r.conf}</td>` +
+    ? `<tr><td class="f">${r.f}</td><td colspan="9" style="text-align:left;color:#e07a55">not found — is "Test Photos/To Crop/" present?</td></tr>`
+    : `<tr><td class="f">${r.f}</td><td>${r.size}</td><td>${r.box}</td>` +
       `<td class="${cls(r.dL)}">${r.dL}</td><td class="${cls(r.dT)}">${r.dT}</td>` +
       `<td class="${cls(r.dR)}">${r.dR}</td><td class="${cls(r.dB)}">${r.dB}</td>` +
       `<td>${r.m0}</td><td>${r.m1}</td><td>${r.m2}</td></tr>`).join('') +

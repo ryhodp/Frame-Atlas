@@ -31,12 +31,6 @@ const HANDLE_CORNERS = ['tl', 'tr', 'bl', 'br', 'tc', 'bc', 'lc', 'rc'];
 // top-left, top-right, bottom-right, bottom-left.
 const QUAD_LABELS = ['↖', '↗', '↘', '↙'];
 
-const CONFIDENCE_STYLES = {
-  high:   { color: '#b8cea1', border: 'rgba(184,206,161,0.45)', bg: 'rgba(184,206,161,0.12)' },
-  medium: { color: '#dcbd76', border: 'rgba(201,162,83,0.45)',  bg: 'rgba(201,162,83,0.12)' },
-  low:    { color: '#cf7152', border: 'rgba(207,113,82,0.45)',  bg: 'rgba(207,113,82,0.12)' },
-};
-
 function snapshotItem(item) {
   return {
     cropBox: item.cropBox ? { ...item.cropBox } : null,
@@ -45,7 +39,6 @@ function snapshotItem(item) {
     // undo steps rather than a second, separate history.
     mode: item.mode,
     corners: item.corners ? item.corners.map(p => ({ ...p })) : null,
-    confidence: item.confidence,
     isFallback: item.isFallback,
     decided: item.decided,
     redetectLevel: item.redetectLevel,
@@ -57,7 +50,6 @@ function applySnapshot(item, snap) {
   item.cropBox = snap.cropBox ? { ...snap.cropBox } : null;
   item.mode = snap.mode;
   item.corners = snap.corners ? snap.corners.map(p => ({ ...p })) : null;
-  item.confidence = snap.confidence;
   item.isFallback = snap.isFallback;
   item.decided = snap.decided;
   item.redetectLevel = snap.redetectLevel;
@@ -121,7 +113,6 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       // — some frames in a batch are tilted screens, most are not.
       mode: 'rect',        // 'rect' | 'perspective'
       corners: null,       // 4 points in natural pixels, only in perspective mode
-      confidence: 0,
       isFallback: false,
       decided: null,       // null | 'approved' | 'skipped'
       redetectLevel: 0,
@@ -198,7 +189,6 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       item.cropBox = result
         ? result.box
         : { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
-      item.confidence = result ? result.confidence : 0;
       item.isFallback = !result;
       item.status = 'ready';
     } catch (e) {
@@ -524,7 +514,6 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     let regressed = false;
     if (result) {
       item.cropBox = result.box;
-      item.confidence = result.confidence;
       item.isFallback = false;
     } else if (prevBox) {
       // Each level widens what counts as flat, so Redetect is the way past a
@@ -564,7 +553,6 @@ export default function CropModal({ images, onClose, onImageCropped }) {
         rotated.onload = () => {
           item.imgEl = rotated;
           item.cropBox = { x: 0, y: 0, w: rotated.naturalWidth, h: rotated.naturalHeight };
-          item.confidence = 0;
           item.isFallback = true;
           item.tightenLevel = 0;
           item.redetectLevel = 0;
@@ -831,8 +819,6 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   };
 
   const handleSize = isMobile ? 22 : 12;
-
-  const confStyle = item && CONFIDENCE_STYLES[item.confidence];
 
   // V32 derived state. `quadValid` is the same convexity test the server runs,
   // so a crossed outline is refused on screen (red, Approve disabled) instead
@@ -1133,19 +1119,6 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                     ⚠ CORNERS CROSS OVER — UNCROSS THEM
                   </span>
                 )}
-                {/* Confidence describes the RECTANGLE detector's certainty, so
-                    it says nothing about a hand-placed quad — hidden rather
-                    than shown as a stale number from before the switch. */}
-                {!isPerspective && item?.status === 'ready' && !item.isFallback && confStyle && (
-                  <span style={{
-                    fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
-                    borderRadius: '3px', padding: '1px 6px', letterSpacing: '0.06em',
-                    fontWeight: 600, textTransform: 'uppercase',
-                    color: confStyle.color, background: confStyle.bg, border: `1px solid ${confStyle.border}`,
-                  }}>
-                    {item.confidence}
-                  </span>
-                )}
                 {!isPerspective && item?.status === 'ready' && item.isFallback && (
                   <span style={{
                     fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
@@ -1223,14 +1196,6 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                     border: '1px solid rgba(0,0,0,0.4)',
                     background: it.decided === 'approved' ? '#b8cea1' : it.decided === 'skipped' ? '#cf7152' : '#65625a',
                   }} />
-                  {it.status === 'ready' && !it.isFallback && (
-                    <span style={{
-                      position: 'absolute', top: '3px', left: '3px',
-                      width: '7px', height: '7px', borderRadius: '50%',
-                      border: '1px solid rgba(0,0,0,0.3)',
-                      background: it.confidence === 'high' ? '#b8cea1' : it.confidence === 'medium' ? '#dcbd76' : '#cf7152',
-                    }} />
-                  )}
                 </div>
               ))}
             </div>
