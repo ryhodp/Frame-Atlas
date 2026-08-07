@@ -74,6 +74,7 @@ export default function DeckDetail() {
 
   const [collapsed, setCollapsed] = useState({}); // sceneKey -> bool
   const [dragOverKey, setDragOverKey] = useState(null); // sceneKey currently being dragged over
+  const [sceneDragIndex, setSceneDragIndex] = useState(null); // index (in `scenes`) of the scene currently being drag-reordered
 
   const [sceneToDelete, setSceneToDelete] = useState(null); // scene object or null
   const [busy, setBusy] = useState(false);
@@ -259,6 +260,51 @@ export default function DeckDetail() {
       console.error('Move/copy photo failed', e2);
     }
     loadDeck();
+  };
+
+  // ── Scene drag-to-reorder ─────────────────────────────────────────────────
+  // Splice the dragged scene out and reinsert it at the drop index, same
+  // "optimistic update, refetch on failure" shape as handleDrop above — no
+  // way to know what actually landed server-side, so loadDeck() resyncs.
+  const reorderScenes = async (fromIndex, toIndex) => {
+    if (fromIndex === toIndex) return;
+    const reordered = [...scenes];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+    const sceneIds = reordered.map(s => s.id);
+
+    setDeck(prev => ({
+      ...prev,
+      scenes: reordered.map((s, i) => ({ ...s, sort_order: i }))
+    }));
+
+    try {
+      const res = await fetch(`/api/decks/${id}/scenes/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scene_ids: sceneIds })
+      });
+      if (!res.ok) throw new Error(`scene reorder failed: ${res.status}`);
+    } catch (err) {
+      console.error('Reorder scenes failed', err);
+      loadDeck();
+    }
+  };
+
+  // A dropped scene carries 'application/x-scene-reorder' instead of the
+  // 'text/plain' deckImageId a dropped photo tile carries — `types` (unlike
+  // getData) is readable without the drop having already happened, so this
+  // branches cleanly instead of colliding with handleDrop's photo-move path.
+  const handleSectionDrop = (targetSceneId, targetIndex, e) => {
+    if (e.dataTransfer.types.includes('application/x-scene-reorder')) {
+      e.preventDefault();
+      const fromIndex = sceneDragIndex;
+      setSceneDragIndex(null);
+      if (fromIndex === null || fromIndex === undefined || fromIndex === targetIndex) return;
+      reorderScenes(fromIndex, targetIndex);
+      return;
+    }
+    handleDrop(targetSceneId, e);
   };
 
   const toggleCollapsed = (key) => {
@@ -463,7 +509,7 @@ export default function DeckDetail() {
       />
 
       {/* One section per scene, in sort_order */}
-      {scenes.map(scene => {
+      {scenes.map((scene, index) => {
         const key = `scene-${scene.id}`;
         return (
           <SceneSection
@@ -476,13 +522,19 @@ export default function DeckDetail() {
             isDragOver={dragOverKey === key}
             onDragEnter={deck.is_owner ? () => setDragOverKey(key) : undefined}
             onDragLeave={deck.is_owner ? () => setDragOverKey(prev => (prev === key ? null : prev)) : undefined}
-            onDrop={deck.is_owner ? e => { setDragOverKey(null); handleDrop(scene.id, e); } : undefined}
+            onDrop={deck.is_owner ? e => { setDragOverKey(null); handleSectionDrop(scene.id, index, e); } : undefined}
             onRemoveImage={deck.is_owner ? removeDeckImage : undefined}
             onStoryboard={deck.is_owner ? () => setStoryboard({ sceneId: scene.id, title: scene.name }) : undefined}
             canEdit={deck.is_owner}
             editable={deck.is_owner}
             onRename={(name) => renameScene(scene.id, name)}
             onDelete={() => setSceneToDelete(scene)}
+            onSceneDragStart={deck.is_owner ? e => {
+              setSceneDragIndex(index);
+              e.dataTransfer.setData('application/x-scene-reorder', String(index));
+              e.dataTransfer.effectAllowed = 'move';
+            } : undefined}
+            onSceneDragEnd={deck.is_owner ? () => setSceneDragIndex(null) : undefined}
           />
         );
       })}
@@ -1068,7 +1120,8 @@ function ShareModal({ deckId, shareToken, onTokenChange, onClose }) {
 function SceneSection({
   sceneKey, title, images, collapsedState, toggleCollapsed,
   isDragOver, onDragEnter, onDragLeave, onDrop,
-  onRemoveImage, onStoryboard, editable, onRename, onDelete, canEdit
+  onRemoveImage, onStoryboard, editable, onRename, onDelete, canEdit,
+  onSceneDragStart, onSceneDragEnd
 }) {
   const isCollapsed = !!collapsedState[sceneKey];
   const [renaming, setRenaming] = useState(false);
@@ -1113,6 +1166,21 @@ function SceneSection({
           ▾
         </button>
 
+        {editable && (
+          <span
+            draggable
+            onDragStart={onSceneDragStart}
+            onDragEnd={onSceneDragEnd}
+            title="Drag to reorder this scene"
+            style={{
+              cursor: 'grab', color: '#8e9099', fontSize: '15px',
+              lineHeight: 1, userSelect: 'none'
+            }}
+          >
+            ⠿
+          </span>
+        )}
+
         {renaming ? (
           <input
             autoFocus
@@ -1144,23 +1212,22 @@ function SceneSection({
           {images.length} photo{images.length === 1 ? '' : 's'}
         </span>
 
-        <div style={{ flex: 1 }} />
-
         {canEdit && images.length > 0 && (
           <button
             onClick={onStoryboard}
-            title="Open storyboard — sequence frames and add notes"
+            title="Reorder this scene's photos and add notes"
             style={{
-              background: 'rgba(217,164,65,0.12)',
-              border: '1px solid rgba(217,164,65,0.45)',
-              color: '#d9a441', borderRadius: '6px', padding: '5px 10px',
-              cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit',
-              marginRight: editable ? '8px' : 0
+              background: '#d9a441', color: '#3d2f00', border: 'none',
+              borderRadius: '6px', padding: '6px 12px',
+              cursor: 'pointer', fontSize: '11.5px', fontWeight: 600, fontFamily: 'inherit',
+              whiteSpace: 'nowrap'
             }}
           >
-            ⊞ Storyboard
+            ↕ Reorder Photos
           </button>
         )}
+
+        <div style={{ flex: 1 }} />
 
         {editable && (
           <button
