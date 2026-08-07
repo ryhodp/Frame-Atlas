@@ -284,7 +284,7 @@ biggest day-to-day quality-of-life win and can be pulled forward any time the ap
 
 ---
 
-## Day 20 — Deck Ordering + Crop Selection Fix *(V38 — small, start here)*
+## Day 20 — Deck Ordering + Crop Selection Fix *(V38 — COMPLETE)*
 
 **Goal:** Stop the two things that interrupt the flow of actually building a lookbook.
 
@@ -304,6 +304,14 @@ biggest day-to-day quality-of-life win and can be pulled forward any time the ap
 **Done when:** Cropping two photos and returning home leaves nothing selected; scenes can be
 dragged into a new order and it sticks; the way to sequence photos in a scene is findable
 without being told.
+
+**Shipped August 7, 2026 (V38).** All three pieces done: `CropModal` now tells its caller
+whether a crop batch actually started vs. every other way it closes, so Home only clears
+Select Mode on a real start. Scene reordering added as `POST /api/decks/<id>/scenes/reorder`
+(mirrors the existing photo-storyboard-order endpoint) with drag-and-drop in `DeckDetail.jsx`,
+using a distinct `dataTransfer` type so it can't collide with the existing photo-into-scene
+drag. The Storyboard button was renamed "↕ Reorder Photos" and given a filled, prominent style.
+Full detail in CLAUDE.md's "Cropping" and "Scene reordering" sections.
 
 ---
 
@@ -507,7 +515,7 @@ small changes keep having surprising side effects.
 | 18 | NAS migration | $0/month forever *(parked — needs hardware)* |
 | 19 | Browser extension | Web clipping ✅ *(V25)* |
 | **— PHASE 2: THE PITCH LAYER —** | | |
-| **20** | **Deck ordering + crop selection fix** | **Scenes reorder; selection clears after crop** *(V38 — next)* |
+| 20 | Deck ordering + crop selection fix | Scenes reorder; selection clears after crop ✅ *(V38)* |
 | 21 | DP technical notes + full-text search | Camera/lens/stop/filter fields + Omnisearch-style find *(V39)* |
 | 22 | PDF lookbook export | A file you can send an agency *(V40)* |
 | 23 | Presentation mode | Present a pitch from the app *(V41)* |
