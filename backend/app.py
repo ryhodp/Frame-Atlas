@@ -5825,6 +5825,39 @@ def delete_scene(scene_id):
     conn.close()
     return jsonify({'success': True})
 
+@app.route('/api/decks/<int:deck_id>/scenes/reorder', methods=['POST'])
+def reorder_scenes(deck_id):
+    """Persists a new scene order within a deck. Expects the COMPLETE ordered
+    list of the deck's scene ids — position in the list becomes sort_order.
+    Mirrors reorder_deck_images below: same validation shape, and the same
+    touch_deck()-not-log_deck_activity() call, since reordering is the one
+    mutation with no activity-feed entry."""
+    data = request.get_json(force=True) or {}
+    scene_ids = data.get('scene_ids')
+
+    if not isinstance(scene_ids, list) or not scene_ids or not all(isinstance(i, int) for i in scene_ids):
+        return jsonify({'error': 'scene_ids must be a non-empty list of ints'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    rows = c.execute('SELECT id FROM scenes WHERE deck_id = ?', (deck_id,)).fetchall()
+    current_ids = {r['id'] for r in rows}
+
+    if set(scene_ids) != current_ids or len(scene_ids) != len(current_ids):
+        conn.close()
+        return jsonify({'error': 'scene_ids must be exactly the scenes in this deck'}), 400
+
+    for position, scene_id in enumerate(scene_ids):
+        c.execute('UPDATE scenes SET sort_order = ? WHERE id = ?', (position, scene_id))
+    touch_deck(c, deck_id)
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
 @app.route('/api/decks/<int:deck_id>/images', methods=['POST'])
 def add_images_to_deck(deck_id):
     data = request.get_json(force=True) or {}
