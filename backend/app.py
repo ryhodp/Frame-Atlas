@@ -11,6 +11,7 @@ import time
 import zlib
 import threading
 import queue as queue_module
+import concurrent.futures
 import urllib.parse
 from array import array
 from datetime import datetime, timedelta
@@ -4647,14 +4648,33 @@ def delete_image(image_id):
                     'moved_to': REMOVED_FOLDER_NAME if user_id == 1 else None,
                     'filename': row['filename']})
 
+# V36: bulk delete moves each admin photo on its own Drive API round trip
+# (get current parents, then move into _Removed) — sequentially, 16 photos
+# was taking 10-20+ seconds, long enough that the browser sometimes gave up
+# on the request before it finished. This many workers run those moves at
+# once; the underlying Drive HTTP client isn't safe to share across threads,
+# so BULK_DELETE_WORKERS also caps how many separate service objects (one
+# per thread, via threading.local in bulk_delete_images) get created.
+BULK_DELETE_WORKERS = 5
+
+# Google's machine-readable reasons for "you're calling too fast" (as
+# opposed to a real permissions/quota problem, which shouldn't be retried).
+DRIVE_RATE_LIMIT_REASONS = {'userRateLimitExceeded', 'rateLimitExceeded'}
+
 @app.route('/api/images/bulk-delete', methods=['POST'])
 def bulk_delete_images():
     """Same rules as DELETE /api/images/<id> (owner-or-admin, admin's own
     images move to Drive's _Removed), just batched. A failure on one photo
     (e.g. a Drive permission hiccup) is skipped and reported — it does not
-    roll back or block the rest of the batch. The _Removed folder lookup is
-    cached per root folder so a 50-photo delete lists Drive for it once,
-    not 50 times."""
+    roll back or block the rest of the batch.
+
+    The Drive move for each admin photo runs across a small thread pool
+    (BULK_DELETE_WORKERS at a time) instead of one at a time. The _Removed
+    folder is looked up once up front, before any worker starts, so they
+    never race to create it. A photo that hits Drive's rate limit gets a
+    couple of short retries before it's actually counted as failed — one
+    busy moment during a big batch shouldn't turn a working delete into an
+    error."""
     user_id = session['user_id']
     data = request.get_json(force=True) or {}
     image_ids = data.get('image_ids')
@@ -4676,35 +4696,64 @@ def bulk_delete_images():
     by_id = {r['id']: r for r in rows}
     deleted = []  # (image_id, drive_file_id)
     errors = []
-    removed_folder_cache = {}
-    service = get_drive_service() if user_id == 1 else None
 
+    to_move = []  # rows that need an actual Drive move (admin only)
     for image_id in image_ids:
         row = by_id.get(image_id)
         if not row or (user_id != 1 and row['user_id'] != user_id):
             errors.append({'id': image_id, 'error': 'Image not found'})
             continue
-
         if user_id == 1:
-            try:
-                file_id = row['drive_file_id']
-                f = service.files().get(fileId=file_id, fields='parents').execute()
-                prev_parents = ','.join(f.get('parents', []))
-                root_id = get_root_folder_id(1)
-                if root_id not in removed_folder_cache:
-                    removed_folder_cache[root_id] = get_or_create_removed_folder(service, root_id)
-                service.files().update(
-                    fileId=file_id,
-                    addParents=removed_folder_cache[root_id],
-                    removeParents=prev_parents,
-                    fields='id'
-                ).execute()
-            except Exception as e:
-                print(f"[bulk-delete] image {image_id} ({row['filename']}) failed: {e}")
-                errors.append({'id': image_id, 'filename': row['filename'], 'error': str(e)})
-                continue
+            to_move.append(row)
+        else:
+            # Friends' deletes are DB-only (Viewer share, can't move files) —
+            # nothing to parallelize, straight to the deleted list.
+            deleted.append((image_id, row['drive_file_id']))
 
-        deleted.append((image_id, row['drive_file_id']))
+    if to_move:
+        root_id = get_root_folder_id(1)
+        removed_folder_id = get_or_create_removed_folder(get_drive_service(), root_id)
+
+        # One Drive service per worker thread, not one shared across all of
+        # them or one built fresh per photo — building it is cheap (no
+        # network call, static discovery doc), and threading.local keeps
+        # each worker's httplib2 transport from being touched by another
+        # thread mid-request.
+        thread_local = threading.local()
+        def _thread_service():
+            if not hasattr(thread_local, 'service'):
+                thread_local.service = get_drive_service()
+            return thread_local.service
+
+        def move_one(row):
+            file_id = row['drive_file_id']
+            service = _thread_service()
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    f = service.files().get(fileId=file_id, fields='parents').execute()
+                    prev_parents = ','.join(f.get('parents', []))
+                    service.files().update(
+                        fileId=file_id,
+                        addParents=removed_folder_id,
+                        removeParents=prev_parents,
+                        fields='id'
+                    ).execute()
+                    return row, None
+                except Exception as e:
+                    if attempt <= 2 and drive_error_reason(e) in DRIVE_RATE_LIMIT_REASONS:
+                        time.sleep(attempt)  # brief backoff, then retry this photo only
+                        continue
+                    return row, e
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=BULK_DELETE_WORKERS) as pool:
+            for row, err in pool.map(move_one, to_move):
+                if err is None:
+                    deleted.append((row['id'], row['drive_file_id']))
+                else:
+                    print(f"[bulk-delete] image {row['id']} ({row['filename']}) failed: {err}")
+                    errors.append({'id': row['id'], 'filename': row['filename'], 'error': str(err)})
 
     if deleted:
         deleted_ids = [d[0] for d in deleted]
