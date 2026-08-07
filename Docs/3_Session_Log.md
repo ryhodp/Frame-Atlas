@@ -1385,3 +1385,132 @@ V27 completely changed the architecture, making test_crop_locally.py incompatibl
 ### Next Steps
 1. No other work queued from this session — normal feature work resumes next time
 2. Test suite is now clean (23/23 passing on main) — no mental burden explaining "yes it's supposed to fail"
+
+---
+
+## Backfilled Catch-Up — V30 through V36
+*Added: August 6, 2026*
+*Status: This log had not been updated since the Test Reconciliation session (July 28), even
+though six more versions shipped and deployed in the meantime. The entries below are
+reconstructed from `git log` and `CLAUDE.md`'s existing V30–V36 technical notes, not written
+live in-session — so they're shorter than a normal entry and skip anything CLAUDE.md doesn't
+already capture (e.g. exact "confirmed with Ryan" wording). Going forward, log each version as
+it ships rather than letting this drift again.*
+
+### V30 — Duplicate Detection Rewrite + Sync-Delete Parity + Stale-Thumbnail Repair + Tag Normalization
+*Committed: July 28, 2026*
+
+Fixed four bugs found in real use:
+1. **Cropped photos still looked uncropped in the grid** — the V27 background crop worker crashed after overwriting the Drive file, leaving a stale thumbnail in the DB. New `reconcile_drive_changes()` detects an MD5 mismatch between the DB and Drive and rebuilds thumbnail/phash/palette. Runs at every boot, plus as step 3 of the duplicate scan.
+2. **Deleting a photo in Drive didn't remove it from the library** — `sync_folder_worker()` now deletes rows whose Drive file is gone, with a safety cap (skip + warn if more than half the library would vanish in one pass, since a partial Drive listing looks identical to a real mass-deletion).
+3. **Same tag showing under two categories** (e.g. "car" as both Location and Objects, "cars" vs. "car") — `normalize_tag_value()` lowercases and collapses a trailing plural 's' at every tag-write site; `merge_plural_tag_duplicates()` is a one-time migration cleaning up what was already stored (conservative — skips words like glass/lens/hands where the plural is the real tag).
+4. **Bulk tag removal didn't re-filter the grid** — `TagModeBar` now calls `onBulkMutated()` after any bulk tag operation, which re-runs the active search.
+
+Also rewrote the duplicate-detection engine's core comparison: added a real signature check (`compute_signature()`, contrast-normalized 16×16 grayscale) between the old phash pre-filter and the final decision, because phash alone was proven mathematically unable to tell apart two different photos that are both soft/dark/letterboxed. See CLAUDE.md's "Duplicate detection (V29 colour gate; V30 fingerprint rewrite)" section for the full measurement details.
+
+New tests: `test_crop_queue_locally.py` (replaces the deleted, stale `test_crop_locally.py`), `test_sync_delete_parity_locally.py`, `test_tag_plural_merge_locally.py`.
+
+**Commit:** `f5e5b9a`
+
+---
+
+### V31 — Shared-Tag Intersection + Bulk Photo Delete in Select Mode
+*Committed: July 28, 2026*
+
+- Select Mode's "shared tags" panel now shows only tags every selected photo actually has (a true intersection), grouped by category, with a search box that reorders matches to the top instead of hiding anything.
+- Select Mode gained a bulk delete button — same rule as the single-photo delete (owner-or-admin; admin's photos move to Drive's `_Removed`), skip-and-continue if one photo in the batch fails.
+
+**Commit:** `2f50c95`
+
+---
+
+### V32 — Perspective Crop + Select-All Results + Library-Wide Tag Removal
+*Committed: July 28, 2026*
+
+**Perspective Mode:** a second crop shape (four draggable corners, for photographing a screen/poster/document at an angle) alongside the existing rectangle crop, inside the same `CropModal`. Reuses the V27 safety architecture (backup before overwrite, abort on failed backup). 57 tests.
+
+**Select All Results:** "Select all" used to only grab the thumbnails already loaded on screen (e.g. 60 out of a "118 images" result) — a silent under-selection bug. New `/api/search/ids` endpoint returns every matching id without loading every thumbnail, and both it and `/api/search` now share one `build_search_filters()` function so they can't disagree about what matches. Added shift-click range select. 47 tests plus a full regression pass.
+
+**Library-Wide Tag Removal:** a per-chip "remove this tag from all N results" action (admin only) with a preview-first modal showing exactly which photos would lose the tag, grouped by category (since e.g. "neon" can mean two different things depending on category).
+
+Diagnosed (but didn't yet fix) two colour-search bugs — shadow inflating coverage numbers, and hue-only matching being unable to separate orange from brown — fixed the following session as V33.
+
+**Commit:** `4e03904`
+
+---
+
+### V33 — Colour Search: Stop Shadow Inflating Coverage, Add a Brightness Rule
+*Committed: July 30, 2026*
+
+Two bugs made a maxed-out "orange" search return photos that were warm but not actually orange:
+1. Near-black pixels (e.g. `#020100`) report HSV saturation 1.0 and a hue reading arithmetically identical to vivid orange, so the palette-merging step had been quietly absorbing pure shadow into orange/warm colour entries — and the shadow then donated its (large) share of the frame to that entry. Measured on one test photo: search reported 54% orange coverage where only 9.5% of the frame was actually orange. Fixed with `_is_shadow_or_gray()` gating every merge.
+2. Hue alone can't separate orange from brown at any strictness setting, because brown IS dark orange — they sit within a couple of degrees of each other on the colour wheel. The "exactness" slider now also carries a brightness tolerance, which is what actually distinguishes them.
+
+Also widened the dominance ("how much of the frame") slider from a 0.5–40% range to 0.5–95%, since a real photo's single biggest colour commonly exceeds 40% and the old ceiling made "is this the whole shot" literally unaskable.
+
+Full detail (including the exact measurements and why brightness had to be folded into "exactness" rather than added as a third slider) is in CLAUDE.md's Colour section. 18 new tests; full regression suite (19 suites) still green.
+
+**Commit:** `88eb5b3`
+
+---
+
+### Crop Workflow Fixes — Stuck Toasts, Rotate/Delete Buttons, Redetect Ceiling
+*Committed: July 30, 2026*
+
+Two small fixes to the crop tool found in live use, not tied to a version number:
+- The "Cropping in background…" status toast could get stuck on screen or pile up across batches; added a 30-second safety timeout and restructured the async error handling so the toast is guaranteed to clear.
+- Added a Rotate button (90° clockwise, for photos imported sideways) and a Delete button (skip/remove an image mid-batch) directly in the crop tool.
+- Removed an artificial 6-press ceiling on the Redetect button — it now only stops offering more passes once detection genuinely returns nothing further to trim.
+
+**Commits:** `9b719c7`, `2a4628b`
+
+---
+
+### Incident — Railway Volume Filled Up, App Wouldn't Start
+*July 31 – August 3, 2026*
+
+The `/app/data` volume (434MB total) filled up and the app crashed on boot trying to load CLIP embeddings. Timeline:
+- **Jul 31:** Patched `load_embeddings_seed()` to skip loading (rather than crash) when the volume is full, so the app could at least come back online while space was freed. Added a temporary `/api/clear-embeddings` maintenance endpoint to free space by dropping the embeddings table.
+- **Aug 3:** That endpoint briefly had no auth on it (needed for a one-time unattended fix) — flagged in the commit itself as a security risk. The actual fix turned out to be freeing 142MB of stale backup files sitting in the Railway console, not clearing embeddings at all. The temporary endpoint was removed once the real fix landed; the graceful disk-full handling in `load_embeddings_seed()` was kept.
+- Root cause of *why* the volume filled: the nightly DB backup job (`run_db_backup()`, from V27) was writing a full temporary copy of the 283MB database to that same 434MB volume before uploading it — see V35 below for the fix.
+
+**Commits:** `a790b64`, `8fed70d`, `64530f6`, `c05954a`, `43aee9b`, `2f176c3`, `39572e1`
+
+---
+
+### V34 — Duplicate Review: Batch-Select Delete, Instant Close
+*Committed: July 31, 2026*
+
+- Duplicate Review used to require confirming photos one at a time. Now each duplicate group auto-checks every photo except the first one (the one Ryan usually keeps), and one header button batches the checked photos through the existing `/api/images/bulk-delete` endpoint with a single confirmation for the whole batch.
+- Confirming a batch now closes the modal immediately instead of blocking on the delete request — same background-job-plus-toast pattern `CropModal.jsx` already used for its crop queue. If part of the batch actually fails, the grid resyncs with the server so those photos reappear instead of staying wrongly marked gone.
+
+**Commits:** `7e1141d`, `e43a2ef`
+
+---
+
+### V35 — Home Feed Shuffle Fix, Select Mode Bulk Delete Backgrounded, RAM-Only Backups
+*Committed: August 3, 2026*
+
+- **Home feed shuffle stopped feeling random.** The V14 rule that sank "seen in the last 7 days" images below unseen ones broke down once most of the library had been viewed: in Ryan's case 3,496 of 3,499 images were marked seen, so the unseen bucket (3 images) was the only thing that ever occupied the top of the feed — same handful of photos, every day. Dropped the seen/unseen bucket entirely; the feed is now a straight seeded shuffle. **This makes the `/api/search` `seed` param description in CLAUDE.md's endpoint list out of date** — it still describes the old recency-bucketed behavior.
+- **Select Mode's bulk delete could leave the UI lying about what happened.** If the delete request's response failed to parse after Drive had already moved the files and the DB rows were already gone (a slow response, a network hiccup), the app just logged the error and left the old selection on screen — Ryan hit this directly: 9 photos already sitting in Drive's `_Removed` folder while the app still said "9 selected." Fixed with its own try/catch that, on failure, drops the selection and resyncs the grid from the server instead of trusting stale local state.
+- Bulk delete in Select Mode also now closes the confirmation modal instantly and finishes as a background job reported through a toast (same pattern as V34's Duplicate Review fix), instead of blocking the UI on the fetch.
+- **Nightly DB backups now happen entirely in RAM.** `run_db_backup()` used to write a full temporary copy of the 283MB database to the same 434MB `/app/data` volume before uploading it — leaving no headroom, which is what caused the July 31 disk-full crash (and was very likely also breaking Select Mode's bulk deletes, since a delete's own DB write needs a little free space too). Now uses SQLite's `serialize()` (Python 3.11+) to build the backup entirely in memory — nothing touches disk that needs cleaning up afterward.
+
+**Commits:** `abcff28`, `58539b8`, `6950a1c`, `f73eb41`
+
+---
+
+### V36 — Sideways Thumbnails Fixed, Bulk Delete Made Reliable at Scale
+*Committed: August 5–6, 2026*
+
+- **Fixed sideways thumbnails.** `generate_thumbnail()` never applied a phone photo's EXIF rotation tag before resizing, so the re-saved thumbnail baked in the sideways pixels (the full-res view looked fine because it streams the untouched Drive original, tag intact). Same fix the crop path already had; now applied at thumbnail generation too.
+- **Bulk delete logging.** No per-image or summary logging existed in `bulk_delete_images()`, so diagnosing a "delete keeps failing" report meant reconstructing events from bare HTTP status codes. Turned out 22 of 23 recent attempts had actually succeeded — the one failure was the browser giving up on a slow (~20s) request, not a server error. Added per-image failure-reason and request-summary logging.
+- **Bulk delete parallelized.** Each photo's Drive move (in a bulk delete) ran one at a time — a 16-photo batch took 10–20+ seconds, long enough that the browser sometimes gave up before it finished. Now runs 5 moves at a time via a thread pool. Two things had to be handled deliberately: each worker thread gets its own Drive service object (the underlying HTTP transport isn't safe to share across threads), and the `_Removed` folder is looked up once up front rather than racing to create it per-photo. A photo that hits Drive's rate limit gets up to 2 retries with backoff before being counted as failed.
+
+**Commits:** `fd7d6e0`, `71f1ac3`, `411ff99`
+
+### Starting Point for Next Session
+The library sits at ~3,499 images. Known open items:
+1. **CLAUDE.md's `/api/search` endpoint description is stale** — still describes the V14 seen/unseen recency bucket that V35 removed. Needs a one-line fix (see above).
+2. **Crop confidence labels** — flagged unreliable since V26 (dark artwork can read "low confidence" on a perfect crop); still not addressed.
+3. No other bugs currently known open. Pick from here or a new feature request.
