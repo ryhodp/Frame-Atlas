@@ -1787,7 +1787,14 @@ export default function Home() {
       {cropImages && (
         <CropModal
           images={cropImages}
-          onClose={() => setCropImages(null)}
+          onClose={(started) => {
+            setCropImages(null);
+            // V38: a crop batch that actually started leaves Select Mode
+            // stuck on (selection intact, Exit not pressed) — clear it the
+            // moment cropping begins, same as bulk delete's instant-clear
+            // pattern. A cancelled/empty review must leave the selection alone.
+            if (started && tagMode) toggleTagMode();
+          }}
           onImageCropped={(id, patch) => handleImageUpdated(id, patch)}
         />
       )}

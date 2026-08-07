@@ -138,6 +138,11 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   const origImgRef = useRef(null);
   const previewCanvasRef = useRef(null);
 
+  // Tracks whether any crop was actually queued this session, so onClose can
+  // tell a real batch start from every other way this modal closes (cancel,
+  // escape, deleting the whole review batch).
+  const startedRef = useRef(false);
+
   // ── Lazy loading: current + next PREFETCH_AHEAD ────────────────────────────
   // Both the prefetch effect below and "Approve all remaining" can ask to
   // load the same item — the prefetch effect fires it eagerly and doesn't
@@ -225,12 +230,13 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     if (targets.length === 0) return;
 
     autoStartRef.current = true;
+    startedRef.current = true;
 
     // Show toast and close modal. This one has duration 0 (stays until we
     // explicitly dismiss it below) — without that dismiss, it would sit on
     // screen forever and stack up with every batch cropped afterward.
     const inProgressToastId = showToast('✓ Cropping in the background…', 'success', 0);
-    onClose();
+    onClose(true);
 
     // Safety timeout: if the async work hasn't cleared this toast in 30s
     // (e.g. due to a hang in polling), force-clear it. This is a defensive
@@ -574,7 +580,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     if (!item) return;
     items.splice(current, 1);
     if (items.length === 0) {
-      onClose();
+      onClose(startedRef.current);
       return;
     }
     if (current >= items.length) setCurrent(items.length - 1);
@@ -698,6 +704,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   const applyCrops = async () => {
     const targets = cropTargets();
     if (!targets.length) return;
+    startedRef.current = true;
     setPhase('applying');
     resultsRef.current = [];
 
@@ -782,9 +789,9 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   // ── Close guard ────────────────────────────────────────────────────────────
   const tryClose = () => {
     if (phase === 'applying') return; // don't abandon mid-apply
-    if (phase === 'done') { onClose(); return; }
+    if (phase === 'done') { onClose(startedRef.current); return; }
     const touched = historyRef.current.length > 0 || items.some(i => i.decided);
-    if (!touched) { onClose(); return; }
+    if (!touched) { onClose(startedRef.current); return; }
     setConfirmClose(true);
   };
 
@@ -1304,7 +1311,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             </div>
           )}
           <button
-            onClick={onClose}
+            onClick={() => onClose(startedRef.current)}
             style={{
               background: '#d9a441', color: '#3d2f00', fontWeight: 700, fontSize: '14px',
               padding: '12px 28px', borderRadius: '8px', border: 'none', cursor: 'pointer',
@@ -1347,7 +1354,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                 Keep reviewing
               </button>
               <button
-                onClick={onClose}
+                onClick={() => onClose(startedRef.current)}
                 style={{
                   background: 'rgba(255,180,171,0.18)', border: '1px solid rgba(255,180,171,0.6)',
                   color: '#ffb4ab', borderRadius: '6px', padding: '7px 14px',
