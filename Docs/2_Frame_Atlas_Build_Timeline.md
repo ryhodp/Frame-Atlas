@@ -265,6 +265,171 @@ Session Log.
 
 **Done when:** Right-clicking a film still on Letterboxd adds it to the library.
 
+**Shipped as V25 (web clipping).** Built as a direct-capture extension (`POST /api/clip`
+takes the pixels from the browser) rather than a save-to-Drive-then-sync flow — see
+CLAUDE.md's "Web clipping (V25)" section.
+
+---
+
+# ═══ PHASE 2 — THE PITCH LAYER ═══
+*Planned August 6, 2026, after a code review + a workflow review from the standpoint of a
+creative director prepping an agency job. The finding that drove this phase: **Frame Atlas is
+excellent at FINDING references and thin at PRESENTING them.** Search, tagging, colour and
+decks are genuinely strong. But there's no export, no way to present from the app, no way to
+reorder the sections of a lookbook, and no way for a client to react to one. For a pitch, that
+last mile is the whole job.*
+
+*Days below are sequenced so the agency-facing work lands first. Day 24 (performance) is the
+biggest day-to-day quality-of-life win and can be pulled forward any time the app feels slow.*
+
+---
+
+## Day 20 — Deck Ordering + Crop Selection Fix *(V38 — small, start here)*
+
+**Goal:** Stop the two things that interrupt the flow of actually building a lookbook.
+
+- **Crop selection bug:** after "Crop all" runs, the selection and Select Mode stay active, so
+  you have to manually hit Exit before selecting new photos. Clear both when a crop batch
+  actually starts — but KEEP the selection if the modal was cancelled without cropping
+  (you may have opened it by accident). Same pattern V35 already uses for bulk delete.
+  Cause is at `Home.jsx` → `<CropModal onClose={() => setCropImages(null)} />`, which closes
+  the modal without touching selection state.
+- **Scene reordering:** `PATCH /api/scenes/<id>` currently only renames. Add ordering so
+  scenes can be dragged up/down within a deck. For a pitch, section order IS the argument —
+  realizing "tone should come before palette" currently means deleting and rebuilding.
+- **Surface Storyboard mode better:** reordering photos *within* a scene already works
+  (Day 12, V11) but it's hidden behind a "⊞ Storyboard" button that reads as an export or a
+  view toggle. Ryan didn't know it existed. Make it obviously the way to sequence a scene.
+
+**Done when:** Cropping two photos and returning home leaves nothing selected; scenes can be
+dragged into a new order and it sticks; the way to sequence photos in a scene is findable
+without being told.
+
+---
+
+## Day 21 — PDF Lookbook Export *(V39)*
+
+**Goal:** A pitch needs a leave-behind — the file that sits in the client's inbox after the
+meeting and gets forwarded to people who weren't in the room. Right now the only output
+Frame Atlas has is a live web link.
+
+- Export any deck to PDF, with the layout chosen at export time:
+  - **One image per page, full bleed** — the pitch document. Scene name as a title card,
+    each frame its own page, storyboard note underneath.
+  - **Contact sheet grid** — multiple frames per page, scene by scene. The working
+    reference / crew handout.
+- Respects storyboard order and scene order (so Day 20 is a genuine prerequisite).
+- Deck title page; frames without notes just omit the caption rather than leaving a gap.
+
+**Watch out:** this needs a PDF library added to `backend/requirements.txt`, which adds 3+ min
+to every Railway deploy from then on. Pick one deliberately — `reportlab` is the obvious
+candidate and is pure-Python. Confirm the image resolution question before building: a PDF
+built from 600px thumbnails will look soft when printed or projected, so this likely needs to
+pull full-res from Drive at export time even though presentation mode does not.
+
+**Done when:** A 20-frame deck exports to a PDF that Ryan would actually send to an agency,
+in both layouts.
+
+---
+
+## Day 22 — Presentation Mode *(V40)*
+
+**Goal:** Present a lookbook from the app, full screen, without a browser header bar in shot.
+
+- Fullscreen deck presentation, keyboard-driven (arrows / space to advance, Esc to exit).
+- Scene name as a title card between sections; storyboard note shown under the frame
+  (toggleable — sometimes you're talking and don't want text competing).
+- **Uses the existing 600px thumbnails** (Ryan's call). They're already loaded in the grid,
+  so this is nearly free to build and there's zero loading pause between frames.
+  **Build it so the image source is a single swappable line** — if it ever looks soft on a
+  real projector, upgrading to full-res-with-preload should be a small change, not a rewrite.
+
+**Done when:** Ryan can open a deck, hit present, and run a pitch off the laptop with nothing
+on screen but the work.
+
+---
+
+## Day 23 — Client Feedback Loop *(V41)*
+
+**Goal:** Close the loop that currently happens over text and email and gets reconciled by hand.
+
+- On the existing public `/share/<token>` link, viewers can:
+  - **Pick** a frame (a "this one" toggle) — the signal that matters most
+  - **Comment** on a specific frame
+- **No login required** — the whole value of the share link is that an agency producer opens it
+  without making an account, and forcing signup kills response rate. Viewer types their name
+  once, stored in their own browser, and everything they leave is attributed to it.
+- **Viewers see each other's comments** (Ryan's call) — collaborative, the whole agency side
+  sees one conversation. Accept the tradeoff that early opinions can anchor later ones.
+- Owner-side summary on the deck: which frames got picked, by whom, and every comment in
+  one place — replacing the manual reconciliation.
+- Owner controls: feedback can be switched off per deck, and the owner can delete any comment.
+  The share token is unguessable, but anyone it's forwarded to can post, so these are the
+  pressure valve.
+
+**Done when:** Ryan shares a lookbook, two people mark picks and leave notes without signing
+in, and Ryan sees a consolidated summary.
+
+---
+
+## Day 24 — Performance: Thumbnail Caching + Indexes + CI *(V42)*
+
+**Goal:** The biggest day-to-day quality-of-life win available. Pull this forward if the app
+ever feels slow.
+
+- **Thumbnails are the problem.** They're stored as base64 text inside the search response, so
+  the browser cannot cache them — there's no image URL to remember. Measured at the real
+  library size (3,499 images, ~81 KB each): **~6.5 MB per page of 60**, ~32 MB to scroll 300,
+  and it all re-transfers on the next visit. That's 2.6 s on good 4G but **10.4 s on hotel/set
+  wifi** and ~26 s on weak LTE. Fix: serve each thumbnail from its own cacheable URL
+  (`/api/images/<id>/thumb`) with proper cache headers, and have the service worker cache
+  those (it currently and correctly refuses to cache anything under `/api` — thumbnails would
+  need to be a deliberate exception, since unlike `/api/auth/me` they're immutable content).
+  This also makes offline mode genuinely useful instead of app-shell-only.
+- **Database indexes — there are currently none.** Benchmarked at real scale
+  (3,499 images / 108,469 tag rows): single tag search **11.0 ms → 0.18 ms (60×)**, two-tag
+  search **9.7 → 0.50 ms (19×)**, autocomplete **31.0 → 7.9 ms (4×)**. Index build took
+  291 ms and cost 3 MB. Honest framing: **invisible at today's size** — 11 ms is nothing —
+  but it grows in a straight line, and autocomplete fires on every keystroke, so around
+  ~14,000 images it starts to feel laggy. Cheap insurance, not an emergency.
+- **CI:** 27 test scripts exist and nothing runs them automatically — they only execute when
+  someone remembers, which is how the "7 of 23 failing on main" situation happened in July.
+  A GitHub Action on every push is ~20 lines.
+
+**Done when:** A revisit to the home grid loads from cache instead of re-downloading; tests
+run themselves on every push.
+
+---
+
+## Day 25 — Security + Reliability Hardening *(V43)*
+
+**Goal:** Close the gaps that are fine for an invite-only tool but shouldn't stay open forever.
+
+- **No limit on login attempts** — passwords can be guessed as fast as requests can be sent.
+  (Password *hashing* itself is correct — werkzeug pbkdf2.) Add throttling/lockout.
+- **Friends' Gemini API keys are stored as plain readable text** in `users.gemini_api_key`.
+  If the DB file leaked, those keys are usable and they bill to your friends. Encrypt at rest.
+- **13 silent `except: pass` blocks** swallow errors without a trace — this is the pattern that
+  made the V27 crop failure invisible for weeks. Audit them; log what's being discarded.
+- **`backend/library.db` is committed to git** (currently empty/harmless, but a real one would
+  put the whole library in git history). Untrack it and add to `.gitignore`.
+- Checked and CLEAN, no action needed: SQL injection — every dynamic query uses hardcoded
+  table names or generated `?` placeholders.
+
+---
+
+## Day 26 — Structural Refactor *(V44 — ongoing, no visible payoff)*
+
+**Goal:** Lower the cost of every future feature. Nothing here is broken; this is about why
+small changes keep having surprising side effects.
+
+- `backend/app.py` is **6,376 lines** — every endpoint, AI tagging, Drive sync, crop, colour
+  math, backups, in one file. Split by domain.
+- `frontend/src/pages/Home.jsx` is **1,855 lines with 36 separate pieces of state**. The V35
+  stale-selection bug lived exactly here, and so did the Day 20 crop-selection bug.
+- Do this incrementally, one domain at a time, with the test suite green before and after —
+  never as one big-bang rewrite.
+
 ---
 
 ## Summary
@@ -287,7 +452,15 @@ Session Log.
 | 13 | Analytics + utility | Library insights + utility views |
 | 14 | Multi-user auth | Friends can log in |
 | 15 | Polish + mobile | Production-ready |
-| 16 | Fly.io migration | Cut Railway, save $60/year |
-| 17 | Personal libraries | Per-user folders *(optional)* |
-| 18 | NAS migration | $0/month forever *(when ready)* |
-| 19 | Browser extension | Web clipping *(future)* |
+| 16 | Fly.io migration | ~~Cut Railway~~ CANCELLED |
+| 17 | Personal libraries | Per-user folders ✅ *(V17)* |
+| 18 | NAS migration | $0/month forever *(parked — needs hardware)* |
+| 19 | Browser extension | Web clipping ✅ *(V25)* |
+| **— PHASE 2: THE PITCH LAYER —** | | |
+| **20** | **Deck ordering + crop selection fix** | **Scenes reorder; selection clears after crop** *(V38 — next)* |
+| 21 | PDF lookbook export | A file you can send an agency *(V39)* |
+| 22 | Presentation mode | Present a pitch from the app *(V40)* |
+| 23 | Client feedback loop | Picks + comments on share links *(V41)* |
+| 24 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run *(V42)* |
+| 25 | Security + reliability hardening | Login throttling, key encryption *(V43)* |
+| 26 | Structural refactor | Lower cost of every future change *(V44, ongoing)* |

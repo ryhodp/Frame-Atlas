@@ -1514,3 +1514,87 @@ The library sits at ~3,499 images. Known open items:
 1. **CLAUDE.md's `/api/search` endpoint description is stale** — still describes the V14 seen/unseen recency bucket that V35 removed. Needs a one-line fix (see above).
 2. **Crop confidence labels** — flagged unreliable since V26 (dark artwork can read "low confidence" on a perfect crop); still not addressed.
 3. No other bugs currently known open. Pick from here or a new feature request.
+
+---
+
+## Planning Session — Code Review + Creative-Director Workflow Review → Phase 2 Roadmap
+*Completed: August 6, 2026*
+*Status: PLANNING ONLY — no code changed this session*
+
+### What Happened
+Two reviews, done back to back: a senior-engineer pass over the actual codebase (not just the
+known-debt notes already in CLAUDE.md), and a workflow review from the standpoint of a
+creative director prepping to pitch a big agency job — i.e. stress-testing whether Frame Atlas
+actually solves that job's pain points, not just Ryan's day-to-day DP reference use.
+
+**Engineering findings, each verified rather than asserted:**
+- No database indexes anywhere. Benchmarked at real scale (3,499 images / 108,469 tag rows,
+  built locally to match): single tag search 11.0ms → 0.18ms (60×) with indexes added,
+  two-tag AND 9.7→0.50ms (19×), autocomplete 31.0→7.9ms (4×). Framed honestly as invisible
+  today, growing linearly, worth doing before ~14k images.
+- Thumbnails are base64 text inside search responses, so the browser can never cache them.
+  Measured at the real per-image size (~81KB): ~6.5MB per 60-image page, ~32MB per 300-image
+  scroll, re-transferred in full on every visit. ~10.4s on hotel/set wifi. Identified as the
+  single highest-value fix available — also what makes offline mode more than app-shell-only.
+- `backend/app.py` (6,376 lines) and `Home.jsx` (1,855 lines, 36 `useState` calls) flagged as
+  structural debt — nothing broken, but why small changes keep having side effects (the V35
+  stale-selection bug and the crop-selection bug found this session both live in Home.jsx).
+- 27 test scripts exist, none run automatically (how "7/23 failing on main" happened in July).
+- Security: no login throttling; friends' Gemini keys stored as plain readable text; 13 silent
+  `except: pass` blocks; `backend/library.db` (currently empty) is tracked in git. SQL
+  injection surface checked specifically and confirmed CLEAN — every dynamic query uses
+  hardcoded table/column names or generated `?` placeholders, never interpolated user input.
+
+**Creative-director findings:** Frame Atlas is strong at *finding* references (search, tagging,
+colour, decks) and thin at *presenting* them — no export at all (the Obsidian export was
+cancelled in V12 and nothing replaced it), share links are thumbnail-only so they look soft
+projected or on Retina, no fullscreen presentation mode, scenes can't be reordered (only
+renamed — Ryan first read this as "can't reorder photos," but that already works via
+Storyboard mode from Day 12/V11; the actual gap is section-level ordering), and no way for a
+client to react to a shared deck — feedback currently happens over text/email and gets
+reconciled by hand.
+
+### Ryan's Two Corrections / Live Bug Reports This Session
+1. **Crop selection doesn't clear.** Selecting 2+ images, cropping them via "Crop all," then
+   returning to Home leaves both still selected — has to manually hit Exit before selecting
+   anything new. Root cause found: `Home.jsx`'s `<CropModal onClose={() => setCropImages(null)} />`
+   only closes the modal, never touches `selectedIds` or Select Mode.
+2. Ryan asked for "order photos within a scene," which turned out to already exist
+   (Storyboard mode, Day 12) — he didn't know the button was there. The real request, once
+   clarified, was **reordering the scenes themselves**, which genuinely doesn't exist
+   (`PATCH /api/scenes/<id>` only renames).
+
+### Decisions Made (Confirmed with Ryan, pre-planning)
+- ✅ Ordering: build BOTH scene reordering (new) and make Storyboard mode (existing) easier
+  to find — not just one or the other
+- ✅ PDF export: support both layouts, chosen at export time — one-image-per-page full bleed
+  (the pitch document) AND a contact-sheet grid (the crew/working reference)
+- ✅ Presentation mode: use the existing 600px thumbnails, not full-res — nearly free to build
+  since they're already loaded in the grid, zero load pause between frames. Built with the
+  image source as a single swappable line so upgrading to full-res-with-preload later, if a
+  real projector ever makes it look soft, is a small change, not a rewrite
+- ✅ Feedback loop: per-frame picks + comments on the existing share link, no login required
+  (viewer types a name once), and viewers CAN see each other's comments — collaborative, one
+  conversation the whole agency side shares, accepting the anchoring tradeoff that comes with it
+
+### Roadmap Written
+Added **Phase 2 — The Pitch Layer** to `/docs/2_Frame_Atlas_Build_Timeline.md`, Days 20–26,
+sequenced with the agency-facing work first:
+- **Day 20 (V38, next session):** crop-selection-clears-on-actual-crop fix + scene reordering
+  + surface Storyboard mode better. Small, start here.
+- **Day 21 (V39):** PDF lookbook export, both layouts
+- **Day 22 (V40):** fullscreen presentation mode, thumbnail-quality per above
+- **Day 23 (V41):** client feedback loop (picks + shared comments) on share links
+- **Day 24 (V42):** performance — thumbnail caching (the big one), DB indexes, CI test runner
+- **Day 25 (V43):** security/reliability hardening — login throttling, encrypt Gemini keys at
+  rest, audit silent exception handlers, untrack `library.db`
+- **Day 26 (V44):** structural refactor of `app.py` / `Home.jsx` — ongoing, no visible payoff,
+  do incrementally with tests green throughout
+
+Full detail, rationale, and "done when" criteria for each day are in the timeline doc itself.
+
+### Starting Point for Next Session
+**Day 20 (V38)** — smallest day in the new phase, fixes something Ryan hits every crop batch:
+1. Clear `selectedIds` + exit Select Mode when a crop batch actually starts (not on cancel)
+2. Add scene reordering (drag scenes up/down within a deck)
+3. Make Storyboard mode (existing photo-reorder-within-a-scene feature) more discoverable
