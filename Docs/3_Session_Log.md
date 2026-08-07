@@ -1598,3 +1598,61 @@ Full detail, rationale, and "done when" criteria for each day are in the timelin
 1. Clear `selectedIds` + exit Select Mode when a crop batch actually starts (not on cancel)
 2. Add scene reordering (drag scenes up/down within a deck)
 3. Make Storyboard mode (existing photo-reorder-within-a-scene feature) more discoverable
+
+---
+
+## Planning Addendum — DGA/ASC/PGA Workflow Review, New Day 21 (DP Notes + Search)
+*Completed: August 7, 2026*
+*Status: PLANNING ONLY — no code changed this session*
+
+### What Happened
+Ran the same kind of workflow review as the creative-director pass, this time from three more
+production roles: a working DGA director, an ASC-level DP, and a PGA producer — asking what
+each would feel is missing, grounded against the actual tag taxonomy and code (not assumed).
+
+**Findings:**
+- **Director:** filmography linking (click a director's name → their frames) already reads as
+  a director's tool. Gap: Frame Atlas's "scenes" are curatorial groupings inside a deck, not
+  script scene numbers — a real naming collision waiting to confuse a conversation with a 1st
+  AD. Also no side-by-side compare view (checked — doesn't exist), which is how a director's
+  actual decision moment usually happens.
+- **DP (ASC-level):** lighting vocabulary in the taxonomy (`lighting_quality`,
+  `lighting_color_temperature`) is genuinely well-observed. Gap: every technical tag
+  (`camera_format`) is an AI *guess from pixels* — nowhere to record the real facts (lens,
+  T-stop, filtration) a DP actually needs to remember a look is reproducible.
+- **Producer:** the V23 permission model (viewer/editor, invite-only) is closer to production
+  reality than expected, and the already-planned Day 24 feedback loop covers most of what a
+  producer wants for approvals. Gap raised: rights/clearance tracking on recognizable film
+  stills used in client-facing decks. **Ryan's call: skip this** — not going on the roadmap.
+
+### Ryan's Two Follow-Up Requests
+1. **"Can't we name scenes? Scene 12 - Kitchen, Scene 13 - Hallway…"** — checked
+   `POST /api/scenes`: `name` is already unrestricted free text, no code needed. This already
+   works today, and Day 20's scene reordering (already planned) covers lining them up to match
+   a script if created out of order.
+2. **DP technical notes, searchable** — Ryan's own example: "we shot at T12 on the Alexa Mini
+   LF, used the probe lens, a rain machine, and had the lights on a colored chase," wanting to
+   search "alexa mini lf" or "colored chase" and pull that photo up directly. This is new
+   ground (checked: no free-text search exists anywhere in the app today, not even on
+   captions) — added to the roadmap as **new Day 21 (V39)**, pushing PDF export → Day 22 and
+   everything after it back by one (full renumber of Days 22–26 → 23–27, V40–V44 → V41–V45,
+   done via a scripted regex pass then hand-verified against every cross-reference).
+
+### Decisions Made (Confirmed with Ryan, pre-planning)
+- ✅ Notes structure: structured fields (Camera/Rig, Lens, Lens Filter, Stop) + one free-text
+  "On-Set Notes" box — not a single blob, not fully structured. Ryan specifically asked to add
+  Camera Rig and Lens Filter beyond the original three-field suggestion
+- ✅ Search quality: Ryan referenced Obsidian's Omnisearch plugin directly — tokenized, ranked,
+  forgiving, not a brittle substring match. Verified SQLite FTS5 is available locally
+  (sqlite3 3.43.2) before committing to it in the plan; flagged to re-verify on the Railway
+  `python:3.11-slim` image at first real deploy, since FTS5 support depends on how libsqlite3
+  was compiled, not just the Python version
+- ✅ Note matches get their own chip style, distinct from tag chips (gold) and NL chips
+  (violet) — visual honesty about what actually matched
+- ✅ Any photo can carry notes, not just `my_work` — no reason to restrict
+- ✅ Rights/clearance tracking (producer's gap): explicitly skipped, not added to roadmap
+
+### Starting Point for Next Session
+Unchanged from Day 20 above — that's still first. Day 21 (DP notes + search) is now fully
+designed and next after it; full field list, FTS5 approach, and chip behavior are written out
+in `/docs/2_Frame_Atlas_Build_Timeline.md`.

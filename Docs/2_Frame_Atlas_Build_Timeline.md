@@ -279,7 +279,7 @@ decks are genuinely strong. But there's no export, no way to present from the ap
 reorder the sections of a lookbook, and no way for a client to react to one. For a pitch, that
 last mile is the whole job.*
 
-*Days below are sequenced so the agency-facing work lands first. Day 24 (performance) is the
+*Days below are sequenced so the agency-facing work lands first. Day 25 (performance) is the
 biggest day-to-day quality-of-life win and can be pulled forward any time the app feels slow.*
 
 ---
@@ -307,7 +307,57 @@ without being told.
 
 ---
 
-## Day 21 — PDF Lookbook Export *(V39)*
+## Day 21 — DP Technical Notes + Full-Text Search *(V39)*
+
+**Goal:** Frame Atlas's taxonomy is fluent in mood and light but has nowhere to record what it
+actually took to get a shot — camera, lens, filtration, gear. Found in the ASC-DP review: every
+technical tag is an AI *guess from pixels*; nothing lets Ryan record the real facts himself.
+
+*Planned August 7, 2026, from Ryan's own example: "we shot at T12 on the Alexa Mini LF, used
+the probe lens, a rain machine, and had the lights on a colored chase" — and wanting to search
+"alexa mini lf" or "colored chase" and pull that photo straight up.*
+
+**Fields (on the `images` table, any photo — Ryan's call, not restricted to `my_work`):**
+- Structured, so these stay reliable filters and don't drown in prose: **Camera / Rig**,
+  **Lens**, **Lens Filter**, **Stop**. `Stop` is text, not a number — T-stops don't fit a
+  numeric column cleanly (`T1.2`, `T2.8`, `T4`).
+- One free-text **"On-Set Notes"** box for everything else — rain machine, colored chase,
+  technique, anything that doesn't fit a clean field. All fields optional; none block saving.
+- Edited in `ImageDetail.jsx`, its own section alongside caption/tags/filmography.
+
+**Search — SQLite FTS5, confirmed available (`sqlite3.sqlite_version` 3.43.2 locally; the
+Railway image is `python:3.11-slim`, whose SQLite ships FTS5 compiled in — verify on first
+real deploy, since a stripped base image is the one way this could differ):**
+- Ryan asked for something like Obsidian's Omnisearch — tokenized, ranked, forgiving of
+  imprecise phrasing, not a brittle `LIKE '%...%'`. FTS5 is SQLite's own built-in full-text
+  index: tokenizes on word boundaries, ranks by relevance (BM25), and needs no new pip
+  dependency (unlike the PDF library Day 22 needs) — it ships inside Python's `sqlite3` module.
+- A virtual table (`notes_fts`) mirrors the free-text + structured fields, kept in sync via
+  SQLite triggers on insert/update/delete of the `images` row — not from every callsite in
+  `app.py` by hand, so it can't drift out of sync the way two hand-copied filter functions did
+  before `build_search_filters()` (V32).
+- A note match becomes **its own chip style** (Ryan's call) — visually distinct from a gold tag
+  chip or a violet NL chip, e.g. amber "🔧 alexa mini lf" — so it's clear at a glance why a
+  photo matched. Combines (AND) with tag chips and NL chips, same as every other filter type.
+- Runs BEFORE the paid Gemini NL-interpret fallback, not instead of tag matching — free,
+  instant, and this ordering is also a small standing cost win: fewer phrases fall through to a
+  billed API call once notes search can answer them first.
+
+**Watch out:**
+- FTS5's tokenizer treats `-` and `.` as word breaks by default — "Alexa Mini LF" indexes fine,
+  but confirm `T1.2` round-trips (`T`, `1`, `2` as separate tokens is likely fine for search,
+  just don't assume the stored text renders back with the period intact without checking).
+- This is genuinely new territory — no existing free-text search anywhere in the app to model
+  the migration/backfill pattern on. Build the FTS trigger sync as its own small test harness
+  before touching real data, same discipline as `test_v33_color_fix_locally.py`.
+
+**Done when:** Ryan can enter camera/lens/stop/filter + a paragraph of notes on a photo, then
+search "alexa mini lf" or "colored chase" from the same search bar and get that photo back
+with a distinct chip showing why it matched.
+
+---
+
+## Day 22 — PDF Lookbook Export *(V40)*
 
 **Goal:** A pitch needs a leave-behind — the file that sits in the client's inbox after the
 meeting and gets forwarded to people who weren't in the room. Right now the only output
@@ -332,7 +382,7 @@ in both layouts.
 
 ---
 
-## Day 22 — Presentation Mode *(V40)*
+## Day 23 — Presentation Mode *(V41)*
 
 **Goal:** Present a lookbook from the app, full screen, without a browser header bar in shot.
 
@@ -349,7 +399,7 @@ on screen but the work.
 
 ---
 
-## Day 23 — Client Feedback Loop *(V41)*
+## Day 24 — Client Feedback Loop *(V42)*
 
 **Goal:** Close the loop that currently happens over text and email and gets reconciled by hand.
 
@@ -372,7 +422,7 @@ in, and Ryan sees a consolidated summary.
 
 ---
 
-## Day 24 — Performance: Thumbnail Caching + Indexes + CI *(V42)*
+## Day 25 — Performance: Thumbnail Caching + Indexes + CI *(V43)*
 
 **Goal:** The biggest day-to-day quality-of-life win available. Pull this forward if the app
 ever feels slow.
@@ -401,7 +451,7 @@ run themselves on every push.
 
 ---
 
-## Day 25 — Security + Reliability Hardening *(V43)*
+## Day 26 — Security + Reliability Hardening *(V44)*
 
 **Goal:** Close the gaps that are fine for an invite-only tool but shouldn't stay open forever.
 
@@ -418,7 +468,7 @@ run themselves on every push.
 
 ---
 
-## Day 26 — Structural Refactor *(V44 — ongoing, no visible payoff)*
+## Day 27 — Structural Refactor *(V45 — ongoing, no visible payoff)*
 
 **Goal:** Lower the cost of every future feature. Nothing here is broken; this is about why
 small changes keep having surprising side effects.
@@ -458,9 +508,10 @@ small changes keep having surprising side effects.
 | 19 | Browser extension | Web clipping ✅ *(V25)* |
 | **— PHASE 2: THE PITCH LAYER —** | | |
 | **20** | **Deck ordering + crop selection fix** | **Scenes reorder; selection clears after crop** *(V38 — next)* |
-| 21 | PDF lookbook export | A file you can send an agency *(V39)* |
-| 22 | Presentation mode | Present a pitch from the app *(V40)* |
-| 23 | Client feedback loop | Picks + comments on share links *(V41)* |
-| 24 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run *(V42)* |
-| 25 | Security + reliability hardening | Login throttling, key encryption *(V43)* |
-| 26 | Structural refactor | Lower cost of every future change *(V44, ongoing)* |
+| 21 | DP technical notes + full-text search | Camera/lens/stop/filter fields + Omnisearch-style find *(V39)* |
+| 22 | PDF lookbook export | A file you can send an agency *(V40)* |
+| 23 | Presentation mode | Present a pitch from the app *(V41)* |
+| 24 | Client feedback loop | Picks + comments on share links *(V42)* |
+| 25 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run *(V43)* |
+| 26 | Security + reliability hardening | Login throttling, key encryption *(V44)* |
+| 27 | Structural refactor | Lower cost of every future change *(V45, ongoing)* |
