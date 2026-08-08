@@ -56,6 +56,7 @@ export default function Home() {
   const isMobile = useIsMobile();
   const [chips, setChips] = useState([]);
   const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
+  const [noteChips, setNoteChips] = useState([]);    // V39: [phrase, phrase, ...] — on-set-notes search
   const [color, setColor] = useState(null);           // active hex or null
   // V24: color search knobs. `prom` = min % of the frame the color must cover,
   // `exact` = 0-100 hue strictness. The *Applied values are what actually get
@@ -123,7 +124,7 @@ export default function Home() {
   const seenIdsRef = useRef(new Set());   // every id already queued this visit
   const pendingViewsRef = useRef(new Set()); // queued but not yet sent to the server
 
-  const hasFilters = chips.length > 0 || nlChips.length > 0 || !!color || !!film || !!ar;
+  const hasFilters = chips.length > 0 || nlChips.length > 0 || noteChips.length > 0 || !!color || !!film || !!ar;
 
   // V17: brand-new friend with an empty library → fetch what the setup
   // checklist needs (folder connected? key saved?). Only fires in the
@@ -152,6 +153,7 @@ export default function Home() {
     const params = new URLSearchParams();
     if (chips.length) params.set('chips', chips.join(','));
     if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
+    if (noteChips.length) params.set('notes', JSON.stringify(noteChips));
     if (color) {
       params.set('color', color);
       params.set('prom', promApplied);
@@ -160,7 +162,7 @@ export default function Home() {
     if (film) params.set('film', film);
     if (ar) params.set('ar', ar);
     return params;
-  }, [chips, nlChips, color, film, ar, promApplied, exactApplied]);
+  }, [chips, nlChips, noteChips, color, film, ar, promApplied, exactApplied]);
 
   // ── Fetch one page of results; append=true keeps existing images ───────────
   const fetchPage = useCallback(async (pageNum, append) => {
@@ -176,7 +178,7 @@ export default function Home() {
     try {
       const params = buildFilterParams();
       // No filters → default browse view → ask the server for this visit's shuffle
-      if (!chips.length && !nlChips.length && !color && !film && !ar) {
+      if (!chips.length && !nlChips.length && !noteChips.length && !color && !film && !ar) {
         params.set('seed', shuffleSeedRef.current);
       }
       params.set('page', pageNum);
@@ -196,7 +198,7 @@ export default function Home() {
         fetchingRef.current = false;
       }
     }
-  }, [buildFilterParams, chips, nlChips, color, film, ar]);
+  }, [buildFilterParams, chips, nlChips, noteChips, color, film, ar]);
 
   // Filters changed → reset to page 0 (skip while in Find Similar mode)
   useEffect(() => {
@@ -411,8 +413,21 @@ export default function Home() {
     searchRef.current?.focus();
   };
 
+  // V39: selecting an on-set-notes match from the dropdown — the suggestion
+  // IS the search (there's no fixed vocabulary of notes values like tags
+  // have), so picking it just locks in the phrase the user already typed.
+  const selectNote = (phrase) => {
+    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
+    if (!noteChips.includes(phrase)) setNoteChips(prev => [...prev, phrase]);
+    setSearchText('');
+    setShowAuto(false);
+    setAutocomplete([]);
+    searchRef.current?.focus();
+  };
+
   const removeChip = (tag) => setChips(prev => prev.filter(t => t !== tag));
   const removeNlChip = (phrase) => setNlChips(prev => prev.filter(n => n.phrase !== phrase));
+  const removeNoteChip = (phrase) => setNoteChips(prev => prev.filter(p => p !== phrase));
 
   // Picking a color while in Find Similar mode exits similar mode first
   const pickColor = (hex) => {
@@ -423,6 +438,7 @@ export default function Home() {
   const clearAll = () => {
     setChips([]);
     setNlChips([]);
+    setNoteChips([]);
     setColor(null);
     setProm(DEFAULT_PROM);
     setExact(DEFAULT_EXACT);
@@ -468,6 +484,7 @@ export default function Home() {
       const pick = autocomplete[highlightedIndex] || autocomplete[0];
       if (pick.type === 'film') selectFilm(pick.value);
       else if (pick.type === 'ar') selectAr(pick.value);
+      else if (pick.type === 'note') selectNote(pick.value);
       else addChip(pick.value);
     } else {
       interpretPhrase(text);
@@ -499,7 +516,7 @@ export default function Home() {
       await fetch('/api/bookmarks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, state: { chips, nlChips, color, film, ar, prom, exact } })
+        body: JSON.stringify({ name, state: { chips, nlChips, noteChips, color, film, ar, prom, exact } })
       });
       setSaveName('');
       loadBookmarks();
@@ -511,6 +528,7 @@ export default function Home() {
   const applyBookmark = (bm) => {
     setChips(bm.state.chips || []);
     setNlChips(bm.state.nlChips || []);
+    setNoteChips(bm.state.noteChips || []);
     setColor(bm.state.color || null);
     setFilm(bm.state.film || null);
     setAr(bm.state.ar || null);
@@ -942,6 +960,7 @@ export default function Home() {
                           {[
                             ...(bm.state.chips || []),
                             ...(bm.state.nlChips || []).map(n => `“${n.phrase}”`),
+                            ...(bm.state.noteChips || []).map(p => `🔧 ${p}`),
                             ...(bm.state.film ? [`🎬 ${bm.state.film}`] : []),
                             ...(bm.state.ar ? [`▭ ${bm.state.ar}`] : []),
                             ...(bm.state.color ? [bm.state.color] : [])
@@ -1005,6 +1024,7 @@ export default function Home() {
                 onMouseDown={() => {
                   if (opt.type === 'film') selectFilm(opt.value);
                   else if (opt.type === 'ar') selectAr(opt.value);
+                  else if (opt.type === 'note') selectNote(opt.value);
                   else addChip(opt.value);
                 }}
                 onMouseEnter={() => setHighlightedIndex(i)}
@@ -1030,6 +1050,12 @@ export default function Home() {
                     <span style={{ fontSize: '11px', flexShrink: 0 }}>▭</span>
                     <span style={{ fontSize: '13.5px', color: '#7dd3c8' }}>{opt.value}</span>
                     <span style={{ fontSize: '11px', color: '#65625a' }}>Aspect Ratio</span>
+                  </span>
+                ) : opt.type === 'note' ? (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '11px', flexShrink: 0 }}>🔧</span>
+                    <span style={{ fontSize: '13.5px', color: '#e0935a' }}>{opt.value}</span>
+                    <span style={{ fontSize: '11px', color: '#65625a' }}>On-Set Notes</span>
                   </span>
                 ) : (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1191,8 +1217,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* Active chips (tags + NL phrases + film + aspect ratio + similar) */}
-        {(chips.length > 0 || nlChips.length > 0 || film || ar || similarTo) && (
+        {/* Active chips (tags + NL phrases + notes phrases + film + aspect ratio + similar) */}
+        {(chips.length > 0 || nlChips.length > 0 || noteChips.length > 0 || film || ar || similarTo) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginTop: '12px' }}>
             {/* Similar chip — from "Find Similar" in the detail panel. Soft violet, distinct from NL/film chips */}
             {similarTo && (
@@ -1315,6 +1341,35 @@ export default function Home() {
               </span>
             ))}
 
+            {/* On-set-notes chips (V39) — amber, distinct from gold tag chips
+                and violet NL chips, so it's clear at a glance the match came
+                from Camera/Lens/Filter/Stop/On-Set Notes, not a tag. */}
+            {noteChips.map(phrase => (
+              <span
+                key={phrase}
+                title={`On-set notes search — finds photos whose Camera/Lens/Filter/Stop/On-Set Notes mention “${phrase}”`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  background: 'rgba(224,147,90,0.14)',
+                  border: '1px solid rgba(224,147,90,0.45)',
+                  borderRadius: '6px',
+                  padding: '4px 8px 4px 9px',
+                  fontSize: '12.5px', color: '#e0935a', fontWeight: 500
+                }}
+              >
+                🔧 {phrase}
+                <button
+                  onClick={() => removeNoteChip(phrase)}
+                  style={{
+                    background: 'none', border: 'none', color: '#e0935a',
+                    cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
+                >×</button>
+              </span>
+            ))}
+
             <button
               onClick={clearAll}
               style={{
@@ -1352,6 +1407,27 @@ export default function Home() {
               photos that feel like {nlChips.length === 1 ? 'that phrase' : 'those phrases'}, so the results may not carry that
               exact tag. To filter by a real tag instead, type it and pick it from the dropdown list —
               those chips are gold and start with a #.
+            </span>
+          </div>
+        )}
+
+        {/* Amber chips (V39) — say out loud what they matched, same reasoning
+            as the violet describe-it note above: an on-set-notes match can
+            easily be confused for a tag match otherwise. */}
+        {noteChips.length > 0 && (
+          <div style={{
+            display: 'flex', gap: '8px', marginTop: '10px',
+            padding: '8px 12px',
+            background: 'rgba(224,147,90,0.07)',
+            border: '1px solid rgba(224,147,90,0.22)',
+            borderRadius: '7px',
+            fontSize: '11.5px', color: '#e0935a', lineHeight: 1.55
+          }}>
+            <span style={{ flexShrink: 0 }}>ⓘ</span>
+            <span>
+              The amber 🔧 {noteChips.length === 1 ? 'chip matches' : 'chips match'} <strong>on-set
+              notes</strong> — Camera/Rig, Lens, Lens Filter, Stop, or the On-Set Notes box on a photo's
+              detail panel, not a tag.
             </span>
           </div>
         )}
@@ -1399,7 +1475,7 @@ export default function Home() {
           )}
           {!similarTo && hasFilters && (
             <span style={{ color: '#65625a' }}>
-              {' '}· {chips.length + nlChips.length + (color ? 1 : 0) + (film ? 1 : 0)} filter{(chips.length + nlChips.length + (color ? 1 : 0) + (film ? 1 : 0)) > 1 ? 's' : ''} active
+              {' '}· {chips.length + nlChips.length + noteChips.length + (color ? 1 : 0) + (film ? 1 : 0)} filter{(chips.length + nlChips.length + noteChips.length + (color ? 1 : 0) + (film ? 1 : 0)) > 1 ? 's' : ''} active
             </span>
           )}
         </span>
