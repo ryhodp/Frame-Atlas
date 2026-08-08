@@ -1656,3 +1656,90 @@ each would feel is missing, grounded against the actual tag taxonomy and code (n
 Unchanged from Day 20 above — that's still first. Day 21 (DP notes + search) is now fully
 designed and next after it; full field list, FTS5 approach, and chip behavior are written out
 in `/docs/2_Frame_Atlas_Build_Timeline.md`.
+
+---
+
+## Day 20 + Day 21 Build — Crop Selection, Scene Reorder, Storyboard Surfacing, DP Notes + Search
+*Completed: August 7–8, 2026 (V38, V39)*
+
+### What We Built — Day 20 (V38)
+Both pieces built by two agents working in parallel, isolated git worktrees (so neither could
+clobber the other's edits), then reviewed and merged by hand:
+- **Crop-selection-clears fix.** Selecting photos and running "Crop All" used to leave Select
+  Mode and the selection stuck on after returning to Home. `CropModal` now tells its caller
+  whether a crop batch actually started (queued at least one job) vs. every other way it closes
+  (cancel, Escape, deleting the whole review batch) — Home only exits Select Mode on a real
+  start, via the same `toggleTagMode()` bulk delete's Exit button already used.
+- **Scene drag-reordering.** New `POST /api/decks/<id>/scenes/reorder`, mirroring the existing
+  photo-storyboard-reorder endpoint (full ordered id list, owner-only, exact-set validation, a
+  silent `touch_deck()` with no activity-log entry). Drag-and-drop in `DeckDetail.jsx` uses a
+  distinct `dataTransfer` type (`application/x-scene-reorder`) so it can never be confused with
+  the existing "drag a photo tile into a scene" interaction on the same drop target.
+- **Storyboard mode surfaced.** The "⊞ Storyboard" button (existing since Day 12/V11 — reorders
+  photos *within* a scene) was hidden behind a label that read as an export or view toggle; Ryan
+  didn't know it existed. Renamed to "↕ Reorder Photos" and given a filled, prominent style.
+
+Full technical detail in CLAUDE.md's "Cropping" and "Scene reordering" sections.
+
+### What We Built — Day 21 (V39)
+- **DP technical notes.** 5 new fields on any photo — Camera/Rig, Lens, Lens Filter, Stop
+  (text, not numeric — `T2.8` doesn't fit a number column), and a freeform On-Set Notes box.
+  Collapsible section in `ImageDetail.jsx`, collapsed by default.
+- **Full-text search.** SQLite FTS5 (`notes_fts`), kept in sync via triggers on `images` rather
+  than app-level writes — the UPDATE trigger is scoped to only those 5 columns, so a crop,
+  favorite toggle, or view-log write can't trigger a pointless rebuild. A backfill seeds
+  pre-existing images at boot and self-disables. Note matches show up **live in the
+  autocomplete dropdown** (not just an Enter-time fallback), and become their own amber
+  🔧-prefixed chip, distinct from gold tag chips and violet NL chips.
+- **Permission model correction, caught mid-session.** Original assumption was that tag editing
+  was owner-scoped like favorites — checking `edit_tags()`/`update_filmography()` directly
+  showed both are actually `@admin_required`, full stop, regardless of who owns the photo. Ryan
+  was told the corrected facts and chose to make DP notes fields the first owner-editable
+  metadata field in the app, a deliberate departure from that precedent rather than matching it.
+- **Two real bugs found and fixed via the test suite**, not theoretical: FTS5's `MATCH` binding
+  only recognizes the table by its real name, not an alias (`n MATCH ?` throws "no such column:
+  n" even though `n` is valid everywhere else in the same query); and an unsanitized live-typing
+  prefix query containing `"`, `-`, `*` together 500'd the autocomplete endpoint before the
+  token-sanitization was tightened.
+- 12-check test suite (`scripts/test_dp_notes_search_locally.py`) covering trigger sync/scoping,
+  owner/admin/rejected permission paths, the backfill, and search/autocomplete integration.
+
+Full technical detail in CLAUDE.md's "DP technical notes + full-text search" section.
+
+### Process Note
+Both Day 21 agents (backend, and the `ImageDetail.jsx` frontend piece) failed within seconds of
+starting — hit the Claude account's session usage limit, not a problem with the plan or the
+prompts. Rather than wait for the reset, Day 21 was built directly in the main session instead
+of via parallel subagents, using the same fully-specified contract (field names, endpoint shape,
+FTS5 design) that had already been written for the agents. Confirmed on the real Railway deploy
+right after: `python:3.11-slim`'s SQLite does have FTS5 compiled in, and the boot-time backfill
+seeded all 3,214 existing images cleanly with no errors — this was the one open risk flagged in
+the original Day 21 plan.
+
+### Decisions Made (Confirmed with Ryan, pre- and mid-session)
+- ✅ Crop-selection clears on batch START (queued), not on batch completion — matches V35's
+  bulk-delete pattern
+- ✅ Scene reorder: new `sort_order`-based endpoint + drag-and-drop (not up/down buttons)
+- ✅ Storyboard button: renamed AND repositioned/restyled, not just one or the other
+- ✅ Parallel agent work: isolated git worktrees, merged by hand after review
+- ✅ DP notes fields: owner-or-admin (corrected from an initial wrong assumption that this
+  would match an existing owner-scoped precedent — no such precedent actually exists for
+  metadata editing, so this is a deliberate first, not a match)
+- ✅ Notes search: live autocomplete suggestions, not just an Enter-time fallback — consistent
+  with how tag/film/aspect-ratio suggestions already work in that dropdown
+- ✅ On-Set Notes section: collapsible, collapsed by default
+
+### Commits
+`4ca2cb8`, `8dbb52d`, `eafc5b5`, `1f5261a`, `5db6ad6`, `e4ca720` (V38 + docs);
+`43dfac4`, `9bf5ea0`, `4d501e1`, `535eb0b` (V39 + docs)
+
+### Starting Point for Next Session
+**Day 22 — PDF Lookbook Export (V40).** Export any deck to PDF at export time, two layouts:
+one-image-per-page full bleed (the pitch document) and a contact-sheet grid (the crew/working
+reference). Respects storyboard order and scene order — Day 20's scene reordering is a genuine
+prerequisite, and it's done. Needs a PDF library added to `backend/requirements.txt`
+(`reportlab` is the obvious candidate, pure-Python, adds 3+ min to every Railway deploy from
+then on) — confirm the image-resolution question before building: a PDF built from 600px
+thumbnails will look soft printed or projected, so this likely needs to pull full-res from
+Drive at export time even though Day 23's presentation mode deliberately does not. Full "done
+when" criteria in `/docs/2_Frame_Atlas_Build_Timeline.md`.
