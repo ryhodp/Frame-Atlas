@@ -315,7 +315,7 @@ Full detail in CLAUDE.md's "Cropping" and "Scene reordering" sections.
 
 ---
 
-## Day 21 — DP Technical Notes + Full-Text Search *(V39)*
+## Day 21 — DP Technical Notes + Full-Text Search *(V39 — COMPLETE)*
 
 **Goal:** Frame Atlas's taxonomy is fluent in mood and light but has nowhere to record what it
 actually took to get a shot — camera, lens, filtration, gear. Found in the ASC-DP review: every
@@ -362,6 +362,19 @@ real deploy, since a stripped base image is the one way this could differ):**
 **Done when:** Ryan can enter camera/lens/stop/filter + a paragraph of notes on a photo, then
 search "alexa mini lf" or "colored chase" from the same search bar and get that photo back
 with a distinct chip showing why it matched.
+
+**Shipped August 8, 2026 (V39).** Built as planned, with one confirmed refinement over the
+original draft: rather than notes search running only as a silent Enter-time check before the
+Gemini fallback, note matches show up **live in the autocomplete dropdown** as you type — Ryan's
+call, for consistency with how tag/film/aspect-ratio suggestions already work in that same
+dropdown. This still satisfies the original goal (free, instant, runs before any billed Gemini
+call) since Enter always picks from the dropdown when it's showing; the live-suggestion path
+just means seeing the match before committing to it, instead of finding out only after pressing
+Enter. Permission model was also settled during planning: DP notes fields are **owner-or-admin**,
+the first metadata field in this app editable by a friend on their own photo (every other edit
+endpoint — tags, filmography — turned out to be admin-only, not owner-scoped as first assumed;
+corrected and re-confirmed with Ryan before building). Full detail in CLAUDE.md's "DP technical
+notes + full-text search" section.
 
 ---
 
@@ -516,7 +529,7 @@ small changes keep having surprising side effects.
 | 19 | Browser extension | Web clipping ✅ *(V25)* |
 | **— PHASE 2: THE PITCH LAYER —** | | |
 | 20 | Deck ordering + crop selection fix | Scenes reorder; selection clears after crop ✅ *(V38)* |
-| 21 | DP technical notes + full-text search | Camera/lens/stop/filter fields + Omnisearch-style find *(V39)* |
+| 21 | DP technical notes + full-text search | Camera/lens/stop/filter fields + Omnisearch-style find ✅ *(V39)* |
 | 22 | PDF lookbook export | A file you can send an agency *(V40)* |
 | 23 | Presentation mode | Present a pitch from the app *(V41)* |
 | 24 | Client feedback loop | Picks + comments on share links *(V42)* |
