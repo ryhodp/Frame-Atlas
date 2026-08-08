@@ -857,6 +857,61 @@ def init_db():
     except Exception:
         pass
 
+    # V39: DP technical notes — camera/rig, lens, lens filter, stop (T-stop,
+    # kept as TEXT since values like "T2.8" don't fit a numeric column), and
+    # a freeform on-set notes box. Any photo can carry these, not just
+    # my_work — Ryan's call, and the first metadata field in this app that's
+    # owner-editable rather than admin-only (see the /notes endpoint below).
+    for _col in ('camera_rig', 'lens', 'lens_filter', 'stop', 'onset_notes'):
+        try:
+            c.execute(f"ALTER TABLE images ADD COLUMN {_col} TEXT")
+            conn.commit()
+            print(f"[migration] Added {_col} column to images")
+        except Exception:
+            pass
+
+    # V39: full-text search over the 5 columns above. FTS5 is SQLite's own
+    # built-in index (tokenizes on word boundaries, ranks by BM25) — no new
+    # pip dependency, ships inside Python's sqlite3 module. `images.id` IS
+    # this table's rowid directly (no separate id column), so a MATCH query
+    # yields image ids with no extra join needed.
+    c.execute('''
+        CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+            camera_rig, lens, lens_filter, stop, onset_notes
+        )
+    ''')
+    conn.commit()
+
+    # Triggers keep notes_fts in sync — not from every write callsite in this
+    # file by hand, which is exactly how build_search_filters() (V32) came to
+    # exist after two hand-copied filter functions drifted apart. The UPDATE
+    # trigger is scoped with `OF col, col, ...` so it fires ONLY when one of
+    # these 5 columns actually changes, not on every unrelated images write
+    # (tag edits go through a different table, but crop/thumbnail/view-log
+    # writes touch images itself and must not trigger a pointless FTS rebuild).
+    c.execute('''
+        CREATE TRIGGER IF NOT EXISTS notes_fts_ai AFTER INSERT ON images BEGIN
+            INSERT INTO notes_fts(rowid, camera_rig, lens, lens_filter, stop, onset_notes)
+            VALUES (new.id, new.camera_rig, new.lens, new.lens_filter, new.stop, new.onset_notes);
+        END
+    ''')
+    c.execute('''
+        CREATE TRIGGER IF NOT EXISTS notes_fts_ad AFTER DELETE ON images BEGIN
+            DELETE FROM notes_fts WHERE rowid = old.id;
+        END
+    ''')
+    c.execute('''
+        CREATE TRIGGER IF NOT EXISTS notes_fts_au
+        AFTER UPDATE OF camera_rig, lens, lens_filter, stop, onset_notes ON images
+        BEGIN
+            UPDATE notes_fts SET
+                camera_rig = new.camera_rig, lens = new.lens, lens_filter = new.lens_filter,
+                stop = new.stop, onset_notes = new.onset_notes
+            WHERE rowid = new.id;
+        END
+    ''')
+    conn.commit()
+
     c.execute("""
         INSERT INTO users (id, username, password_hash)
         SELECT 1, 'ryan', ''
@@ -2014,9 +2069,15 @@ def ar_query_labels(q):
 
 def build_image_dict(row, tags, palette, filmography):
     """Turns one `images` row (must include id, filename, thumbnail_blob,
-    caption, aspect_ratio, is_favorite, is_flagged) into the JSON shape used
-    by both /api/search and /api/images/<id>/similar. Keep these two routes
-    using this single helper so their image objects can never drift apart."""
+    caption, aspect_ratio, is_favorite, is_flagged, and — V39 — camera_rig,
+    lens, lens_filter, stop, onset_notes) into the JSON shape used by both
+    /api/search and /api/images/<id>/similar. Keep these two routes using
+    this single helper so their image objects can never drift apart.
+
+    V39's 5 fields are plain `images` columns (unlike tags/palette/
+    filmography, which come from joined tables and need their own queries),
+    so `notes` is read straight off `row` here instead of being threaded
+    through as a fifth function argument across every call site."""
     ar_str = row['aspect_ratio'] or '16:9'
     ar_float = ar_float_from_str(ar_str)
 
@@ -2033,7 +2094,14 @@ def build_image_dict(row, tags, palette, filmography):
         'is_flagged': bool(row['is_flagged']),
         'tags': tags,
         'palette': palette,
-        'filmography': filmography
+        'filmography': filmography,
+        'notes': {
+            'camera_rig': row['camera_rig'],
+            'lens': row['lens'],
+            'lens_filter': row['lens_filter'],
+            'stop': row['stop'],
+            'onset_notes': row['onset_notes'],
+        }
     }
 
 def hydrate_image_rows(c, rows):
@@ -2320,6 +2388,29 @@ def backfill_phashes():
 
     print(f"[phash-backfill] {len(pending)} fingerprint(s) predate V30 — rebuilding in background.")
     threading.Thread(target=_job, daemon=True).start()
+
+def backfill_notes_fts():
+    """V39 one-time self-heal: seed notes_fts for every image that predates
+    the AFTER INSERT trigger (every photo synced/uploaded/clipped before this
+    shipped). Unlike the palette/phash backfills above, there's no Pillow
+    work per image — just copying 5 text columns — so this is one set-based
+    SQL statement run inline at boot, not a per-image Python loop in a
+    background thread. Self-disables: once every images.id has a matching
+    notes_fts rowid, the INSERT affects zero rows on every later boot."""
+    try:
+        conn = get_db()
+        cur = conn.execute('''
+            INSERT INTO notes_fts (rowid, camera_rig, lens, lens_filter, stop, onset_notes)
+            SELECT id, camera_rig, lens, lens_filter, stop, onset_notes FROM images
+            WHERE id NOT IN (SELECT rowid FROM notes_fts)
+        ''')
+        seeded = cur.rowcount
+        conn.commit()
+        conn.close()
+        if seeded:
+            print(f"[notes-fts-backfill] Seeded {seeded} image(s) into notes_fts.")
+    except Exception as e:
+        print(f"[notes-fts-backfill] Failed: {e}")
 
 def merge_plural_tag_duplicates():
     """V30 one-time cleanup: collapse existing plural/singular tag drift
@@ -3228,6 +3319,29 @@ def autocomplete():
             'count': bucket_counts[label]
         } for label in ar_labels if bucket_counts.get(label)]
 
+    # V39: on-set notes — live suggestion, not a list of discrete values like
+    # tags/film. There's no fixed vocabulary to suggest FROM (notes are
+    # freeform prose), so this checks whether the CURRENT typed text has any
+    # match at all and, if so, offers exactly one entry: "run this phrase as
+    # a notes search." A prefix MATCH (see _fts5_match_query) so it updates
+    # as Ryan keeps typing, same as everything else in this dropdown.
+    # Deliberately NOT scoped by active_chips co-occurrence like tag
+    # suggestions are — a global per-user count is enough for v1.
+    note_results = []
+    match_query = _fts5_match_query(q, prefix=True)
+    if match_query:
+        # FTS5's special MATCH binding only recognizes the table by its real
+        # name, not an alias — `n MATCH ?` throws "no such column: n" even
+        # though `n` is a valid alias for notes_fts everywhere else in this
+        # query (verified directly against sqlite3, not assumed).
+        note_count = c.execute('''
+            SELECT COUNT(DISTINCT n.rowid) AS cnt
+            FROM notes_fts n JOIN images i ON i.id = n.rowid
+            WHERE i.user_id = ? AND notes_fts MATCH ?
+        ''', (uid, match_query)).fetchone()['cnt']
+        if note_count:
+            note_results = [{'type': 'note', 'value': q, 'count': note_count}]
+
     conn.close()
 
     tag_results = [{
@@ -3250,7 +3364,7 @@ def autocomplete():
     # always sit at the very top regardless of type or how many images carry
     # it — otherwise a popular tag that merely starts with the same letters
     # can bury the one result you actually typed for.
-    combined = tag_results + film_results + ar_results
+    combined = tag_results + film_results + ar_results + note_results
     combined.sort(key=lambda r: (r['value'].lower() != q, -r['count']))
     return jsonify(combined)
 
@@ -3263,6 +3377,39 @@ def tag_categories():
         'label': CAT_LABELS[key],
         'color': CAT_COLORS.get(key, '#9c988d')
     } for key in CAT_LABELS])
+
+def _fts5_match_query(phrase, prefix=False):
+    """Turns a raw user phrase into a safe notes_fts MATCH query. A raw
+    phrase can't go straight into MATCH — FTS5's query syntax gives meaning
+    to characters like -, ", *, : — so every token is quoted to be treated
+    literally. A bareword sequence of quoted tokens implicitly ANDs them,
+    which is exactly the "forgiving of word order" behavior Ryan wants
+    (an Omnisearch-style match, not a rigid substring/phrase match).
+
+    prefix=True additionally leaves the LAST token unquoted with a trailing
+    * (FTS5 prefix syntax), for live-typing autocomplete against a query
+    that isn't finished yet. Embedded double-quote characters are stripped
+    from every token first — otherwise one could break out of the quoting."""
+    tokens = [t.replace('"', '') for t in phrase.split() if t.replace('"', '')]
+    if not tokens:
+        return None
+    if prefix:
+        *head, last = tokens
+        parts = [f'"{t}"' for t in head]
+        # The trailing token is deliberately left UNQUOTED so the * prefix
+        # wildcard means anything to FTS5 — but that also means every OTHER
+        # FTS5-meaningful character (-, *, :, (, ), ^) is live here too, not
+        # neutralized by quoting the way it is for every other token above.
+        # Strip to alphanumerics before appending the wildcard (verified: a
+        # raw token like `weird"-*query` 500'd the endpoint before this).
+        last_clean = ''.join(ch for ch in last if ch.isalnum())
+        if last_clean:
+            parts.append(f'{last_clean}*')
+        if not parts:
+            return None
+    else:
+        parts = [f'"{t}"' for t in tokens]
+    return ' '.join(parts)
 
 def build_search_filters(c, uid, args):
     """Turn the search query params into (conditions, params, is_unfiltered)
@@ -3281,6 +3428,7 @@ def build_search_filters(c, uid, args):
     """
     chips_raw = args.get('chips', '').strip()
     nl_raw = args.get('nl', '').strip()
+    notes_raw = args.get('notes', '').strip()  # V39: JSON array of on-set-notes phrases
     color_raw = args.get('color', '').strip()
     film_raw = args.get('film', '').strip()
     ar_raw = args.get('ar', '').strip()  # V15: aspect-ratio bucket, e.g. "2.39:1"
@@ -3307,6 +3455,17 @@ def build_search_filters(c, uid, args):
         except Exception:
             nl_groups = []
 
+    # V39: notes phrases. JSON array of plain strings — each is its own
+    # AND'd notes_fts MATCH, same shape as an nl_groups entry above. Invalid
+    # JSON or a non-list just means no notes filter, never a 500.
+    notes_phrases = []
+    if notes_raw:
+        try:
+            parsed = json.loads(notes_raw)
+            notes_phrases = [str(p) for p in parsed if isinstance(p, str) and p.strip()]
+        except Exception:
+            notes_phrases = []
+
     conditions = ['user_id = ?']
     params = [uid]
 
@@ -3322,6 +3481,13 @@ def build_search_filters(c, uid, args):
         gph = ','.join('?' * len(group))
         conditions.append(f'id IN (SELECT image_id FROM tags WHERE value IN ({gph}))')
         params.extend(group)
+
+    for phrase in notes_phrases:
+        match_query = _fts5_match_query(phrase)
+        if not match_query:
+            continue
+        conditions.append('id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)')
+        params.append(match_query)
 
     if color_raw:
         # Small library — compute color matches in Python.
@@ -3408,7 +3574,7 @@ def build_search_filters(c, uid, args):
             )''')
             params.extend([like, like, like])
 
-    is_unfiltered = not (active_chips or nl_groups or color_raw or film_raw or ar_raw)
+    is_unfiltered = not (active_chips or nl_groups or notes_phrases or color_raw or film_raw or ar_raw)
     return conditions, params, is_unfiltered
 
 @app.route('/api/search')
@@ -3443,7 +3609,8 @@ def search():
         order_params = []
 
     rows = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, {fav_flag_cols(uid)}
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio,
+               camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(uid)}
         FROM images {where}
         ORDER BY {order_by} LIMIT ? OFFSET ?
     ''', params + order_params + [per, page * per]).fetchall()
@@ -3629,6 +3796,7 @@ def get_similar_images(image_id):
     candidates = c.execute(f'''
         SELECT e.image_id, e.clip_vector,
                i.id, i.filename, i.thumbnail_blob, i.caption, i.aspect_ratio,
+               i.camera_rig, i.lens, i.lens_filter, i.stop, i.onset_notes,
                {fav_flag_cols(uid, alias='i')}
         FROM embeddings e
         JOIN images i ON i.id = e.image_id
@@ -4484,6 +4652,44 @@ def update_filmography(image_id):
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'filmography': filmography})
+
+@app.route('/api/images/<int:image_id>/notes', methods=['POST'])
+def update_notes(image_id):
+    """Set or clear a photo's DP technical fields (camera/rig, lens, lens
+    filter, stop) and freeform on-set notes. V39: deliberately owner-or-admin
+    rather than @admin_required — the first metadata field in this app a
+    friend can edit on their OWN photo. Every other edit endpoint (tags,
+    filmography) is admin-only; this is Ryan's explicit call, since these are
+    facts about a shoot a friend would know, not an AI guess to curate.
+    notes_fts stays in sync via the AFTER UPDATE OF ... trigger (see
+    init_db()) — nothing here touches it directly."""
+    data = request.get_json(force=True) or {}
+    camera_rig = (data.get('camera_rig') or '').strip()
+    lens = (data.get('lens') or '').strip()
+    lens_filter = (data.get('lens_filter') or '').strip()
+    stop = (data.get('stop') or '').strip()
+    onset_notes = (data.get('onset_notes') or '').strip()
+
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute('SELECT user_id FROM images WHERE id = ?', (image_id,)).fetchone()
+    if not row or (row['user_id'] != session['user_id'] and session.get('role') != 'admin'):
+        conn.close()
+        return jsonify({'error': 'Image not found'}), 404
+
+    c.execute(
+        'UPDATE images SET camera_rig = ?, lens = ?, lens_filter = ?, stop = ?, onset_notes = ? WHERE id = ?',
+        (camera_rig or None, lens or None, lens_filter or None, stop or None, onset_notes or None, image_id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'notes': {
+        'camera_rig': camera_rig or None,
+        'lens': lens or None,
+        'lens_filter': lens_filter or None,
+        'stop': stop or None,
+        'onset_notes': onset_notes or None,
+    }})
 
 def _parse_bulk_image_ids(data):
     """Shared image_ids validation for the bulk filmography endpoints."""
@@ -5373,7 +5579,8 @@ def _fetch_image_dict(c, image_id, owner_user_id):
     is_favorite/is_flagged reflect the deck OWNER (not the viewer — the public
     share view has no logged-in viewer at all)."""
     row = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, {fav_flag_cols(owner_user_id)}
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio,
+               camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(owner_user_id)}
         FROM images WHERE id = ?
     ''', (image_id,)).fetchone()
     if not row:
@@ -6201,7 +6408,8 @@ def get_utility_view(view):
     conn = get_db()
     c = conn.cursor()
     rows = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, {fav_flag_cols(uid)}
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio,
+               camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(uid)}
         FROM images WHERE {where}
         ORDER BY date_added DESC {limit_sql}
     ''', params + limit_params).fetchall()
@@ -6394,6 +6602,7 @@ if __name__ == '__main__':
     load_embeddings_seed()
     backfill_palettes()
     backfill_phashes()
+    backfill_notes_fts()
     merge_plural_tag_duplicates()
     threading.Thread(target=reconcile_drive_changes, daemon=True).start()
     start_backup_scheduler()
@@ -6404,6 +6613,7 @@ init_db()
 load_embeddings_seed()
 backfill_palettes()
 backfill_phashes()
+backfill_notes_fts()
 merge_plural_tag_duplicates()
 threading.Thread(target=reconcile_drive_changes, daemon=True).start()
 start_backup_scheduler()
