@@ -42,6 +42,16 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const [editingFilm, setEditingFilm] = useState(false);
   const [filmDraft, setFilmDraft] = useState({ title: '', director: '', dp: '', year: '' });
 
+  // V39: DP technical notes — camera/rig, lens, lens filter, stop, freeform
+  // on-set notes. Collapsed by default (Ryan's call — most photos won't have
+  // this filled in, and the panel is already dense), directly editable when
+  // expanded rather than a separate read/edit toggle like filmography above:
+  // these are short structured fields with no clickable-search behavior to
+  // justify a distinct read view.
+  const [notes, setNotes] = useState(image?.notes || null);
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const [notesDraft, setNotesDraft] = useState({ camera_rig: '', lens: '', lens_filter: '', stop: '', onset_notes: '' });
+
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
@@ -64,6 +74,13 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     setEditingTags(false);
     setFilm(image.filmography || null);
     setEditingFilm(false);
+    setNotes(image.notes || null);
+    setNotesExpanded(false);
+    setNotesDraft({
+      camera_rig: image.notes?.camera_rig || '', lens: image.notes?.lens || '',
+      lens_filter: image.notes?.lens_filter || '', stop: image.notes?.stop || '',
+      onset_notes: image.notes?.onset_notes || ''
+    });
     setConfirmDelete(false);
     setDeleteError(null);
     setOverlayMode('off');
@@ -200,6 +217,21 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   };
 
   const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '' });
+
+  const saveNotes = async (draft) => {
+    try {
+      const res = await fetch(`/api/images/${image.id}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNotes(data.notes);
+        onUpdated?.(image.id, { notes: data.notes });
+      }
+    } catch {}
+  };
 
   const doDelete = async () => {
     setDeleting(true);
@@ -698,6 +730,99 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 }}>{image.filename}</div>
               </div>
             </div>
+
+            {/* On-Set Notes — DP technical fields (V39): camera/rig, lens,
+                lens filter, stop, freeform notes. Collapsed by default. */}
+            {(() => {
+              const hasNotesContent = !!(notes && (
+                notes.camera_rig || notes.lens || notes.lens_filter || notes.stop || notes.onset_notes
+              ));
+              const noteFieldStyle = {
+                background: '#18181b', color: '#efeadd',
+                border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+              };
+              return (
+                <div style={{ marginBottom: '20px' }}>
+                  <button
+                    onClick={() => setNotesExpanded(v => !v)}
+                    style={{
+                      background: 'none', border: 'none', padding: 0,
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                      color: hasNotesContent ? '#dcbd76' : '#65625a',
+                      fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em',
+                      cursor: 'pointer', fontFamily: 'inherit'
+                    }}
+                  >
+                    <span style={{
+                      display: 'inline-block', fontSize: '10px',
+                      transform: notesExpanded ? 'none' : 'rotate(-90deg)',
+                      transition: 'transform 150ms ease'
+                    }}>▾</span>
+                    ON-SET NOTES
+                    {hasNotesContent && !notesExpanded && (
+                      <span style={{ fontSize: '10px', color: '#65625a', fontWeight: 400 }}>· filled in</span>
+                    )}
+                  </button>
+
+                  {notesExpanded && (
+                    <div style={{
+                      marginTop: '10px', padding: '14px 16px',
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '10px'
+                    }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+                        <input
+                          value={notesDraft.camera_rig}
+                          onChange={e => setNotesDraft(d => ({ ...d, camera_rig: e.target.value }))}
+                          placeholder="Camera / Rig"
+                          style={noteFieldStyle}
+                        />
+                        <input
+                          value={notesDraft.lens}
+                          onChange={e => setNotesDraft(d => ({ ...d, lens: e.target.value }))}
+                          placeholder="Lens"
+                          style={noteFieldStyle}
+                        />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+                        <input
+                          value={notesDraft.lens_filter}
+                          onChange={e => setNotesDraft(d => ({ ...d, lens_filter: e.target.value }))}
+                          placeholder="Lens Filter"
+                          style={noteFieldStyle}
+                        />
+                        <input
+                          value={notesDraft.stop}
+                          onChange={e => setNotesDraft(d => ({ ...d, stop: e.target.value }))}
+                          placeholder="Stop (e.g. T2.8)"
+                          style={noteFieldStyle}
+                        />
+                      </div>
+                      <textarea
+                        value={notesDraft.onset_notes}
+                        onChange={e => setNotesDraft(d => ({ ...d, onset_notes: e.target.value }))}
+                        placeholder="On-set notes — rain machine, colored chase, technique…"
+                        rows={3}
+                        style={{ ...noteFieldStyle, width: '100%', resize: 'vertical', marginBottom: '10px', boxSizing: 'border-box' }}
+                      />
+                      <button
+                        onClick={() => saveNotes(notesDraft)}
+                        style={{
+                          background: 'rgba(201,162,83,0.12)',
+                          border: '1px solid rgba(201,162,83,0.35)',
+                          color: '#dcbd76', borderRadius: '6px', padding: '5px 13px',
+                          fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
+                        }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Color palette — above tags */}
             {image.palette && image.palette.length > 0 && (
