@@ -31,6 +31,8 @@ from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 from google import genai as genai_client
 
+from pdf_export import build_deck_pdf, pdf_download_name, LAYOUTS as PDF_LAYOUTS
+
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 # Railway's proxy terminates HTTPS in front of us; without this, Flask thinks
 # every request arrived over plain http and builds http:// URLs (which breaks
@@ -6362,6 +6364,66 @@ def get_shared_deck(token):
     payload = _deck_payload(c, deck_row)
     conn.close()
     return jsonify(payload)
+
+@app.route('/api/decks/<int:deck_id>/export.pdf')
+def export_deck_pdf(deck_id):
+    """Day 22 (V40): render a deck as a PDF lookbook.
+
+    ?layout=full   one photo per page, scene title cards — the client pitch doc
+    ?layout=grid   contact sheet, 6 frames a page — the crew handout
+    ?include_unsorted=1|0   whether the Unsorted bucket ships as a final section
+
+    Owner-only (the same 404-not-403 idiom the rest of the deck routes use).
+    All layout lives in backend/pdf_export.py; this only reads rows. It writes
+    nothing — in particular NOT log_deck_activity(), which would bump
+    decks.updated_at and light up the frontend's "New changes" banner for an
+    export that changed nothing.
+
+    Deliberately does not reuse _deck_payload(): that base64-encodes every
+    thumbnail into JSON (pure waste when the bytes go straight into a PDF) and
+    its single global ORDER BY doesn't give correct per-scene ordering.
+    """
+    layout = (request.args.get('layout') or 'full').strip().lower()
+    if layout not in PDF_LAYOUTS:
+        return jsonify({'error': f"layout must be one of {', '.join(PDF_LAYOUTS)}"}), 400
+    include_unsorted = (request.args.get('include_unsorted') or '1').strip().lower() not in ('0', 'false', 'no')
+
+    conn = get_db()
+    c = conn.cursor()
+    deck_row = c.execute(
+        'SELECT id, name FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])
+    ).fetchone()
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+
+    scene_rows = c.execute(
+        'SELECT id, name FROM scenes WHERE deck_id = ? ORDER BY sort_order ASC, id ASC', (deck_id,)
+    ).fetchall()
+    # The JOIN quietly drops any deck_images row whose image is gone.
+    photo_rows = c.execute('''
+        SELECT di.id AS deck_image_id, di.scene_id, di.storyboard_note,
+               i.filename, i.thumbnail_blob
+        FROM deck_images di
+        JOIN images i ON i.id = di.image_id
+        WHERE di.deck_id = ?
+        ORDER BY CASE WHEN di.storyboard_order IS NULL THEN 1 ELSE 0 END,
+                 di.storyboard_order ASC, di.id ASC
+    ''', (deck_id,)).fetchall()
+    deck = {'id': deck_row['id'], 'name': deck_row['name']}
+    conn.close()
+
+    buckets = {}
+    for row in photo_rows:
+        buckets.setdefault(row['scene_id'], []).append(dict(row))
+
+    sections = [{'name': s['name'], 'images': buckets.get(s['id'], [])} for s in scene_rows]
+    if include_unsorted and buckets.get(None):
+        sections.append({'name': None, 'images': buckets[None]})
+
+    fh = build_deck_pdf(deck, sections, layout=layout)
+    return send_file(fh, mimetype='application/pdf', as_attachment=True,
+                     download_name=pdf_download_name(deck['name']))
 
 # ============================================================================
 # DAY 13 (V12): ANALYTICS + UTILITY VIEWS
