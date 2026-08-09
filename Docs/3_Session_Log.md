@@ -1743,3 +1743,86 @@ then on) — confirm the image-resolution question before building: a PDF built 
 thumbnails will look soft printed or projected, so this likely needs to pull full-res from
 Drive at export time even though Day 23's presentation mode deliberately does not. Full "done
 when" criteria in `/docs/2_Frame_Atlas_Build_Timeline.md`.
+
+---
+
+## Day 22 — August 9, 2026 *(V40 — PDF Lookbook Export)*
+
+### Session Shape (worth noting)
+The Day 22 code was written in an earlier working session but **never committed, never pushed,
+and never logged** — it was found sitting as uncommitted changes at the top of this session,
+when Ryan asked to start Day 23. Nothing was live on Railway. This session verified it, then
+committed, pushed and documented it before moving on. Ryan's explicit call over building Day 23
+on top of an uncommitted pile.
+
+Verification run before committing anything:
+- `scripts/test_pdf_export_locally.py` — 33 passed, 0 failed
+- `scripts/test_pdf_export_endpoint_locally.py` — 18 passed, 0 failed
+- `npm run build` — clean, 70 modules
+- `useToast`'s real signature checked against `ToastContext.jsx` (the new modal calls
+  `showToast`/`dismissToast` with a manual-dismiss duration of 0)
+
+### What We Built — Day 22 (V40)
+- **`backend/pdf_export.py`** — all layout lives here. `GET /api/decks/<id>/export.pdf` in
+  `app.py` only queries rows and hands them over. Owner-only, and deliberately read-only: it
+  does not call `log_deck_activity()`, so exporting can't bump `decks.updated_at` and light up
+  the "New changes" banner for something that changed nothing. A test pins that.
+- **Two layouts.** `full` = one photo per page with a scene title card ahead of each section
+  (the client pitch document); `grid` = a 3×2 contact sheet (the crew handout). Plus an
+  "Include Unsorted photos" toggle that only appears when the deck actually has unsorted ones.
+- **Deck title page** with name, date, scene/photo counts, gold rule — the app's dark cinematic
+  palette carried into print.
+- **"⎙ Export PDF"** in the deck header, opening a layout-choice modal. Uses the same
+  instant-close-plus-background-toast pattern as `CropModal`/`DuplicateReview`: reads its values,
+  closes, and downloads inside a bare IIFE that touches no component state (by then the
+  component is unmounted). Disabled with an explanatory tooltip when viewing an offline copy.
+
+### Decisions Made
+- ✅ **`reportlab==4.2.5`** — first new pip dependency since `google-genai`. Adds 3+ min to every
+  Railway deploy from here on, as flagged in the timeline. Pure-Python, no system libs.
+- ✅ **Letterboxed on a fixed page, NOT full bleed** (a departure from the timeline's own
+  wording). True full bleed means cropping a frame to fill a fixed page shape. Every page is
+  landscape US Letter; images scale to fit with aspect ratio intact and centre on the near-black
+  page. Silently re-framing a cinematographer's shots would make the export worse than useless.
+- ✅ **Thumbnails, not full-res from Drive** — the opposite of what the timeline predicted.
+  Shipped on the stored thumbnails so Ryan can judge real output before paying for a Drive round
+  trip per frame at export time. Swapping the source later is a contained change.
+- ✅ **A single unreadable photo never takes the export down** — it's skipped and logged, and a
+  section left with no usable photos emits no scene title card at all (no stranded headers).
+
+### Technical Findings (real, measured — not theoretical)
+- **Hand reportlab raw JPEG bytes, never a PIL image object.** Given a PIL object reportlab has
+  no compressed stream to reuse, so it embeds raw pixels Flate-compressed — lossless, and
+  hopeless on photographic content. Given JPEG bytes it copies them straight in as DCTDecode.
+  Measured on a real 20-frame deck: **13.7MB via PIL vs 1.5MB via bytes.** The first number does
+  not survive an email attachment limit, and emailing the file IS the feature.
+- **The re-encode decision reads the EXIF orientation tag, not a before/after size comparison.**
+  Orientations 2 and 4 are mirrors — they rewrite pixels without changing dimensions, so a size
+  check would call them a no-op and reuse a blob whose pixels had just been corrected.
+- **CLAUDE.md's stored thumbnail spec was wrong and is now corrected.** It said 600px/quality 75;
+  `generate_thumbnail()`'s actual defaults are **800px/quality 85**. Found because the exporter's
+  output quality depends on knowing the real number.
+- Blob object URLs are revoked on a timer, not synchronously after `click()` — revoking
+  immediately can cancel the download before Safari has started reading the blob.
+
+### Technical Debt / Open Questions
+- **Sharpness is unproven on real output.** The whole thumbnails-not-full-res decision rests on
+  800px looking acceptable printed or projected. Ryan should export a real 20-frame deck and
+  look at it before this counts as settled. If it's soft, the fix is scoped to `_prepare()` plus
+  a Drive fetch — not a rewrite.
+- Fonts are reportlab's built-in Helvetica, not the app's Manrope (no font file in the repo).
+- The export is synchronous: a very large deck holds the request open while it renders. Fine at
+  current deck sizes; if it ever times out, this becomes a background job like the crop queue.
+
+### Commits
+`ba2e318` (backend renderer + endpoint + reportlab + 2 test scripts), `66def67` (export button
+and modal), plus this docs commit.
+
+### Starting Point for Next Session
+**Day 23 — Presentation Mode (V41).** Fullscreen, keyboard-driven deck presentation: arrows /
+space to advance, Esc to exit, scene name as a title card between sections, storyboard note
+under the frame with a toggle to hide it (sometimes you're talking and don't want text competing).
+Ryan's standing call is to use the existing 800px thumbnails — already loaded in the grid, so
+there's zero loading pause between frames — but **built so the image source is a single
+swappable line**, in case it looks soft on a real projector. Full "done when" criteria in
+`/docs/2_Frame_Atlas_Build_Timeline.md`.

@@ -378,7 +378,7 @@ notes + full-text search" section.
 
 ---
 
-## Day 22 — PDF Lookbook Export *(V40)*
+## Day 22 — PDF Lookbook Export *(V40 — COMPLETE)*
 
 **Goal:** A pitch needs a leave-behind — the file that sits in the client's inbox after the
 meeting and gets forwarded to people who weren't in the room. Right now the only output
@@ -400,6 +400,23 @@ pull full-res from Drive at export time even though presentation mode does not.
 
 **Done when:** A 20-frame deck exports to a PDF that Ryan would actually send to an agency,
 in both layouts.
+
+**How it actually shipped:**
+- `reportlab==4.2.5` it is — pure-Python, first new dependency since `google-genai`.
+- **"Full bleed" became "letterboxed on a fixed page."** True full bleed means cropping a
+  frame to fill a fixed page shape, and silently re-framing a cinematographer's shots would
+  make the export worse than useless. Every page is landscape US Letter; the image scales to
+  fit with its aspect ratio intact and centres on the near-black page, so leftover space
+  reads as intentional margin.
+- **Thumbnails, not full-res from Drive** — the opposite of what this entry predicted. The
+  stored thumbnails are 800px/q85 (not the 600px this entry assumed), and pulling full-res
+  would mean a Drive round trip per frame at export time. Shipped on thumbnails so Ryan can
+  judge real output before paying that cost; swapping the source later is a contained change.
+- **Hand reportlab JPEG bytes, never a PIL image object.** Measured on a real 20-frame deck:
+  13.7MB via PIL vs 1.5MB via bytes, because bytes embed as DCTDecode while a PIL object gets
+  Flate-compressed raw pixels. The first number doesn't survive an email attachment limit,
+  and emailing the file IS the feature.
+- 51 checks across two test scripts. Full technical detail in CLAUDE.md.
 
 ---
 
