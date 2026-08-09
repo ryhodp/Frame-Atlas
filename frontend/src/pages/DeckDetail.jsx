@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import StoryboardView from '../components/StoryboardView';
 import { useOfflineCache, hasRemoteUpdates } from '../hooks/useOfflineCache';
+import { useToast } from '../ToastContext';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -81,6 +82,7 @@ export default function DeckDetail() {
 
   const [storyboard, setStoryboard] = useState(null); // { sceneId, title } or null
   const [shareOpen, setShareOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
 
@@ -429,6 +431,25 @@ export default function DeckDetail() {
             >
               👥 Crew
             </button>
+            <button
+              onClick={() => !showingCached && setExportOpen(true)}
+              disabled={showingCached}
+              title={showingCached
+                ? "You're offline — this is a saved copy. Reconnect to build a PDF."
+                : 'Save this lookbook as a PDF you can email'}
+              style={{
+                background: 'none',
+                border: `1px solid ${showingCached ? '#33353b' : '#44474f'}`,
+                color: showingCached ? '#6b6d75' : '#e2e2e6',
+                borderRadius: '8px', padding: '8px 16px',
+                cursor: showingCached ? 'default' : 'pointer',
+                fontSize: '13px', fontFamily: 'inherit',
+                whiteSpace: 'nowrap',
+                opacity: showingCached ? 0.6 : 1
+              }}
+            >
+              ⎙ Export PDF
+            </button>
           </>
         ) : (
           <div style={{
@@ -566,6 +587,15 @@ export default function DeckDetail() {
           shareToken={deck.share_token}
           onTokenChange={(token) => setDeck(prev => ({ ...prev, share_token: token }))}
           onClose={() => setShareOpen(false)}
+        />
+      )}
+
+      {exportOpen && (
+        <ExportModal
+          deckId={Number(id)}
+          deckName={deck.name}
+          hasUnsorted={deck.images.some(img => img.scene_id === null)}
+          onClose={() => setExportOpen(false)}
         />
       )}
 
@@ -1308,6 +1338,220 @@ function DeckTile({ img, onRemove, canEdit }) {
           }}
         >×</button>
       )}
+    </div>
+  );
+}
+
+// ── Export to PDF — layout choice, then an instant-close background download ──
+//
+// Follows the same instant-close-plus-background-toast pattern as CropModal and
+// DuplicateReview: a big deck takes several seconds to render server-side, and
+// blocking the modal on that fetch just looks broken. The download runs in a
+// bare IIFE that touches NO component state, because by then this component is
+// already unmounted.
+function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
+  const [layout, setLayout] = useState('full');
+  const [includeUnsorted, setIncludeUnsorted] = useState(true);
+  const { showToast, dismissToast } = useToast();
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const startExport = () => {
+    // Read every value we need BEFORE unmounting — nothing below may touch state.
+    const params = new URLSearchParams({
+      layout,
+      include_unsorted: (hasUnsorted && includeUnsorted) ? '1' : '0'
+    });
+    const url = `/api/decks/${deckId}/export.pdf?${params.toString()}`;
+    const fallbackName = `${deckName || 'lookbook'}.pdf`;
+
+    onClose();
+
+    const toastId = showToast('Building your PDF…', 'info', 0);
+    const safetyTimeout = setTimeout(() => dismissToast(toastId), 60000);
+
+    (async () => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          clearTimeout(safetyTimeout);
+          dismissToast(toastId);
+          showToast(body.error || 'Export failed', 'error');
+          return;
+        }
+
+        const blob = await res.blob();
+
+        // Prefer the server's own filename; fall back to the deck name.
+        let filename = fallbackName;
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+        if (match && match[1]) {
+          try { filename = decodeURIComponent(match[1]); }
+          catch { filename = match[1]; }
+        }
+
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Revoking synchronously right after click() can cancel the download
+        // before the browser has actually started reading the blob (Safari).
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+
+        clearTimeout(safetyTimeout);
+        dismissToast(toastId);
+        showToast('PDF ready — check your downloads', 'success');
+      } catch (e) {
+        console.error('Exporting the deck to PDF failed', e);
+        clearTimeout(safetyTimeout);
+        dismissToast(toastId);
+        showToast('Export failed', 'error');
+      }
+    })();
+  };
+
+  const layoutOptions = [
+    {
+      value: 'full',
+      label: 'One image per page',
+      blurb: 'The pitch document. Each frame gets a full page with its note underneath. This is the one you send to a client.'
+    },
+    {
+      value: 'grid',
+      label: 'Contact sheet',
+      blurb: 'A grid of frames, several per page. The working reference to hand out to your crew.'
+    }
+  ];
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#2a2c31',
+          border: '1px solid #44474f',
+          borderRadius: '12px',
+          padding: '20px 22px',
+          width: '460px', maxWidth: 'calc(100vw - 48px)',
+          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+        }}
+      >
+        <div style={{ fontSize: '15px', fontWeight: 600, color: '#efeadd', marginBottom: '6px' }}>
+          Export lookbook
+        </div>
+        <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5, marginBottom: '16px' }}>
+          Turns this deck into a PDF you can email — scenes in order, with your notes.
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+          {layoutOptions.map(opt => {
+            const selected = layout === opt.value;
+            return (
+              <div
+                key={opt.value}
+                onClick={() => setLayout(opt.value)}
+                style={{
+                  display: 'flex', gap: '10px', alignItems: 'flex-start',
+                  border: `1px solid ${selected ? '#d9a441' : '#44474f'}`,
+                  background: selected ? 'rgba(217,164,65,0.10)' : 'none',
+                  borderRadius: '8px', padding: '11px 13px',
+                  cursor: 'pointer'
+                }}
+              >
+                <input
+                  type="radio"
+                  name="fa-export-layout"
+                  checked={selected}
+                  onChange={() => setLayout(opt.value)}
+                  style={{
+                    accentColor: '#d9a441', width: '15px', height: '15px',
+                    cursor: 'pointer', marginTop: '2px', flexShrink: 0
+                  }}
+                />
+                <div>
+                  <div style={{
+                    fontSize: '13.5px', fontWeight: 600,
+                    color: selected ? '#d9a441' : '#e2e2e6', marginBottom: '3px'
+                  }}>
+                    {opt.label}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#9c988d', lineHeight: 1.5 }}>
+                    {opt.blurb}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {hasUnsorted && (
+          <label style={{
+            display: 'flex', gap: '10px', alignItems: 'flex-start',
+            cursor: 'pointer', marginBottom: '18px'
+          }}>
+            <input
+              type="checkbox"
+              checked={includeUnsorted}
+              onChange={e => setIncludeUnsorted(e.target.checked)}
+              style={{
+                accentColor: '#d9a441', width: '15px', height: '15px',
+                cursor: 'pointer', marginTop: '2px', flexShrink: 0
+              }}
+            />
+            <div>
+              <div style={{ fontSize: '13px', color: '#e2e2e6', marginBottom: '3px' }}>
+                Include Unsorted photos
+              </div>
+              <div style={{ fontSize: '12px', color: '#9c988d', lineHeight: 1.5 }}>
+                Photos you haven't put into a scene yet. They'll come last.
+              </div>
+            </div>
+          </label>
+        )}
+
+        <div style={{
+          display: 'flex', gap: '8px', justifyContent: 'flex-end',
+          borderTop: '1px solid #2a2c31', paddingTop: '4px'
+        }}>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none', border: '1px solid #44474f',
+              color: '#9c988d', borderRadius: '8px', padding: '10px 18px',
+              cursor: 'pointer', fontSize: '13.5px', fontFamily: 'inherit',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={startExport}
+            style={{
+              background: '#d9a441', color: '#3d2f00', border: 'none',
+              borderRadius: '8px', padding: '10px 18px',
+              fontSize: '13.5px', fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'inherit', whiteSpace: 'nowrap'
+            }}
+          >
+            Export PDF
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
