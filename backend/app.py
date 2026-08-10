@@ -2148,25 +2148,40 @@ def ar_query_labels(q):
             labels.append(label)
     return list(dict.fromkeys(labels))  # dedupe, keep order
 
-def build_image_dict(row, tags, palette, filmography):
+def build_image_dict(row, tags, palette, filmography, public=False):
     """Turns one `images` row (must include id, filename, thumbnail_blob,
-    caption, aspect_ratio, is_favorite, is_flagged, and — V39 — camera_rig,
-    lens, lens_filter, stop, onset_notes) into the JSON shape used by both
-    /api/search and /api/images/<id>/similar. Keep these two routes using
-    this single helper so their image objects can never drift apart.
+    caption, aspect_ratio, is_favorite, is_flagged, md5_checksum, and — V39 —
+    camera_rig, lens, lens_filter, stop, onset_notes) into the JSON shape
+    used by /api/search, /api/images/<id>/similar, and the decks endpoints.
+    Keep everything on this single helper so image objects can never drift
+    apart between routes.
 
     V39's 5 fields are plain `images` columns (unlike tags/palette/
     filmography, which come from joined tables and need their own queries),
     so `notes` is read straight off `row` here instead of being threaded
-    through as a fifth function argument across every call site."""
+    through as a fifth function argument across every call site.
+
+    V43 (Day 25): `public=True` is the one exception that still embeds the
+    thumbnail as base64 — used only for the anonymous /api/share/<token>
+    view, which has no login to gate a cacheable URL behind. Every other
+    caller gets a small `/api/images/<id>/thumb` URL instead of a base64
+    blob buried in JSON, which the browser can actually cache. The `?v=`
+    is the image's own checksum, so a crop (which changes it) forces a
+    fresh fetch and nothing else does."""
     ar_str = row['aspect_ratio'] or '16:9'
     ar_float = ar_float_from_str(ar_str)
 
-    thumb_b64 = base64.b64encode(row['thumbnail_blob']).decode('utf-8')
+    if public:
+        thumb_b64 = base64.b64encode(row['thumbnail_blob']).decode('utf-8')
+        thumbnail = f'data:image/jpeg;base64,{thumb_b64}'
+    else:
+        version = row['md5_checksum'] or row['id']
+        thumbnail = f"/api/images/{row['id']}/thumb?v={version}"
+
     return {
         'id': row['id'],
         'filename': row['filename'],
-        'thumbnail': f'data:image/jpeg;base64,{thumb_b64}',
+        'thumbnail': thumbnail,
         'caption': row['caption'] or '',
         'aspect_ratio': ar_str,
         'ar_label': normalize_ar_label(ar_float),
@@ -3690,7 +3705,7 @@ def search():
         order_params = []
 
     rows = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio,
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, md5_checksum,
                camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(uid)}
         FROM images {where}
         ORDER BY {order_by} LIMIT ? OFFSET ?
@@ -3822,6 +3837,41 @@ def get_full_image(image_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/images/<int:image_id>/thumb')
+def get_image_thumb(image_id):
+    """A photo's thumbnail as its own cacheable URL (V43/Day 25), instead of
+    base64 buried inside a JSON response — a base64 blob inside JSON can
+    never be cached by the browser, since there's no URL to remember it by.
+    Measured at real library size: ~6.5MB re-transferred per page of 60,
+    every single visit.
+
+    The `?v=` query param (the image's own md5_checksum, set by
+    build_image_dict()) is never read here — it exists purely so the URL
+    itself changes when a crop rewrites the image, forcing a fresh fetch,
+    while an unrelated re-tag leaves the checksum and the URL untouched.
+
+    Same owner-or-admin check as the other single-image endpoints (crop,
+    delete, notes) — deliberately NOT a signed/public URL, since search
+    already never returns another user's images, and this keeps that
+    guarantee true for the thumbnail too."""
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute(
+        'SELECT thumbnail_blob, user_id FROM images WHERE id = ?', (image_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row or (row['user_id'] != session['user_id'] and session.get('role') != 'admin'):
+        return jsonify({'error': 'Image not found'}), 404
+
+    resp = send_file(io.BytesIO(row['thumbnail_blob']), mimetype='image/jpeg')
+    # private: this is login-gated, per-user content — a shared/CDN cache
+    # must not serve one user's thumbnail to another. immutable + a year:
+    # safe because the URL itself changes (see ?v= above) whenever the
+    # actual bytes do.
+    resp.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
+    return resp
+
 def _cosine_similarity(vec_a, vec_b):
     """Plain-Python cosine similarity between two equal-length float lists.
     Re-normalizes defensively (the seed vectors are already L2-normalized,
@@ -3876,7 +3926,7 @@ def get_similar_images(image_id):
     # query, no per-candidate lookups. Scoped to this user's own images.
     candidates = c.execute(f'''
         SELECT e.image_id, e.clip_vector,
-               i.id, i.filename, i.thumbnail_blob, i.caption, i.aspect_ratio,
+               i.id, i.filename, i.thumbnail_blob, i.caption, i.aspect_ratio, i.md5_checksum,
                i.camera_rig, i.lens, i.lens_filter, i.stop, i.onset_notes,
                {fav_flag_cols(uid, alias='i')}
         FROM embeddings e
@@ -5652,15 +5702,18 @@ def find_duplicates():
 # DECKS + SCENES
 # ============================================================================
 
-def _fetch_image_dict(c, image_id, owner_user_id):
+def _fetch_image_dict(c, image_id, owner_user_id, public=False):
     """Loads one images row plus its tags/palette/filmography and runs it
     through build_image_dict(). Used by the decks endpoints, which need the
     same image JSON shape as /api/search and /api/images/<id>/similar but
     are fetching images one at a time (via deck_images), not in bulk.
     is_favorite/is_flagged reflect the deck OWNER (not the viewer — the public
-    share view has no logged-in viewer at all)."""
+    share view has no logged-in viewer at all).
+
+    `public` passes straight through to build_image_dict() — see its
+    docstring (V43/Day 25)."""
     row = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio,
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, md5_checksum,
                camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(owner_user_id)}
         FROM images WHERE id = ?
     ''', (image_id,)).fetchone()
@@ -5680,7 +5733,7 @@ def _fetch_image_dict(c, image_id, owner_user_id):
     ).fetchone()
     filmography = {'title': fr['title'], 'director': fr['director'], 'dp': fr['dp'], 'year': fr['year']} if fr else None
 
-    return build_image_dict(row, tags, palette, filmography)
+    return build_image_dict(row, tags, palette, filmography, public=public)
 
 def _display_name(row):
     """Best-effort human label for a user row: username, falling back to
@@ -6005,12 +6058,16 @@ def deck_activity(deck_id):
         for r in rows
     ])
 
-def _deck_payload(c, deck_row):
+def _deck_payload(c, deck_row, public=False):
     """Full deck JSON: deck info + ordered scenes + flat image list. Shared by
     the owner view (GET /api/decks/<id>) and the public share view
     (GET /api/share/<token>) so the two can never drift apart. Images come back
     in storyboard order (unordered rows last, then by row id) — the frontend
-    preserves this order when it groups images into scene sections."""
+    preserves this order when it groups images into scene sections.
+
+    `public=True` (only ever passed by the share-token route) makes every
+    image's thumbnail an embedded base64 blob instead of a login-gated URL —
+    see build_image_dict()'s docstring (V43/Day 25)."""
     deck_id = deck_row['id']
     scenes = [
         {'id': s['id'], 'name': s['name'], 'sort_order': s['sort_order']}
@@ -6028,7 +6085,7 @@ def _deck_payload(c, deck_row):
 
     images_out = []
     for di in di_rows:
-        img_dict = _fetch_image_dict(c, di['image_id'], deck_row['user_id'])
+        img_dict = _fetch_image_dict(c, di['image_id'], deck_row['user_id'], public=public)
         if img_dict is None:
             continue
         img_dict['deck_image_id'] = di['id']
@@ -6444,9 +6501,11 @@ def join_deck_via_link(token):
 @app.route('/api/share/<token>')
 def get_shared_deck(token):
     """Public read-only deck view — no login, the token IS the access grant.
-    Viewers get thumbnails only (they're embedded in the payload as data URIs);
-    none of the full-res, edit, or delete endpoints check tokens, so a shared
-    link exposes nothing beyond what this one endpoint returns."""
+    Viewers get thumbnails only (they're embedded in the payload as data URIs —
+    public=True, since there's no login here to gate a cacheable URL behind,
+    see build_image_dict()'s docstring); none of the full-res, edit, or
+    delete endpoints check tokens, so a shared link exposes nothing beyond
+    what this one endpoint returns."""
     conn = get_db()
     c = conn.cursor()
     deck_row = c.execute(
@@ -6457,7 +6516,7 @@ def get_shared_deck(token):
         conn.close()
         return jsonify({'error': 'Share link not found or revoked'}), 404
 
-    payload = _deck_payload(c, deck_row)
+    payload = _deck_payload(c, deck_row, public=True)
     conn.close()
     return jsonify(payload)
 
@@ -6845,7 +6904,7 @@ def get_utility_view(view):
     conn = get_db()
     c = conn.cursor()
     rows = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio,
+        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, md5_checksum,
                camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(uid)}
         FROM images WHERE {where}
         ORDER BY date_added DESC {limit_sql}

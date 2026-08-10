@@ -8,6 +8,15 @@
  *
  * Deliberately never caches /api — those responses are per-user and
  * auth-sensitive, and a stale /api/auth/me would show the wrong account.
+ *
+ * ONE exception (V43/Day 25): /api/images/<id>/thumb URLs. They're
+ * content-addressed (?v=<checksum> changes whenever the pixels do — see
+ * build_image_dict() in app.py), so a cache hit is always the right image,
+ * same reasoning as the fingerprinted /assets/ files below. This is also
+ * what keeps offline deck viewing working now that deck payloads carry
+ * thumb URLs instead of embedded base64 — useOfflineCache.js still saves
+ * the deck JSON verbatim, and this is what makes the pictures those URLs
+ * point to actually available with no connection.
  */
 
 const CACHE = 'frame-atlas-shell-v1';
@@ -88,6 +97,21 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  // The one deliberate exception to "never cache /api" — see the file
+  // header comment. Cache-first, same as /assets/ below: the URL itself
+  // changes whenever the image does, so a hit is never stale.
+  if (/^\/api\/images\/\d+\/thumb$/.test(url.pathname)) {
+    event.respondWith(
+      caches
+        .match(request, MATCH_OPTS)
+        .then((hit) =>
+          hit ? replay(hit) : fetch(request).then((response) => cacheCopy(event, request, response))
+        )
+    );
+    return;
+  }
+
   if (url.pathname.startsWith('/api/')) return;
 
   // Diagnostic hook — confirms which service worker build is actually serving.

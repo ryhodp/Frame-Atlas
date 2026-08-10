@@ -500,7 +500,7 @@ in, and Ryan sees a consolidated summary.
 
 ---
 
-## Day 25 — Performance: Thumbnail Caching + Indexes + CI *(V43)*
+## Day 25 — Performance: Thumbnail Caching + Indexes + CI *(V43 — COMPLETE)*
 
 **Goal:** The biggest day-to-day quality-of-life win available. Pull this forward if the app
 ever feels slow.
@@ -526,6 +526,32 @@ ever feels slow.
 
 **Done when:** A revisit to the home grid loads from cache instead of re-downloading; tests
 run themselves on every push.
+
+**Shipped August 10, 2026 (V43), in two passes.**
+
+*Part 1 — indexes + CI:* 5 `CREATE INDEX IF NOT EXISTS` statements added to `init_db()`
+(idempotent, run on every boot, no self-disabling flag needed). GitHub Actions workflow runs
+all 36 `scripts/test_*_locally.py` + `.mjs` scripts on every push — turned out every one already
+builds its own throwaway synthetic database, so no fixtures or secrets were needed after all,
+simpler than originally planned.
+
+*Part 2 — thumbnail caching:* `build_image_dict()` now returns a `/api/images/<id>/thumb?v=<md5_checksum>`
+URL instead of embedded base64, for every authenticated context (search, decks, similar-images,
+favorites/flagged/recent). One real design conflict surfaced during planning and got resolved
+before writing code: the same function that serves search results also serves the public
+`/share/<token>` page, which has no login — so a login-gated thumbnail URL would have broken
+public share links. Fixed with a `public=` flag threaded through `build_image_dict()` →
+`_fetch_image_dict()` → `_deck_payload()`: the public share view is the one deliberate exception
+that still embeds base64, everything else gets the cacheable URL. The `?v=` is the image's own
+checksum, so a crop (which rewrites it) forces a fresh fetch while an unrelated re-tag doesn't.
+`frontend/public/sw.js` gained one narrow, documented exception to its "never cache /api" rule
+for exactly this URL shape — which is also what keeps offline deck viewing working, since
+`useOfflineCache.js` still stores the deck JSON verbatim and the service worker is what makes
+the pictures those URLs point to actually available with no connection. No frontend `.jsx` file
+needed to change — every consumer already just does `<img src={img.thumbnail}>`, and a URL
+string works exactly like a data URI there. Verified live in a real browser: a repeat page load
+fired zero network requests for thumbnails at all, served straight from the browser's own disk
+cache. Full detail in CLAUDE.md's "Thumbnails" and "Offline support" sections.
 
 ---
 
@@ -590,6 +616,6 @@ small changes keep having surprising side effects.
 | 22 | PDF lookbook export | A file you can send an agency *(V40)* |
 | 23 | Presentation mode | Present a pitch from the app *(V41)* |
 | 24 | Client feedback loop | Picks + comments on share links *(V42)* |
-| 25 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run *(V43)* |
+| 25 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run ✅ *(V43)* |
 | 26 | Security + reliability hardening | Login throttling, key encryption *(V44)* |
 | 27 | Structural refactor | Lower cost of every future change *(V45, ongoing)* |
