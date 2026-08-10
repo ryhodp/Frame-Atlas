@@ -1826,3 +1826,93 @@ Ryan's standing call is to use the existing 800px thumbnails — already loaded 
 there's zero loading pause between frames — but **built so the image source is a single
 swappable line**, in case it looks soft on a real projector. Full "done when" criteria in
 `/docs/2_Frame_Atlas_Build_Timeline.md`.
+
+---
+
+## Day 23 — August 9, 2026 *(V41 — Presentation Mode)*
+
+### What We Built
+- **Fullscreen deck presentation.** New "▶ Present" button on the deck page opens a black-
+  background overlay: click, arrows, space, or Enter advance; right-click or Backspace go back;
+  Home/End jump to either end; Esc (or the on-screen ✕) exits. Entirely frontend — no new
+  endpoint. It reads the same `deck.scenes` + `deck.images` the deck page already fetched, so it
+  works from the offline cached copy too, with zero extra network round trip to open it.
+- **Scene title cards** between sections — gold text, a rule, the photo count — but only when a
+  deck actually has 2+ non-empty sections. A one-scene deck skips straight to its first frame.
+- **Storyboard notes** shown in a band under each frame, toggleable with the on-screen pill or
+  the `N` key. Visibility remembers your last choice via `localStorage`, first-run default ON.
+- **Frames fit whole on the black background, never cropped** — the same rule as V40's PDF
+  exporter, and for the same reason: re-framing a cinematographer's shots to fill a screen shape
+  would make the feature worse than useless.
+- **Advancing past the last frame holds there.** No loop, no end card, no auto-exit — in a live
+  pitch you can never accidentally reveal you've run out of material or drop the client into the
+  app UI.
+- Idle-fade UI (controls and cursor disappear after ~2.5s of stillness so nothing but the work is
+  on screen), a one-time opening hint pill, and real browser fullscreen with a graceful fallback
+  if the browser refuses it outside a user gesture.
+
+### Decisions Made (confirmed with Ryan before writing code)
+- ✅ Notes visibility remembers your last choice (localStorage), not a fixed default
+- ✅ Title cards only when there are 2+ non-empty sections
+- ✅ Hold on the last frame — no loop, no end card, no auto-exit
+- ✅ Present lives only on the owner's deck page for V41 — not on the public `/share/<token>`
+  view. A future day can add self-presenting to a shared lookbook; that's new scope on a page
+  with its own separate data fetch, not a checkbox on this one
+- ✅ 800px thumbnails (Ryan's standing call from the original Day 23 plan), image source kept to
+  one swappable function (`slideImageSrc()`) so upgrading to full-res-with-preload later is
+  contained, not a rewrite
+
+### Technical Notes
+- The running order — scene `sort_order`, photo storyboard order preserved, Unsorted always
+  last, which sections get title cards — lives in `frontend/src/presentationOrder.js` as a pure
+  function (`buildSlides`), not inline in the component. Same reasoning as V32's
+  `selectionRange.js`: a mis-ordered pitch still LOOKS fine on screen, so this is the one part of
+  the feature that can be silently wrong rather than visibly broken, and CLAUDE.md's own
+  verification notes say browser automation can't reliably drive keyboard interactions to catch
+  it — so the logic has to be reachable from code. `scripts/test_presentation_order.mjs`, 20
+  checks, including a scene dragged above another (V38 reorder) presenting in its new position,
+  and a photo whose `scene_id` no longer matches any real scene landing in Unsorted rather than
+  silently vanishing.
+- Esc is caught two ways: a normal `keydown` handler, plus a `fullscreenchange` listener for when
+  the browser's native fullscreen swallows the Esc keystroke itself on exit — without the second
+  listener, Esc would silently fail to close the presentation roughly half the time depending on
+  whether real fullscreen actually engaged.
+
+### A Real Bug Found and Fixed While Verifying
+`scripts/run_local_for_browser_check.py` — the tool used to click through a real build in a
+browser before calling anything done — has been silently broken since V40. It broke the moment
+V40 added `from pdf_export import ...` to `app.py`: the harness patches `app.py` into a temp
+directory to run it, but never added `backend/` to `sys.path`, so any sibling module import
+fails with `ModuleNotFoundError`. The `test_*_locally.py` scripts already carry that `sys.path`
+line; this harness didn't. Nobody had run it since V40 landed, so this sat undetected for a full
+day of work. Fixed with the same one-line pattern the test scripts use, then used to verify V41
+end-to-end: seeded a real 3-scene, 9-photo deck with mixed notes and confirmed scene order, title
+cards, the notes toggle, hold-on-last-frame, and localStorage persistence all in a live browser.
+
+### Process Note
+The Day 22 (V40) code was discovered uncommitted and unlogged at the very start of this session
+— written in an earlier session but never committed, pushed, or documented. Before starting
+Day 23, this session verified it (51 automated checks, a clean frontend build, both sample PDFs
+sent to Ryan), committed it, pushed it live to Railway, and wrote its session log entry. See the
+"Day 22" entry directly above this one.
+
+### Technical Debt / Open Questions
+- Same open question as V40: sharpness of 800px thumbnails on a real projector is unproven.
+  Presentation mode inherits this — if it ever needs to change, `slideImageSrc()` is the only
+  function that has to move.
+- No self-presenting on the public share link yet (see Decisions above) — explicitly deferred,
+  not forgotten.
+
+### Commits
+`36c3eca` (Presentation Mode + the browser-check harness fix), plus this docs commit.
+
+### Starting Point for Next Session
+**Day 24 — Client Feedback Loop (V42).** Close the loop that currently happens over text and
+email and gets reconciled by hand. On the existing public `/share/<token>` link, viewers can
+pick a frame (a "this one" toggle — the signal that matters most) and comment on a specific
+frame, with no login required: they type their name once, stored in their own browser, and
+everything they leave is attributed to it. Viewers see each other's comments (Ryan's call —
+collaborative, the whole agency side sees one conversation). Owner-side summary on the deck
+shows which frames got picked, by whom, and every comment in one place. Owner controls: feedback
+can be switched off per deck, and the owner can delete any comment. Full "done when" criteria in
+`/docs/2_Frame_Atlas_Build_Timeline.md`.

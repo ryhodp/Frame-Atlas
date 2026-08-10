@@ -420,7 +420,7 @@ in both layouts.
 
 ---
 
-## Day 23 — Presentation Mode *(V41)*
+## Day 23 — Presentation Mode *(V41 — COMPLETE)*
 
 **Goal:** Present a lookbook from the app, full screen, without a browser header bar in shot.
 
@@ -434,6 +434,27 @@ in both layouts.
 
 **Done when:** Ryan can open a deck, hit present, and run a pitch off the laptop with nothing
 on screen but the work.
+
+**How it actually shipped:**
+- **800px thumbnails, not 600px** — this entry's own number was stale (corrected at the source
+  in V40; this file inherited the mistake). Same actual asset the grid already has in memory.
+- **Four decisions confirmed with Ryan before writing code, none obvious from the plan above:**
+  notes visibility remembers your last choice (localStorage) rather than a fixed default; title
+  cards appear only when a deck has 2+ non-empty scenes, so a one-scene deck skips straight to
+  its first frame; advancing past the last frame holds there — no loop, no end card, no
+  auto-exit, so you can never accidentally reveal you've run out of material mid-pitch; and
+  Present lives only on the owner's deck page for V41 (the public share link gets it in Day 24
+  or later, not bundled here).
+- The running order (scene order, photo order, which sections get title cards) is a pure
+  function in `frontend/src/presentationOrder.js`, not inline in the component — same reasoning
+  as V32's shift-click range selection: this kind of logic can silently be WRONG rather than
+  visibly broken, and browser automation can't reliably drive keyboard interactions to catch it,
+  so it needs to be reachable from code. 20 checks in `scripts/test_presentation_order.mjs`.
+- Verified end-to-end in a real browser via `scripts/run_local_for_browser_check.py` against a
+  seeded 3-scene, 9-photo deck — which surfaced and fixed an unrelated bug: that harness broke
+  the moment V40 added `from pdf_export import ...` to `app.py`, because the harness patches
+  `app.py` into a temp directory without ever adding `backend/` to `sys.path`. Nobody had run it
+  since V40 landed.
 
 ---
 
