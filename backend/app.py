@@ -617,6 +617,46 @@ def init_db():
         )
     ''')
 
+    # V42 (Day 24): anonymous client feedback on a shared lookbook. Both
+    # tables key off deck_image_id (the deck-specific instance of a photo),
+    # same as storyboard_note already does — an image can appear in more
+    # than one deck, and feedback belongs to the one it was left on.
+    #
+    # A "pick" is a toggle, one per (frame, browser) — UNIQUE enforces that
+    # server-side so a double-click or a retry can't inflate the count.
+    # viewer_token is a random id the viewer's OWN browser generates and
+    # stores in localStorage (never a login), kept separate from the display
+    # name they type so retyping their name slightly differently doesn't
+    # fork their identity or let two people who both type "Sarah" share a
+    # pick slot.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS deck_picks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_image_id INTEGER NOT NULL,
+            viewer_token TEXT NOT NULL,
+            viewer_name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(deck_image_id, viewer_token),
+            FOREIGN KEY (deck_image_id) REFERENCES deck_images(id)
+        )
+    ''')
+
+    # Comments are never deduped or toggled — every submission is its own
+    # row. viewer_token still rides along (not used for uniqueness here) so
+    # a future "edit your own comment" feature would have something to key
+    # on without a schema change.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS deck_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deck_image_id INTEGER NOT NULL,
+            viewer_token TEXT NOT NULL,
+            viewer_name TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (deck_image_id) REFERENCES deck_images(id)
+        )
+    ''')
+
     c.execute('''
         CREATE TABLE IF NOT EXISTS sync_settings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -871,6 +911,20 @@ def init_db():
             print(f"[migration] Added {_col} column to images")
         except Exception:
             pass
+
+    # V42: whether a deck accepts anonymous picks/comments on its share link.
+    # DEFAULT 0 means every deck that already existed before this migration
+    # ran comes back OFF — a deliberate choice (confirmed with Ryan): links
+    # already sitting in an agency inbox must not suddenly start accepting
+    # public comments the moment this ships. Brand new decks get feedback ON
+    # by INSERTing the value explicitly in create_deck() below, overriding
+    # this column default for every row created from here on.
+    try:
+        c.execute("ALTER TABLE decks ADD COLUMN feedback_enabled INTEGER DEFAULT 0")
+        conn.commit()
+        print("[migration] Added feedback_enabled column to decks")
+    except Exception:
+        pass
 
     # V39: full-text search over the 5 columns above. FTS5 is SQLite's own
     # built-in index (tokenizes on word boundaries, ranks by BM25) — no new
@@ -5617,7 +5671,7 @@ def _deck_access(c, deck_id, user_id):
     add/remove photos, etc.) should keep using the stricter
     `user_id = session['user_id']` owner-only check instead of this."""
     deck_row = c.execute(
-        'SELECT id, name, created_at, updated_at, share_token, invite_token, user_id '
+        'SELECT id, name, created_at, updated_at, share_token, invite_token, user_id, feedback_enabled '
         'FROM decks WHERE id = ?', (deck_id,)
     ).fetchone()
     if not deck_row:
@@ -5714,7 +5768,10 @@ def create_deck():
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('INSERT INTO decks (user_id, name) VALUES (?, ?)', (session['user_id'], name))
+    # feedback_enabled = 1 explicitly, overriding the column's own DEFAULT 0
+    # (that default exists so decks that predate V42 come back OFF — see the
+    # migration above). Every deck created from here on starts with feedback on.
+    c.execute('INSERT INTO decks (user_id, name, feedback_enabled) VALUES (?, ?, 1)', (session['user_id'], name))
     deck_id = c.lastrowid
     created_at = c.execute('SELECT created_at FROM decks WHERE id = ?', (deck_id,)).fetchone()['created_at']
     conn.commit()
@@ -5725,7 +5782,8 @@ def create_deck():
         'name': name,
         'created_at': created_at,
         'image_count': 0,
-        'preview_thumbnails': []
+        'preview_thumbnails': [],
+        'feedback_enabled': True
     })
 
 @app.route('/api/decks/<int:deck_id>', methods=['PATCH'])
@@ -5755,6 +5813,10 @@ def delete_deck(deck_id):
         conn.close()
         return jsonify({'error': 'Deck not found'}), 404
 
+    # V42: picks/comments key off deck_image_id, so they have to go BEFORE
+    # deck_images itself — after that delete there's nothing left to join on.
+    c.execute('DELETE FROM deck_picks WHERE deck_image_id IN (SELECT id FROM deck_images WHERE deck_id = ?)', (deck_id,))
+    c.execute('DELETE FROM deck_comments WHERE deck_image_id IN (SELECT id FROM deck_images WHERE deck_id = ?)', (deck_id,))
     c.execute('DELETE FROM deck_images WHERE deck_id = ?', (deck_id,))
     c.execute('DELETE FROM scenes WHERE deck_id = ?', (deck_id,))
     c.execute('DELETE FROM deck_members WHERE deck_id = ?', (deck_id,))
@@ -5959,6 +6021,10 @@ def _deck_payload(c, deck_row):
         # frontend's "New changes" banner permanently dead.
         'updated_at': deck_row['updated_at'],
         'share_token': deck_row['share_token'],
+        # V42: whether the share link accepts picks/comments. Every caller of
+        # this function selects the column now (see _deck_access and
+        # get_shared_deck) so it's always present on deck_row.
+        'feedback_enabled': bool(deck_row['feedback_enabled']),
         'scenes': scenes,
         'images': images_out
     }
@@ -6197,6 +6263,11 @@ def delete_deck_image(deck_image_id):
         conn.close()
         return jsonify({'error': 'deck image not found'}), 404
 
+    # V42: drop any picks/comments left on this frame — otherwise re-adding
+    # the same underlying image to the deck later would land on a fresh
+    # deck_images row with orphaned feedback pointing at the old one.
+    c.execute('DELETE FROM deck_picks WHERE deck_image_id = ?', (deck_image_id,))
+    c.execute('DELETE FROM deck_comments WHERE deck_image_id = ?', (deck_image_id,))
     c.execute('DELETE FROM deck_images WHERE id = ?', (deck_image_id,))
     log_deck_activity(c, row['deck_id'], 'removed_photo')
     conn.commit()
@@ -6354,7 +6425,7 @@ def get_shared_deck(token):
     conn = get_db()
     c = conn.cursor()
     deck_row = c.execute(
-        'SELECT id, name, created_at, updated_at, share_token, user_id '
+        'SELECT id, name, created_at, updated_at, share_token, user_id, feedback_enabled '
         'FROM decks WHERE share_token = ?', (token,)
     ).fetchone()
     if not deck_row:
@@ -6364,6 +6435,285 @@ def get_shared_deck(token):
     payload = _deck_payload(c, deck_row)
     conn.close()
     return jsonify(payload)
+
+# ============================================================================
+# DAY 24 (V42): CLIENT FEEDBACK — anonymous picks + comments on a share link
+# ============================================================================
+
+COMMENT_MAX_LEN = 2000
+VIEWER_NAME_MAX_LEN = 60
+# The viewer's browser generates this (crypto.randomUUID()) and echoes it on
+# every feedback write — never a login, just a way to recognize "the same
+# browser came back" so a pick can be toggled and can't be inflated by a
+# double-click or a retried request. Loose enough to accept a UUID or any
+# other reasonable random string; tight enough that it can't be used to
+# smuggle SQL-shaped or oversized junk into a TEXT column with no other
+# validation.
+VIEWER_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{8,128}$')
+
+def _valid_viewer_token(token):
+    return isinstance(token, str) and bool(VIEWER_TOKEN_RE.match(token))
+
+def _clean_viewer_name(raw):
+    name = (raw or '').strip()
+    if not name or len(name) > VIEWER_NAME_MAX_LEN:
+        return None
+    return name
+
+def _feedback_deck_for_token(c, token):
+    """The deck row for a share token, but ONLY if feedback is turned on —
+    every public write endpoint below gates through this one function, so a
+    future third condition (e.g. a moderation pause) only has to change here."""
+    return c.execute(
+        'SELECT id FROM decks WHERE share_token = ? AND feedback_enabled = 1', (token,)
+    ).fetchone()
+
+def _deck_feedback_payload(c, deck_id, viewer_token=None):
+    """Picks + comments for every frame in a deck that has either, grouped by
+    deck_image_id and ranked most-picked first. Shared by the owner's
+    Feedback panel and the public share page's own view of the same data, so
+    the two can never drift apart — same reasoning as _deck_payload().
+
+    `viewer_token`, when given, marks which picks belong to THIS browser
+    (`picked_by_me`) — left as None for the owner's own view, since the
+    owner isn't a "viewer" with a token of their own.
+
+    Thumbnails/filenames are deliberately NOT included here — both callers
+    already have deck.images in hand (from _deck_payload) and can cross-
+    reference by deck_image_id, so this stays a small, fast query."""
+    pick_rows = c.execute('''
+        SELECT dp.deck_image_id, dp.viewer_name, dp.viewer_token
+        FROM deck_picks dp
+        JOIN deck_images di ON di.id = dp.deck_image_id
+        WHERE di.deck_id = ?
+        ORDER BY dp.created_at ASC
+    ''', (deck_id,)).fetchall()
+
+    comment_rows = c.execute('''
+        SELECT dc.id, dc.deck_image_id, dc.viewer_name, dc.body, dc.created_at
+        FROM deck_comments dc
+        JOIN deck_images di ON di.id = dc.deck_image_id
+        WHERE di.deck_id = ?
+        ORDER BY dc.created_at ASC
+    ''', (deck_id,)).fetchall()
+
+    frames = {}
+    def bucket(deck_image_id):
+        return frames.setdefault(str(deck_image_id), {
+            'pick_count': 0, 'pickers': [], 'picked_by_me': False, 'comments': []
+        })
+
+    for r in pick_rows:
+        b = bucket(r['deck_image_id'])
+        b['pick_count'] += 1
+        b['pickers'].append(r['viewer_name'])
+        if viewer_token and r['viewer_token'] == viewer_token:
+            b['picked_by_me'] = True
+
+    for r in comment_rows:
+        b = bucket(r['deck_image_id'])
+        b['comments'].append({
+            'id': r['id'], 'viewer_name': r['viewer_name'],
+            'body': r['body'], 'created_at': r['created_at']
+        })
+
+    # Most-picked first (Ryan's call): the frame that won the room is the
+    # first thing the owner sees, not whichever happens to sort first in the
+    # deck. Ties keep insertion order, which is already earliest-pick-first
+    # since pick_rows came back ASC by created_at and dict insertion order —
+    # and therefore Python's stable sort — preserves that.
+    ranked_ids = [
+        int(k) for k, v in sorted(frames.items(), key=lambda kv: -kv[1]['pick_count'])
+        if v['pick_count'] > 0 or v['comments']
+    ]
+
+    return {
+        'frames': frames,
+        'ranked_deck_image_ids': ranked_ids,
+        'total_picks': len(pick_rows),
+        'total_comments': len(comment_rows),
+    }
+
+@app.route('/api/decks/<int:deck_id>/feedback', methods=['GET'])
+def get_deck_feedback(deck_id):
+    """Owner-only feedback summary. Reuses _deck_feedback_payload so this can
+    never show the owner something different from what viewers themselves see."""
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+    payload = _deck_feedback_payload(c, deck_id)
+    conn.close()
+    return jsonify(payload)
+
+@app.route('/api/decks/<int:deck_id>/feedback-enabled', methods=['POST'])
+def set_deck_feedback_enabled(deck_id):
+    """Owner-only on/off switch — lives in the Share panel on the frontend
+    (feedback only matters once a link exists, so the switch lives with the
+    thing that creates the link). Deliberately does NOT call touch_deck() or
+    log_deck_activity(): this isn't a content change crew members or the
+    offline "New changes" banner need to know about — same reasoning as the
+    V40 PDF export being read-only."""
+    data = request.get_json(force=True) or {}
+    enabled = bool(data.get('enabled'))
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+    c.execute('UPDATE decks SET feedback_enabled = ? WHERE id = ?', (1 if enabled else 0, deck_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'feedback_enabled': enabled})
+
+@app.route('/api/decks/<int:deck_id>/comments/<int:comment_id>', methods=['DELETE'])
+def delete_deck_comment(deck_id, comment_id):
+    """Owner-only. The share token is unguessable, but anyone holding it can
+    post — this delete is the pressure valve the product plan calls for."""
+    conn = get_db()
+    c = conn.cursor()
+    if not c.execute('SELECT 1 FROM decks WHERE id = ? AND user_id = ?', (deck_id, session['user_id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Deck not found'}), 404
+    row = c.execute('''
+        SELECT dc.id FROM deck_comments dc JOIN deck_images di ON di.id = dc.deck_image_id
+        WHERE dc.id = ? AND di.deck_id = ?
+    ''', (comment_id, deck_id)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Comment not found'}), 404
+    c.execute('DELETE FROM deck_comments WHERE id = ?', (comment_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/share/<token>/feedback', methods=['GET'])
+def get_share_feedback(token):
+    """Public. Everyone holding the link sees the same picks and comments —
+    Ryan's call, collaborative, one conversation for the whole agency side —
+    except `picked_by_me`, which is scoped to whichever browser is asking."""
+    viewer_token = request.headers.get('X-FA-Viewer') or request.args.get('viewer_token')
+    if not _valid_viewer_token(viewer_token):
+        viewer_token = None
+    conn = get_db()
+    c = conn.cursor()
+    deck_row = c.execute('SELECT id, feedback_enabled FROM decks WHERE share_token = ?', (token,)).fetchone()
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Share link not found or revoked'}), 404
+    if not deck_row['feedback_enabled']:
+        conn.close()
+        return jsonify({'enabled': False, 'frames': {}, 'ranked_deck_image_ids': [],
+                        'total_picks': 0, 'total_comments': 0})
+    payload = _deck_feedback_payload(c, deck_row['id'], viewer_token=viewer_token)
+    payload['enabled'] = True
+    conn.close()
+    return jsonify(payload)
+
+@app.route('/api/share/<token>/picks', methods=['POST'])
+def add_share_pick(token):
+    """Public, idempotent: picking a frame you already picked (same browser)
+    just refreshes the display name in case it was retyped — it does not
+    create a second pick or error."""
+    data = request.get_json(force=True) or {}
+    deck_image_id = data.get('deck_image_id')
+    viewer_token = data.get('viewer_token')
+    viewer_name = _clean_viewer_name(data.get('viewer_name'))
+    if not isinstance(deck_image_id, int):
+        return jsonify({'error': 'deck_image_id is required'}), 400
+    if not _valid_viewer_token(viewer_token):
+        return jsonify({'error': 'viewer_token is required'}), 400
+    if not viewer_name:
+        return jsonify({'error': 'A name is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    deck_row = _feedback_deck_for_token(c, token)
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Feedback is not open on this lookbook'}), 404
+    if not c.execute('SELECT 1 FROM deck_images WHERE id = ? AND deck_id = ?',
+                     (deck_image_id, deck_row['id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Frame not found in this deck'}), 404
+
+    c.execute('''
+        INSERT INTO deck_picks (deck_image_id, viewer_token, viewer_name)
+        VALUES (?, ?, ?)
+        ON CONFLICT(deck_image_id, viewer_token) DO UPDATE SET viewer_name = excluded.viewer_name
+    ''', (deck_image_id, viewer_token, viewer_name))
+    conn.commit()
+    count = c.execute('SELECT COUNT(*) FROM deck_picks WHERE deck_image_id = ?', (deck_image_id,)).fetchone()[0]
+    conn.close()
+    return jsonify({'picked': True, 'pick_count': count})
+
+@app.route('/api/share/<token>/picks', methods=['DELETE'])
+def remove_share_pick(token):
+    """Public, idempotent: un-picking a frame that was never picked (or was
+    already un-picked) is a no-op, not an error."""
+    data = request.get_json(force=True) or {}
+    deck_image_id = data.get('deck_image_id')
+    viewer_token = data.get('viewer_token')
+    if not isinstance(deck_image_id, int) or not _valid_viewer_token(viewer_token):
+        return jsonify({'error': 'deck_image_id and viewer_token are required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    deck_row = _feedback_deck_for_token(c, token)
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Feedback is not open on this lookbook'}), 404
+
+    c.execute('''
+        DELETE FROM deck_picks WHERE deck_image_id = ? AND viewer_token = ?
+        AND deck_image_id IN (SELECT id FROM deck_images WHERE deck_id = ?)
+    ''', (deck_image_id, viewer_token, deck_row['id']))
+    conn.commit()
+    count = c.execute('SELECT COUNT(*) FROM deck_picks WHERE deck_image_id = ?', (deck_image_id,)).fetchone()[0]
+    conn.close()
+    return jsonify({'picked': False, 'pick_count': count})
+
+@app.route('/api/share/<token>/comments', methods=['POST'])
+def add_share_comment(token):
+    """Public. Every submission is its own row — comments are never
+    deduped or toggled the way picks are."""
+    data = request.get_json(force=True) or {}
+    deck_image_id = data.get('deck_image_id')
+    viewer_token = data.get('viewer_token')
+    viewer_name = _clean_viewer_name(data.get('viewer_name'))
+    body = (data.get('body') or '').strip()
+    if not isinstance(deck_image_id, int):
+        return jsonify({'error': 'deck_image_id is required'}), 400
+    if not _valid_viewer_token(viewer_token):
+        return jsonify({'error': 'viewer_token is required'}), 400
+    if not viewer_name:
+        return jsonify({'error': 'A name is required'}), 400
+    if not body:
+        return jsonify({'error': 'Comment cannot be empty'}), 400
+    if len(body) > COMMENT_MAX_LEN:
+        return jsonify({'error': f'Comment is too long (max {COMMENT_MAX_LEN} characters)'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    deck_row = _feedback_deck_for_token(c, token)
+    if not deck_row:
+        conn.close()
+        return jsonify({'error': 'Feedback is not open on this lookbook'}), 404
+    if not c.execute('SELECT 1 FROM deck_images WHERE id = ? AND deck_id = ?',
+                     (deck_image_id, deck_row['id'])).fetchone():
+        conn.close()
+        return jsonify({'error': 'Frame not found in this deck'}), 404
+
+    c.execute('''
+        INSERT INTO deck_comments (deck_image_id, viewer_token, viewer_name, body)
+        VALUES (?, ?, ?, ?)
+    ''', (deck_image_id, viewer_token, viewer_name, body))
+    comment_id = c.lastrowid
+    created_at = c.execute('SELECT created_at FROM deck_comments WHERE id = ?', (comment_id,)).fetchone()['created_at']
+    conn.commit()
+    conn.close()
+    return jsonify({'id': comment_id, 'viewer_name': viewer_name, 'body': body, 'created_at': created_at})
 
 @app.route('/api/decks/<int:deck_id>/export.pdf')
 def export_deck_pdf(deck_id):
