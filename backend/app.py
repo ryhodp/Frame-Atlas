@@ -1010,6 +1010,31 @@ def init_db():
         )
     """)
     conn.commit()
+
+    # V43 (Day 25): there were zero indexes anywhere in this database until
+    # now — every search, autocomplete keystroke and tag lookup was a full
+    # table scan. Invisible at a few thousand images (a scan is still only a
+    # handful of milliseconds) but it grows in a straight line, and
+    # autocomplete fires on every keystroke. CREATE INDEX IF NOT EXISTS is
+    # trivially idempotent, so this just runs on every boot rather than
+    # needing a self-disabling backfill flag like the phash/palette ones.
+    for _idx_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_images_user_id ON images(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_tags_image_id ON tags(image_id)",
+        # Covers the AND-filter subquery every search/select-all/removal-
+        # preview runs: WHERE value IN (...) GROUP BY image_id — value leads
+        # so SQLite can seek straight to matching rows, image_id trails so
+        # the GROUP BY is satisfied from the index alone.
+        "CREATE INDEX IF NOT EXISTS idx_tags_value_image_id ON tags(value, image_id)",
+        # Covers autocomplete's WHERE user_id = ? AND LOWER(value) LIKE 'x%'
+        # and the co-occurrence suggestions query's WHERE t.user_id = ?.
+        "CREATE INDEX IF NOT EXISTS idx_tags_user_value ON tags(user_id, value)",
+        # Covers tag-removal preview and bulk-remove, both scoped by category.
+        "CREATE INDEX IF NOT EXISTS idx_tags_category_value ON tags(category, value)",
+    ):
+        c.execute(_idx_sql)
+    conn.commit()
+
     conn.close()
 
 def load_embeddings_seed():
