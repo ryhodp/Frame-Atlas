@@ -12,10 +12,12 @@ Usage (from the frame-atlas folder):
 
 import importlib.util
 import os
+import sys
 import sqlite3
 import tempfile
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(REPO, 'backend'))
 NUM_IMAGES = 40
 
 
@@ -118,28 +120,17 @@ def main():
     assert r.get_json()["logged"] == 0
     print("6. /api/views/log: upserts, counts repeats, ignores foreign/junk ids.")
 
-    # 7. Recently seen images sink below unseen ones in the seeded order
-    recently_seen = {1, 2, 3, 4}
-    order, _ = fetch_order(client, seed="visit-C")
-    positions = {img_id: idx for idx, img_id in enumerate(order)}
-    max_unseen = max(positions[i] for i in date_desc if i not in recently_seen)
-    min_seen = min(positions[i] for i in recently_seen)
-    assert max_unseen < min_seen, "every unseen image must come before every recently-seen one"
-    print("7. Recency: seen-this-week images demoted below unseen ones.")
+    # 7. V35 dropped the recency bucket entirely — logging views must not
+    # perturb the seeded order in any way (no "seen sinks below unseen").
+    order_before, _ = fetch_order(client, seed="visit-C")
+    r = client.post("/api/views/log", json={"image_ids": list(range(1, NUM_IMAGES + 1))})
+    assert r.get_json()["logged"] == NUM_IMAGES
+    order_after, _ = fetch_order(client, seed="visit-C")
+    assert order_after == order_before, \
+        "V35: view history must not affect the seeded shuffle order"
+    print("7. No recency weighting (V35): logging views leaves the seeded order untouched.")
 
-    # 8. Views older than 7 days no longer demote
-    conn = sqlite3.connect(db_path)
-    conn.execute("UPDATE image_views SET last_seen_at = datetime('now', '-10 days') WHERE image_id = 1")
-    conn.commit()
-    conn.close()
-    order, _ = fetch_order(client, seed="visit-C")
-    positions = {img_id: idx for idx, img_id in enumerate(order)}
-    still_seen = {2, 3, 4}
-    assert positions[1] < min(positions[i] for i in still_seen), \
-        "a view from 10 days ago should count as fresh again"
-    print("8. Recency window: 10-day-old views count as fresh again.")
-
-    print("\nAll 8 checks passed.")
+    print("\nAll 7 checks passed.")
 
 
 if __name__ == "__main__":

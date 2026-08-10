@@ -32,6 +32,7 @@ import sys
 import tempfile
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(REPO, 'backend'))
 
 
 # ── fake Drive (just enough for files().create() and a folder listing) ─────

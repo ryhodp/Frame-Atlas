@@ -26,11 +26,13 @@ Usage (from the frame-atlas folder):
 import importlib.util
 import io
 import os
+import sys
 import sqlite3
 import tempfile
 import time
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(REPO, 'backend'))
 
 W, H = 320, 180
 ORANGE = "#E08840"          # the preset orange swatch the UI offers

@@ -2,6 +2,7 @@
 import importlib.util, io, json, os, sys, tempfile
 
 REPO = "/Users/ryanhoang/Desktop/frame-atlas"
+sys.path.insert(0, os.path.join(REPO, 'backend'))
 workdir = tempfile.mkdtemp(prefix="frame_atlas_admin_analytics_")
 db_path = os.path.join(workdir, "library.db")
 

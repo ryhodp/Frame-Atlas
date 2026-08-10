@@ -16,10 +16,12 @@ Usage (from the frame-atlas folder):
 import importlib.util
 import io
 import os
+import sys
 import sqlite3
 import tempfile
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(REPO, 'backend'))
 NUM_IMAGES = 5
 
 

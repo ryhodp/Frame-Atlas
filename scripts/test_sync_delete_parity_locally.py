@@ -29,6 +29,7 @@ import sys
 import tempfile
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(REPO, 'backend'))
 ROBOT_EMAIL = "frame-atlas-robot@test-project.iam.gserviceaccount.com"
 
 

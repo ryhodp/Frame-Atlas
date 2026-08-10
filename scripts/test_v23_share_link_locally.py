@@ -19,6 +19,7 @@ import sys
 import tempfile
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(REPO, 'backend'))
 
 
 def make_jpeg(mod, color=(80, 120, 200)):
