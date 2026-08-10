@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import StoryboardView from '../components/StoryboardView';
+import PresentationMode from '../components/PresentationMode';
 import { useOfflineCache, hasRemoteUpdates } from '../hooks/useOfflineCache';
 import { useToast } from '../ToastContext';
 
@@ -83,6 +84,7 @@ export default function DeckDetail() {
   const [storyboard, setStoryboard] = useState(null); // { sceneId, title } or null
   const [shareOpen, setShareOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [presenting, setPresenting] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
 
@@ -461,6 +463,30 @@ export default function DeckDetail() {
           </div>
         )}
 
+        {/* Present — deliberately outside the is_owner block: a crew member can
+            already see every frame and note on this page, so presenting is just
+            a way of looking at it. Works from the offline cached copy too, since
+            the thumbnails it shows are already in hand. */}
+        <button
+          onClick={() => deck.images.length > 0 && setPresenting(true)}
+          disabled={deck.images.length === 0}
+          title={deck.images.length === 0
+            ? 'Add some photos to this lookbook first'
+            : 'Play this lookbook fullscreen — arrows to move, Esc to exit'}
+          style={{
+            background: deck.images.length === 0 ? 'none' : '#d9a441',
+            border: `1px solid ${deck.images.length === 0 ? '#33353b' : '#d9a441'}`,
+            color: deck.images.length === 0 ? '#6b6d75' : '#3d2f00',
+            borderRadius: '8px', padding: '8px 16px',
+            cursor: deck.images.length === 0 ? 'default' : 'pointer',
+            fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
+            whiteSpace: 'nowrap',
+            opacity: deck.images.length === 0 ? 0.6 : 1
+          }}
+        >
+          ▶ Present
+        </button>
+
         <button
           onClick={() => setActivityOpen(true)}
           style={{
@@ -587,6 +613,15 @@ export default function DeckDetail() {
           shareToken={deck.share_token}
           onTokenChange={(token) => setDeck(prev => ({ ...prev, share_token: token }))}
           onClose={() => setShareOpen(false)}
+        />
+      )}
+
+      {presenting && (
+        <PresentationMode
+          deckName={deck.name}
+          scenes={deck.scenes}
+          images={deck.images}
+          onClose={() => setPresenting(false)}
         />
       )}
 

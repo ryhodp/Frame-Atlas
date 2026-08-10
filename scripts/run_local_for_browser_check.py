@@ -27,6 +27,14 @@ import tempfile
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
 
+# The patched copy of app.py runs from a temp directory, so backend/ has to be
+# importable for app.py's own sibling modules to resolve — without this, V40's
+# `from pdf_export import ...` dies at import with ModuleNotFoundError and this
+# whole harness won't boot. The test_*_locally.py scripts already carry the same
+# line; this one didn't, and V40 landed before anyone ran it. Any future module
+# that lives next to app.py needs nothing more than this.
+sys.path.insert(0, os.path.join(REPO, "backend"))
+
 # Reuse the fake Google Drive from the V17 test harness so the personal-
 # library flow (connect folder → sync) is fully clickable locally.
 sys.path.insert(0, os.path.dirname(__file__))
