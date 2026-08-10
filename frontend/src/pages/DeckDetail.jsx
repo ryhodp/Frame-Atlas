@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import StoryboardView from '../components/StoryboardView';
 import PresentationMode from '../components/PresentationMode';
+import FeedbackPanel from '../components/FeedbackPanel';
 import { useOfflineCache, hasRemoteUpdates } from '../hooks/useOfflineCache';
 import { useToast } from '../ToastContext';
 
@@ -85,6 +86,7 @@ export default function DeckDetail() {
   const [shareOpen, setShareOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [presenting, setPresenting] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
 
@@ -452,6 +454,20 @@ export default function DeckDetail() {
             >
               ⎙ Export PDF
             </button>
+            {deck.feedback_enabled && (
+              <button
+                onClick={() => setFeedbackOpen(true)}
+                style={{
+                  background: 'none', border: '1px solid #44474f',
+                  color: '#e2e2e6', borderRadius: '8px', padding: '8px 16px',
+                  cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
+                  whiteSpace: 'nowrap'
+                }}
+                title="See which frames got picked, and every comment, in one place"
+              >
+                💬 Feedback
+              </button>
+            )}
           </>
         ) : (
           <div style={{
@@ -611,7 +627,9 @@ export default function DeckDetail() {
         <ShareModal
           deckId={Number(id)}
           shareToken={deck.share_token}
+          feedbackEnabled={deck.feedback_enabled}
           onTokenChange={(token) => setDeck(prev => ({ ...prev, share_token: token }))}
+          onFeedbackEnabledChange={(enabled) => setDeck(prev => ({ ...prev, feedback_enabled: enabled }))}
           onClose={() => setShareOpen(false)}
         />
       )}
@@ -622,6 +640,14 @@ export default function DeckDetail() {
           scenes={deck.scenes}
           images={deck.images}
           onClose={() => setPresenting(false)}
+        />
+      )}
+
+      {feedbackOpen && (
+        <FeedbackPanel
+          deckId={Number(id)}
+          images={deck.images}
+          onClose={() => setFeedbackOpen(false)}
         />
       )}
 
@@ -1020,12 +1046,31 @@ function ActivityPanel({ deckId, onClose }) {
 }
 
 // ── Share link modal — create, copy, revoke ──────────────────────────────────
-function ShareModal({ deckId, shareToken, onTokenChange, onClose }) {
+function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeedbackEnabledChange, onClose }) {
   const [working, setWorking] = useState(false);
   const [copied, setCopied] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [savingFeedback, setSavingFeedback] = useState(false);
 
   const shareUrl = shareToken ? `${window.location.origin}/share/${shareToken}` : null;
+
+  const toggleFeedback = async () => {
+    const next = !feedbackEnabled;
+    setSavingFeedback(true);
+    onFeedbackEnabledChange(next); // optimistic — flipped back on failure below
+    try {
+      const res = await fetch(`/api/decks/${deckId}/feedback-enabled`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next })
+      });
+      if (!res.ok) throw new Error('toggle failed');
+    } catch (e) {
+      console.error('Toggling feedback failed', e);
+      onFeedbackEnabledChange(!next);
+    }
+    setSavingFeedback(false);
+  };
 
   const createLink = async () => {
     setWorking(true);
@@ -1131,6 +1176,43 @@ function ShareModal({ deckId, shareToken, onTokenChange, onClose }) {
               >
                 {copied ? 'Copied ✓' : 'Copy'}
               </button>
+            </div>
+
+            <div
+              onClick={savingFeedback ? undefined : toggleFeedback}
+              onKeyDown={savingFeedback ? undefined : (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFeedback(); }
+              }}
+              role="switch"
+              aria-checked={feedbackEnabled}
+              aria-label="Allow picks & comments"
+              tabIndex={savingFeedback ? -1 : 0}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: '10px',
+                background: '#1a1c20', border: '1px solid #33353b',
+                borderRadius: '8px', padding: '11px 12px', marginBottom: '14px',
+                cursor: savingFeedback ? 'default' : 'pointer', opacity: savingFeedback ? 0.7 : 1
+              }}
+            >
+              <div style={{
+                flexShrink: 0, marginTop: '1px', width: '32px', height: '18px', borderRadius: '999px',
+                background: feedbackEnabled ? '#d9a441' : '#44474f', position: 'relative', transition: 'background 150ms'
+              }}>
+                <div style={{
+                  position: 'absolute', top: '2px', left: feedbackEnabled ? '16px' : '2px',
+                  width: '14px', height: '14px', borderRadius: '50%', background: '#fff',
+                  transition: 'left 150ms'
+                }} />
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#e2e2e6', marginBottom: '2px' }}>
+                  Allow picks &amp; comments
+                </div>
+                <div style={{ fontSize: '12px', color: '#9c988d', lineHeight: 1.5 }}>
+                  Viewers can mark favorite frames and leave notes without signing in. You can
+                  delete anything they post, and turn this off any time.
+                </div>
+              </div>
             </div>
 
             {confirmRevoke ? (
