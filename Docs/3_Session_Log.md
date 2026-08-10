@@ -1916,3 +1916,87 @@ collaborative, the whole agency side sees one conversation). Owner-side summary 
 shows which frames got picked, by whom, and every comment in one place. Owner controls: feedback
 can be switched off per deck, and the owner can delete any comment. Full "done when" criteria in
 `/docs/2_Frame_Atlas_Build_Timeline.md`.
+
+---
+
+## Day 24 — August 10, 2026 *(V42 — Client Feedback Loop)*
+
+### What We Built
+- **Anonymous picks + comments on the public share link.** Every frame on `/share/<token>` gets
+  a "☆ Pick this one" toggle and a comment thread, shown only when the deck's owner has feedback
+  turned on. No login: the first time a viewer picks or comments, a small modal asks for a
+  name — once, ever, on that device — and every action after that uses it automatically.
+- **Everyone holding the link sees the same picks and comments** (Ryan's call, confirmed
+  pre-session) — collaborative, one conversation for the whole agency side, not a private
+  ballot. Accepted the tradeoff that early opinions can anchor later ones.
+- **Owner Feedback panel** (new "💬 Feedback" button, next to Export PDF) — most-picked frame
+  first, picker names, every comment grouped underneath, delete (×) per comment.
+- **Feedback on/off switch** lives in the existing Share panel, right under the link.
+
+### Decisions Made (confirmed with Ryan before writing code — all 4 pre-coding questions)
+- ✅ Duplicate-pick protection: an invisible per-browser token (`localStorage`, separate from
+  the typed display name), not name-matching or no dedup at all
+- ✅ **Decks that existed before this shipped default to feedback OFF; decks created from here
+  on default ON.** The one decision that mattered most: a link already sitting in an agency
+  inbox must not start accepting public comments the moment this landed
+- ✅ Owner summary: dedicated Feedback panel, sorted most-picked-first (not deck order, not
+  inline badges on the editor grid)
+- ✅ The on/off switch lives in the Share panel, not a separate location
+
+### Technical Notes
+- `deck_picks` / `deck_comments` key off `deck_image_id` (same pattern as `storyboard_note`) —
+  an image can live in more than one deck, feedback belongs to the one it was left on.
+- A pick is `UNIQUE(deck_image_id, viewer_token)`, so a double-click or a retried request can't
+  inflate the count — and un-picking is idempotent too.
+- `_deck_feedback_payload()` is the one function BOTH the owner's panel and the public page's
+  own feedback view call, so they can never show a different number for the same deck — same
+  precedent as `_deck_payload()` (V23) and `build_search_filters()` (V32).
+- All four public feedback endpoints (`GET`/`POST`/`DELETE` under `/api/share/<token>/...`) gate
+  through one function that checks the token AND `feedback_enabled` together, so turning
+  feedback off blocks writes immediately even with a perfectly valid token.
+
+### Two Real Bugs Found and Fixed During Browser Verification
+- **A stranded empty row.** Deleting the only comment on a frame with zero picks left an empty
+  card in the owner's Feedback panel until the next reload — the backend already excludes empty
+  frames on a fresh fetch, but the panel's local state after an optimistic delete didn't
+  re-derive that. Fixed by filtering the CURRENT local state on every render instead of trusting
+  the list from the initial load.
+- **An inaccessible toggle.** The Share panel's on/off switch was a plain `div` with an
+  `onClick` — no keyboard access, no accessible role. Found because the browser-verification
+  tooling's own accessibility-tree reader couldn't discover it either, which is the same wall a
+  screen-reader user would hit. Now `role="switch"`, `aria-checked`, `tabIndex`, keyboard support.
+
+### A Third Bug Found, Unrelated to This Feature
+While trying to run regression tests to confirm V42 didn't break decks/scenes/sharing, discovered
+that **29 of the repo's `test_*_locally.py` scripts had been silently `ModuleNotFoundError`-ing
+since Day 22** — same root cause as the `run_local_for_browser_check.py` bug fixed in the V41
+session (V40 added `from pdf_export import ...` to `app.py`; the harness patches `app.py` into a
+temp directory without adding `backend/` to `sys.path`), just never caught in the other 29
+because nobody had run them since. Fixed in its own commit, separate from V42. All 29 now pass
+except `test_shuffle_locally.py`, which asserts pre-V35 recency-ordering behavior that CLAUDE.md
+documents as deliberately removed — a stale test, not a regression, flagged separately (spawned
+as its own task rather than "fixed" here, since fixing it is a judgment call about what the test
+SHOULD assert now, not a mechanical one-line patch).
+
+### Verification
+48 backend checks (`scripts/test_client_feedback_locally.py`) plus a full pass of every existing
+`test_*_locally.py` script (28 pass clean, 1 pre-existing stale assertion flagged separately) and
+a clean `npm run build`. Then driven end-to-end in a real browser via
+`scripts/run_local_for_browser_check.py`: name prompt on first pick, picking additional frames
+without re-prompting, posting and reading a comment, the owner's panel matching exactly what was
+left, deleting a comment (confirmed the stranded-row fix), and toggling feedback off (confirmed
+both the header button and the public endpoint respect it immediately).
+
+### Technical Debt / Open Questions
+- No rate limiting on public feedback writes — Ryan's plan explicitly named "owner can delete"
+  as the pressure valve rather than asking for one, so this is accepted as-is for v1.
+- No self-presenting feedback view — a viewer can pick/comment but there's no read-only
+  "everyone's picks" view for THEM, only for the owner. Not asked for; not built.
+
+### Commits
+`07be774` (backend), `d83c878` (frontend), `de4a4a1` (unrelated test-harness fix, 29 files),
+plus this docs commit.
+
+### Starting Point for Next Session
+**Day 25 — Performance: Thumbnail Caching + Indexes + CI (V43).** Full "done when" criteria in
+`/docs/2_Frame_Atlas_Build_Timeline.md`.

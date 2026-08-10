@@ -458,7 +458,7 @@ on screen but the work.
 
 ---
 
-## Day 24 — Client Feedback Loop *(V42)*
+## Day 24 — Client Feedback Loop *(V42 — COMPLETE)*
 
 **Goal:** Close the loop that currently happens over text and email and gets reconciled by hand.
 
@@ -478,6 +478,25 @@ on screen but the work.
 
 **Done when:** Ryan shares a lookbook, two people mark picks and leave notes without signing
 in, and Ryan sees a consolidated summary.
+
+**How it actually shipped:**
+- **Existing shared decks default OFF, new decks default ON** — the one real fork from "no
+  login required" that needed an explicit decision. A link already sitting in an agency inbox
+  must not start accepting public comments the moment this shipped; Ryan flips it on per deck
+  from the Share panel when he wants it.
+- The "browser, not a login" identity is two separate values: a random token the viewer's
+  browser generates for itself (invisible, controls the actual pick toggle) and the name they
+  type (can change any time without losing pick history). One name prompt, on the first pick or
+  comment, whichever comes first — not a gate in front of the whole page.
+- Owner summary is most-picked-frame-first, not deck order — the headline ("which one won") is
+  the first thing Ryan sees, not something he has to scan for.
+- Found and fixed two real bugs during browser verification: a stranded empty row when deleting
+  the only comment on a picks-less frame, and a custom on/off switch that was a plain `div` with
+  no keyboard access or accessible role — the same gap that made it briefly untestable through
+  the accessibility tree is a gap a screen-reader user would hit too.
+- Also found (unrelated to this feature, but blocking honest verification of it): 29 of the
+  repo's `test_*_locally.py` scripts had been silently `ModuleNotFoundError`-ing since Day 22 —
+  fixed in its own commit, separate from V42 itself.
 
 ---
 
