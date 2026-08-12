@@ -7,3 +7,4 @@ google-auth-httplib2==0.2.0
 google-api-python-client==2.107.0
 google-genai==1.16.0
 reportlab==4.2.5
+cryptography==43.0.3

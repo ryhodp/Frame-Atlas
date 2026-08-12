@@ -555,7 +555,7 @@ cache. Full detail in CLAUDE.md's "Thumbnails" and "Offline support" sections.
 
 ---
 
-## Day 26 — Security + Reliability Hardening *(V44)*
+## Day 26 — Security + Reliability Hardening *(V44 — COMPLETE)*
 
 **Goal:** Close the gaps that are fine for an invite-only tool but shouldn't stay open forever.
 
@@ -569,6 +569,41 @@ cache. Full detail in CLAUDE.md's "Thumbnails" and "Offline support" sections.
   put the whole library in git history). Untrack it and add to `.gitignore`.
 - Checked and CLEAN, no action needed: SQL injection — every dynamic query uses hardcoded
   table names or generated `?` placeholders.
+
+**Shipped August 11, 2026 (V44).** All four planned items done, plus one bug found that wasn't
+on the list and turned out to matter more than anything that was:
+
+- **Login throttling** ships as an escalating lockout keyed to the *account*, never the caller's
+  IP — 5 wrong passwords free, then a lockout that doubles each further failure (30s → 1hr cap).
+  Deliberately account-scoped rather than IP-scoped: this app is routinely used from shared
+  networks (V43's own notes cite hotel/set wifi), where IP throttling would let one guesser lock
+  out everyone else on that connection. The lock is checked **before** the password hash, so a
+  locked account rejects even the *correct* password — otherwise the throttle would still leak
+  "that one was right" one guess at a time. Verified live in the real login screen, including
+  that the lock releases on its own with no admin action needed.
+- **Gemini keys are Fernet-encrypted at rest**, cipher key in its own new Railway variable
+  (`FA_ENCRYPTION_KEY`, deliberately separate from `FLASK_SECRET_KEY` so rotating one can't
+  silently break the other). No migration pass needed: a legacy plaintext key just reads as-is
+  and quietly upgrades to encrypted the next time it's saved. Verified against the actual
+  database file on a live server, not just the API response, that a saved key is genuinely
+  unreadable at rest.
+- **The `except: pass` count was wrong — 16, not 13.** 13 are `init_db()`'s routine
+  column-migration blocks, now silent only on the expected "column already exists" case and
+  loud on anything else. 3 more outside `init_db()` now log too. One (aspect-ratio parsing) was
+  deliberately left silent after confirming it's actually unreachable and fires on every
+  autocomplete keystroke — logging it would've been pure noise.
+- **`backend/library.db` untracked**, confirmed first that it was 0 bytes in its only commit
+  (so no real data was ever in git history) before removing it.
+- **The bug not on the list:** `Dockerfile` was missing `PYTHONUNBUFFERED=1`. Without it, every
+  `print()` after boot sat in a buffer and was lost outright if the process restarted or crashed
+  first — confirmed directly, a whole local session produced zero log output beyond startup.
+  This makes the entire except:pass audit above pointless on arrival (a log line that never
+  reaches Railway helps nobody), and is very likely part of why the V27 crop failure went
+  unnoticed for weeks. One-line fix; verified logs now arrive in real time.
+- 33 checks in `scripts/test_security_hardening_locally.py`, all 33 existing test scripts
+  re-run clean, and full live-browser verification: normal login, a real lockout rendering in
+  the actual login form (including that it rejects the *correct* password while locked and
+  releases on its own), and a saved Gemini key confirmed encrypted in the live database file.
 
 ---
 
@@ -617,5 +652,5 @@ small changes keep having surprising side effects.
 | 23 | Presentation mode | Present a pitch from the app *(V41)* |
 | 24 | Client feedback loop | Picks + comments on share links *(V42)* |
 | 25 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run ✅ *(V43)* |
-| 26 | Security + reliability hardening | Login throttling, key encryption *(V44)* |
+| 26 | Security + reliability hardening | Login throttling, key encryption ✅ *(V44)* |
 | 27 | Structural refactor | Lower cost of every future change *(V45, ongoing)* |

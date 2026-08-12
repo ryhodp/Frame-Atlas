@@ -11,3 +11,13 @@ scripts/fingerprints.log
 # Local-only reference images for the crop regression harness (scripts/crop_regression.html).
 # Kept on disk, never committed — 36 MB of screenshots that only slow the build context.
 Test Photos/
+
+# SQLite databases (V44/Day 26). backend/library.db was tracked by git until
+# now — harmless in practice (it was 0 bytes in its only commit, verified) but
+# a real one would put the entire library, every tag, and every user row into
+# git history permanently. The live database lives on Railway's volume at
+# /app/data/library.db and must never be committed from anywhere.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

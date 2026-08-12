@@ -478,6 +478,15 @@ def get_db():
     conn.create_function('shuffle_key', 2, _shuffle_key)
     return conn
 
+def _is_duplicate_column_error(e):
+    """V44 (Day 26): every ALTER TABLE ADD COLUMN migration below is wrapped
+    in a try/except that's silent on the routine case — the column already
+    existing, which is true on every boot after the first. But a genuinely
+    unexpected error (disk full, DB locked, corrupted schema) getting
+    swallowed the same way is exactly the pattern that hid the V27 crop bug
+    for weeks. This tells the two apart so only the unexpected case logs."""
+    return 'duplicate column' in str(e).lower()
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -801,8 +810,9 @@ def init_db():
         c.execute("ALTER TABLE images ADD COLUMN tagging_status TEXT DEFAULT 'pending'")
         conn.commit()
         print("[migration] Added tagging_status column")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding tagging_status column: {e}")
 
     # V7: fingerprints for duplicate detection.
     # md5_checksum = exact-file fingerprint (comes free from Drive metadata)
@@ -812,8 +822,9 @@ def init_db():
             c.execute(f"ALTER TABLE images ADD COLUMN {_col} TEXT")
             conn.commit()
             print(f"[migration] Added {_col} column")
-        except Exception:
-            pass
+        except Exception as e:
+            if not _is_duplicate_column_error(e):
+                print(f"[migration] WARNING: unexpected error adding {_col} column: {e}")
 
     # V7 part 2: holds the signed-in user's Google OAuth token (for uploads),
     # separate from the read-only service account used for sync/download.
@@ -821,16 +832,18 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN google_oauth_token TEXT")
         conn.commit()
         print("[migration] Added google_oauth_token column")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding google_oauth_token column: {e}")
 
     # V13 (Day 14): admin's login email.
     try:
         c.execute("ALTER TABLE users ADD COLUMN email TEXT")
         conn.commit()
         print("[migration] Added email column")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding email column: {e}")
 
     # V18: reusable "join this deck as a viewer" link, separate from the
     # anonymous share_token — accepting it requires login and creates a
@@ -839,32 +852,52 @@ def init_db():
         c.execute("ALTER TABLE decks ADD COLUMN invite_token TEXT")
         conn.commit()
         print("[migration] Added invite_token column to decks")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding invite_token column to decks: {e}")
 
     # V19: last login timestamp, powers the admin per-user analytics view.
     try:
         c.execute("ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP")
         conn.commit()
         print("[migration] Added last_login_at column to users")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding last_login_at column to users: {e}")
+
+    # V44 (Day 26): escalating per-account login lockout. Counts consecutive
+    # wrong passwords and, past LOGIN_LOCK_THRESHOLD, sets a lockout window
+    # that doubles with each further failure (capped at LOGIN_LOCK_MAX_SECONDS)
+    # — see login() below. Deliberately keyed on the ACCOUNT, not the caller's
+    # IP: a shared network (hotel wifi, a set) must never let one guesser lock
+    # out everyone else on it, and an attacker rotating IPs must not be able
+    # to dodge the throttle.
+    for _col, _type in (('failed_login_count', 'INTEGER DEFAULT 0'), ('login_locked_until', 'TIMESTAMP')):
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {_col} {_type}")
+            conn.commit()
+            print(f"[migration] Added {_col} column to users")
+        except Exception as e:
+            if not _is_duplicate_column_error(e):
+                print(f"[migration] WARNING: unexpected error adding {_col} column to users: {e}")
 
     # V23: crew collaboration — permission levels on deck_members (viewer/editor)
     try:
         c.execute("ALTER TABLE deck_members ADD COLUMN permission TEXT DEFAULT 'viewer'")
         conn.commit()
         print("[migration] Added permission column to deck_members")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding permission column to deck_members: {e}")
 
     # V23: track when a deck was last modified for the "new changes" banner
     try:
         c.execute("ALTER TABLE decks ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         conn.commit()
         print("[migration] Added updated_at column to decks")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding updated_at column to decks: {e}")
 
     # V25: where a web-clipped image came from, so a still pulled off a blog
     # can be traced back to its page later. NULL for Drive syncs and uploads.
@@ -872,8 +905,9 @@ def init_db():
         c.execute("ALTER TABLE images ADD COLUMN source_url TEXT")
         conn.commit()
         print("[migration] Added source_url column to images")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding source_url column to images: {e}")
 
     # V24: how much of the frame each palette color actually covers (0.0-1.0).
     # extract_palette() always computed this and threw it away; color search
@@ -884,8 +918,9 @@ def init_db():
         c.execute("ALTER TABLE colors ADD COLUMN share REAL")
         conn.commit()
         print("[migration] Added share column to colors")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding share column to colors: {e}")
 
     # V33: which build of extract_palette() produced this row. NULL = before
     # versioning existed. backfill_palettes() rebuilds anything older than
@@ -896,8 +931,9 @@ def init_db():
         c.execute("ALTER TABLE colors ADD COLUMN palette_version INTEGER")
         conn.commit()
         print("[migration] Added palette_version column to colors")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding palette_version column to colors: {e}")
 
     # V39: DP technical notes — camera/rig, lens, lens filter, stop (T-stop,
     # kept as TEXT since values like "T2.8" don't fit a numeric column), and
@@ -909,8 +945,9 @@ def init_db():
             c.execute(f"ALTER TABLE images ADD COLUMN {_col} TEXT")
             conn.commit()
             print(f"[migration] Added {_col} column to images")
-        except Exception:
-            pass
+        except Exception as e:
+            if not _is_duplicate_column_error(e):
+                print(f"[migration] WARNING: unexpected error adding {_col} column to images: {e}")
 
     # V42: whether a deck accepts anonymous picks/comments on its share link.
     # DEFAULT 0 means every deck that already existed before this migration
@@ -923,8 +960,9 @@ def init_db():
         c.execute("ALTER TABLE decks ADD COLUMN feedback_enabled INTEGER DEFAULT 0")
         conn.commit()
         print("[migration] Added feedback_enabled column to decks")
-    except Exception:
-        pass
+    except Exception as e:
+        if not _is_duplicate_column_error(e):
+            print(f"[migration] WARNING: unexpected error adding feedback_enabled column to decks: {e}")
 
     # V39: full-text search over the 5 columns above. FTS5 is SQLite's own
     # built-in index (tokenizes on word boundaries, ranks by BM25) — no new
@@ -1199,6 +1237,60 @@ def fav_flag_cols(user_id, alias='images'):
         f"EXISTS(SELECT 1 FROM user_flags fl WHERE fl.user_id = {uid} AND fl.image_id = {alias}.id) AS is_flagged"
     )
 
+# ── V44 (Day 26): LOGIN THROTTLING ──────────────────────────────────────────
+# Before this there was no limit at all: passwords could be guessed as fast as
+# requests could be sent. werkzeug's pbkdf2 hashing was already correct, but
+# hashing only makes a STOLEN database expensive to crack — it does nothing
+# about guessing against a live login form.
+#
+# Keyed on the ACCOUNT, never the caller's IP address. Two reasons, both
+# deliberate: an attacker can rotate IPs freely (so IP throttling buys almost
+# nothing), and this app is explicitly used from shared networks — CLAUDE.md's
+# own V43 notes cite hotel and set wifi as normal conditions — where one
+# guesser would otherwise lock out everyone else sharing that connection.
+LOGIN_LOCK_THRESHOLD = 5      # wrong passwords allowed before any lock kicks in
+LOGIN_LOCK_BASE_SECONDS = 30  # first lock; doubles per failure past the threshold
+LOGIN_LOCK_MAX_SECONDS = 3600  # ceiling, so an account is never bricked outright
+
+def _login_lock_remaining(locked_until):
+    """Seconds still to wait on a lock, or 0 if not locked. An unparseable
+    timestamp counts as NOT locked — a corrupted value must never be able to
+    permanently lock a real user out of their own account."""
+    if not locked_until:
+        return 0
+    try:
+        until = datetime.fromisoformat(str(locked_until))
+    except (TypeError, ValueError) as e:
+        print(f"[auth] Ignoring unparseable login_locked_until value {locked_until!r}: {e}")
+        return 0
+    return max(0, int((until - datetime.now()).total_seconds()))
+
+def _format_lock_wait(seconds):
+    """Human wording for the retry message — '45 seconds' / '3 minutes'."""
+    if seconds < 60:
+        return f'{seconds} second{"" if seconds == 1 else "s"}'
+    minutes = (seconds + 59) // 60
+    return f'{minutes} minute{"" if minutes == 1 else "s"}'
+
+def _record_failed_login(row):
+    """Bump the consecutive-failure counter and, past the threshold, set an
+    exponentially growing lockout window."""
+    count = (row['failed_login_count'] or 0) + 1
+    locked_until = None
+    if count >= LOGIN_LOCK_THRESHOLD:
+        # 5th failure -> base, 6th -> 2x, 7th -> 4x, ... capped.
+        wait = min(LOGIN_LOCK_BASE_SECONDS * (2 ** (count - LOGIN_LOCK_THRESHOLD)), LOGIN_LOCK_MAX_SECONDS)
+        locked_until = datetime.now() + timedelta(seconds=wait)
+        print(f"[auth] '{row['username']}' hit {count} consecutive failed logins — locked for {wait}s")
+
+    conn = get_db()
+    conn.execute(
+        'UPDATE users SET failed_login_count = ?, login_locked_until = ? WHERE id = ?',
+        (count, locked_until.isoformat(sep=' ', timespec='seconds') if locked_until else None, row['id'])
+    )
+    conn.commit()
+    conn.close()
+
 @app.route('/api/setup/status')
 def setup_status():
     conn = get_db()
@@ -1250,16 +1342,39 @@ def login():
     conn = get_db()
     c = conn.cursor()
     row = c.execute(
-        'SELECT id, username, email, role, password_hash FROM users WHERE username = ? COLLATE NOCASE',
+        'SELECT id, username, email, role, password_hash, failed_login_count, login_locked_until '
+        'FROM users WHERE username = ? COLLATE NOCASE',
         (username,)
     ).fetchone()
     conn.close()
 
+    # V44 (Day 26): the lockout check runs BEFORE the password check, so a
+    # locked account can't be probed at all — otherwise the throttle would
+    # still leak "was that the right password?" one attempt at a time.
+    if row:
+        locked_for = _login_lock_remaining(row['login_locked_until'])
+        if locked_for > 0:
+            print(f"[auth] Rejected login for '{row['username']}' — locked for another {locked_for}s")
+            return jsonify({
+                'error': f'Too many failed attempts. Try again in {_format_lock_wait(locked_for)}.',
+                'locked': True,
+                'retry_after_seconds': locked_for,
+            }), 429
+
     if not row or not row['password_hash'] or not check_password_hash(row['password_hash'], password):
+        if row:
+            _record_failed_login(row)
         return jsonify({'error': 'Invalid username or password'}), 401
 
     conn = get_db()
-    conn.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'],))
+    # A successful login clears the throttle — the counter tracks CONSECUTIVE
+    # failures, so a legitimate user who mistypes twice then gets it right
+    # starts clean rather than creeping toward a lockout over weeks.
+    conn.execute(
+        "UPDATE users SET last_login_at = CURRENT_TIMESTAMP, failed_login_count = 0, "
+        "login_locked_until = NULL WHERE id = ?",
+        (row['id'],)
+    )
     conn.commit()
     conn.close()
 
@@ -1454,17 +1569,106 @@ def _broadcast_progress():
 # GEMINI KEYS & USAGE
 # ============================================================================
 
+# V44 (Day 26): friends' Gemini keys used to sit in users.gemini_api_key as
+# plain readable text. They're real credentials that bill to a friend's own
+# Google account, so a leaked copy of library.db (which travels: the monthly
+# Drive backup, any local copy) meant usable keys. Now encrypted at rest with
+# Fernet (AES-128-CBC + HMAC authentication, from `cryptography`).
+#
+# The encryption key lives in its own Railway env var, NOT derived from
+# FLASK_SECRET_KEY — one secret protecting two unrelated things means
+# rotating it for a session-security reason would silently destroy every
+# stored API key, and vice versa.
+#
+# Values are stored with an "enc:v1:" prefix so encrypted and legacy
+# plaintext rows are always distinguishable. There is no migration pass: a
+# plaintext key is read as-is and silently re-encrypted the next time it's
+# saved (see set_user_gemini_key), because we can't decrypt what was never
+# encrypted and forcing friends to re-paste their keys would break their
+# tagging with no warning.
+ENCRYPTED_PREFIX = 'enc:v1:'
+
+def _fernet():
+    """The app's Fernet cipher, or None if FA_ENCRYPTION_KEY isn't set.
+
+    Returning None rather than raising is deliberate: a missing key must not
+    take the whole app down at import time (it'd break every route, not just
+    Gemini features). Callers fall back to storing plaintext exactly as
+    before V44, and log loudly — so an unset env var degrades to the old
+    behaviour instead of silently losing keys."""
+    raw = os.environ.get('FA_ENCRYPTION_KEY', '').strip()
+    if not raw:
+        return None
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(raw.encode())
+    except Exception as e:
+        print(f"[crypto] FA_ENCRYPTION_KEY is set but unusable ({e}) — "
+              "falling back to plaintext storage. Generate a valid key with: "
+              "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"")
+        return None
+
+def encrypt_secret(plaintext):
+    """Encrypt a secret for storage. Returns plaintext unchanged (and warns)
+    if no encryption key is configured, so saving a key never hard-fails."""
+    if not plaintext:
+        return plaintext
+    f = _fernet()
+    if f is None:
+        print("[crypto] WARNING: storing a secret in PLAINTEXT — FA_ENCRYPTION_KEY is not set on this deploy.")
+        return plaintext
+    return ENCRYPTED_PREFIX + f.encrypt(plaintext.encode()).decode()
+
+def decrypt_secret(stored):
+    """Read a stored secret. Anything without the enc: prefix is a legacy
+    plaintext row and comes back as-is — that's what keeps keys saved before
+    V44 working without a migration."""
+    if not stored or not stored.startswith(ENCRYPTED_PREFIX):
+        return stored
+    f = _fernet()
+    if f is None:
+        print("[crypto] ERROR: found an encrypted secret but FA_ENCRYPTION_KEY is not set — cannot decrypt.")
+        return None
+    try:
+        return f.decrypt(stored[len(ENCRYPTED_PREFIX):].encode()).decode()
+    except Exception as e:
+        # Wrong key, or a corrupted/tampered value — Fernet authenticates, so
+        # this catches both. Never fall back to returning the ciphertext: it
+        # would be sent to Google as an API key and fail confusingly.
+        #
+        # Log the exception TYPE, not just str(e): Fernet's InvalidToken
+        # carries an empty message, so "({e})" alone printed literally
+        # "()" — a log line that says nothing is the exact problem the
+        # V44 except:pass audit exists to fix.
+        reason = str(e) or type(e).__name__
+        print(f"[crypto] ERROR: could not decrypt stored secret ({reason}) — "
+              "wrong FA_ENCRYPTION_KEY, or the value was corrupted. Treating as missing.")
+        return None
+
+def set_user_gemini_key(user_id, key):
+    """Save a user's Gemini key, encrypted. The single write path, so a key
+    can never be stored unencrypted by some other route later."""
+    conn = get_db()
+    conn.execute('UPDATE users SET gemini_api_key = ? WHERE id = ?', (encrypt_secret(key), user_id))
+    conn.commit()
+    conn.close()
+
 def get_user_gemini_key(user_id):
     """Admin (user 1) rides the shared Railway env key. Everyone else must
     have saved their own key in Account settings — a friend's AI tagging and
-    NL search run on their own key/budget, never the admin's."""
+    NL search run on their own key/budget, never the admin's.
+
+    V44: stored keys are encrypted at rest; decrypt_secret() transparently
+    passes through rows saved as plaintext before that change."""
     if user_id == 1:
         return os.environ.get('GEMINI_API_KEY')
     conn = get_db()
     c = conn.cursor()
     row = c.execute('SELECT gemini_api_key FROM users WHERE id = ?', (user_id,)).fetchone()
     conn.close()
-    return row['gemini_api_key'] if row and row['gemini_api_key'] else None
+    if not row or not row['gemini_api_key']:
+        return None
+    return decrypt_secret(row['gemini_api_key'])
 
 def record_gemini_usage(user_id, usage_metadata, model_name=None):
     """Adds one API response's token counts to this user's running total for
@@ -1626,8 +1830,12 @@ def _run_tagging_job_inner(user_id=None):
                 c.execute("UPDATE images SET tagging_status = 'failed' WHERE id = ?", (img_id,))
                 conn.commit()
                 conn.close()
-            except Exception:
-                pass
+            except Exception as mark_err:
+                # Still swallowed on purpose — the tagging run must continue
+                # through the remaining images — but no longer invisibly. An
+                # image stuck at 'pending' despite having failed is otherwise
+                # indistinguishable from one never attempted (V44/Day 26).
+                print(f"[tagging] Could not mark image {img_id} as failed: {mark_err}")
             with _tag_progress_lock:
                 _tag_progress['failed'] += 1
                 _tag_progress['done'] += 1
@@ -2142,6 +2350,14 @@ def ar_query_labels(q):
             if num > 0 and den > 0:
                 labels.append(normalize_ar_label(num / den))
         except (ValueError, ZeroDivisionError):
+            # Deliberately the ONE silent handler left after the V44/Day 26
+            # audit, for two reasons. It's unreachable: the regex above only
+            # ever captures digit strings, so float() can't raise ValueError,
+            # and the num/den guard runs BEFORE the division, so
+            # ZeroDivisionError can't fire either (verified against "16:0",
+            # "0:9", "0.0:0.0"). And this runs on every autocomplete
+            # keystroke, so a log line here would be pure noise. Kept purely
+            # as a belt-and-braces guard in case the regex is ever loosened.
             pass
     for label, _ in STANDARD_ASPECT_RATIOS:
         if q in label:
@@ -3230,14 +3446,16 @@ def account_gemini_key():
         if not key:
             conn.close()
             return jsonify({'error': 'No key provided'}), 400
-        c.execute('UPDATE users SET gemini_api_key = ? WHERE id = ?', (key, uid))
-        conn.commit()
         conn.close()
+        # V44: goes through set_user_gemini_key so it's encrypted at rest.
+        # key_last4 is computed from what the user just typed, never read
+        # back out of the database.
+        set_user_gemini_key(uid, key)
         return jsonify({'success': True, 'has_key': True, 'key_last4': key[-4:]})
 
     row = c.execute('SELECT gemini_api_key FROM users WHERE id = ?', (uid,)).fetchone()
     conn.close()
-    key = row['gemini_api_key'] if row else None
+    key = decrypt_secret(row['gemini_api_key']) if row and row['gemini_api_key'] else None
     return jsonify({'has_key': bool(key), 'key_last4': key[-4:] if key else None})
 
 @app.route('/api/tag/mine', methods=['POST'])
@@ -5135,8 +5353,12 @@ def drive_error_reason(e):
             errors = json.loads(e.content).get('error', {}).get('errors') or []
             if errors:
                 return errors[0].get('reason')
-        except Exception:
-            pass
+        except Exception as parse_err:
+            # Returning None is correct — callers already handle "reason
+            # unknown" — but a Drive error whose body we couldn't even parse
+            # is worth seeing, since every caller's error handling gets less
+            # specific from here (V44/Day 26).
+            print(f"[drive] Could not parse error reason from HttpError body: {parse_err}")
     return None
 
 # How each format gets re-saved after cropping. Pillow can't reuse the source
