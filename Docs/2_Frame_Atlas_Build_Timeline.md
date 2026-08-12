@@ -619,6 +619,28 @@ small changes keep having surprising side effects.
 - Do this incrementally, one domain at a time, with the test suite green before and after —
   never as one big-bang rewrite.
 
+**Part 1 shipped August 12, 2026 (V45).** `app.py` had grown to 7,337 lines by the time this
+started, not the 6,376 above. The pure maths — bytes and numbers in, numbers out, nothing
+touching the database, Drive or Flask — moved into four flat files beside it: `colors.py` (343),
+`perspective.py` (228), `imaging.py` (131), `fingerprint.py` (122). **7,337 → 6,626 lines.**
+Every moved function is character-for-character what it was, diffed against the original before
+each cut.
+
+**Why only the pure parts, and what that unblocked.** All 34 `scripts/test_*_locally.py` copy
+`app.py` — one single file — into a temp directory, string-patch `DB_PATH` inside it, and import
+that copy. Move database-touching code out and the trick breaks *quietly*: the tests keep
+running while the moved module resolves from the real `backend/` with the production DB path
+intact. Pure modules carry no `DB_PATH`, so this slice needed zero harness changes and could be
+verified against an identical pass/fail baseline captured on unmodified `main`.
+
+Names are imported back into `app.py` rather than left as module references, keeping its public
+surface identical — the test scripts read `mod.color_matches`, `mod.PALETTE_DARK_V`, `mod._hsv`
+directly. Confirmed first that none of them *reassign* anything in the moved set.
+
+**Part 2 (next):** rework the 34 test scripts to set the database path via an environment
+variable instead of find-and-replacing the file. That is the single blocker on extracting Drive,
+sync, tagging and the crop worker. `Home.jsx` remains untouched.
+
 ---
 
 ## Summary
@@ -653,4 +675,4 @@ small changes keep having surprising side effects.
 | 24 | Client feedback loop | Picks + comments on share links *(V42)* |
 | 25 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run ✅ *(V43)* |
 | 26 | Security + reliability hardening | Login throttling, key encryption ✅ *(V44)* |
-| 27 | Structural refactor | Lower cost of every future change *(V45, ongoing)* |
+| 27 | Structural refactor | Pure maths out of app.py: 7,337 → 6,626 lines ✅ *(V45 part 1)* |

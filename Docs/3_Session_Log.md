@@ -2000,3 +2000,119 @@ plus this docs commit.
 ### Starting Point for Next Session
 **Day 25 — Performance: Thumbnail Caching + Indexes + CI (V43).** Full "done when" criteria in
 `/docs/2_Frame_Atlas_Build_Timeline.md`.
+
+---
+
+## Day 27 — August 12, 2026 *(V45 part 1 — Structural Refactor + a crop diagnosis)*
+
+> **Log gap, noted not filled:** Days 25 (V43) and 26 (V44) shipped and are committed
+> (`28fc600`, `c16e764`, `678c517`) but no session-log entries were ever appended for them.
+> Their full detail lives in `/docs/2_Frame_Atlas_Build_Timeline.md` and in CLAUDE.md's
+> technical sections. Writing them retroactively here would be invention, so this entry
+> follows Day 24 directly.
+
+### The Session Started With a Bug Report: "images are failing to crop"
+
+**Diagnosed from Railway's live logs, not from reading code.** A crop of image 63 was queued at
+01:26:35 UTC and reported finished 1.1 seconds later. A real crop has to download the original
+from Drive, upload an untouched backup into `_Removed`, overwrite the Drive file, then rebuild
+the thumbnail, fingerprint and palette — ten seconds of work at the very least. One second means
+it died early, at the Drive step.
+
+**The actual finding was that the reason is unknowable.** It was captured and then destroyed
+three separate times over:
+
+1. The background crop worker catches the error, stores the message in an in-memory dict, and
+   never prints it — so nothing reaches Railway's logs, and V44's `PYTHONUNBUFFERED` fix has
+   nothing to print.
+2. The toast on the auto-start path showed only a count ("✗ 1 image failed to crop"), with the
+   error text sitting unused in the response it had just parsed.
+3. `CropModal` then POSTs `/api/crop-progress/reset` about a second later, which wipes both the
+   failure list AND the job records.
+
+`applyCrops()` does have a results screen that renders full error text per image — but the
+auto-start effect fires first on every real batch, so that screen is unreachable in practice.
+
+This is the same species of bug Day 26 audited for and missed, because it isn't literally
+`except: pass` — it's "catch the error, store it, then delete the drawer you stored it in."
+
+**Fixed (`83f390c`, deployed):** the failure toast now carries the reasons themselves,
+deduplicated (a batch almost always fails for one shared cause) and held 30s instead of the 4s
+default, since it is the only surviving record. Queue-time failures, previously `console.error`
+only, go through the same path.
+
+**Still unknown, deliberately:** which Drive error it actually is. Ryan chose "instrument first,
+fix after" over guessing. The three candidates, all of which fail this fast: the service account
+lost write permission on the folder (crop overwrites in place; a Viewer share can't), Ryan's
+Google OAuth token expired or was revoked (the backup copy uploads as Ryan — a service account
+has no storage quota), or Drive rejected the download. A bulk-delete succeeded 6 seconds
+earlier, so the robot account can still list and move files, which points away from a total
+Drive outage. **Next crop attempt will name it on screen.**
+
+### Then: Day 27 Part 1 — Splitting app.py
+
+Four pre-coding decisions, all confirmed before any code: pure maths only this session,
+`backend/` flat files (not a package), the test-harness rework gets its own session, one deploy
+at the end.
+
+**The constraint that shaped the whole plan.** All 34 `scripts/test_*_locally.py` copy `app.py`
+— one single file — into a temp directory, string-patch `DB_PATH` inside it, and import that
+copy with `backend/` on `sys.path`. Move anything that touches the database out of `app.py` and
+that trick breaks *quietly*: the tests keep running, but the moved module resolves from the real
+`backend/` with the production `/app/data/library.db` path intact. Pure modules have no
+`DB_PATH`, so the harness needed no changes at all — which is exactly why "pure only" was the
+right first slice, not a timid one.
+
+**What moved** (7,337 → 6,626 lines):
+
+| New file | Lines | What's in it |
+|---|---|---|
+| `backend/colors.py` | 343 | palette extraction, hue/brightness matching, duplicate colour gate |
+| `backend/perspective.py` | 228 | the hand-rolled 8×8 homography solver, quad validation |
+| `backend/imaging.py` | 131 | `generate_thumbnail`, aspect-ratio parsing and bucketing |
+| `backend/fingerprint.py` | 122 | phash + the signature that actually decides duplicates |
+
+Every moved function is character-for-character what it was — each block was diffed against the
+original before the cut, not after.
+
+### Decisions Made
+- **Names are imported back into `app.py`, not left as module references.** Its public surface
+  is unchanged, because the test scripts reach straight into it (`mod.color_matches`,
+  `mod.PALETTE_DARK_V`, `mod._hsv`). Checked first that none of them *reassign* anything in the
+  moved set — only `get_drive_service`, `get_user_drive_service`, `get_root_folder_id`,
+  `trigger_tagging`, `MediaIoBase*`, `ImageDraw` and `PERSONAL_LIBRARY_CAP` are ever
+  monkeypatched, and all of those stayed put.
+- Some imported names are unused *within* `app.py` and a linter will say so. The import block
+  says in as many words not to delete them — they are the module's API, and dropping one breaks
+  a test script silently.
+- The DB-facing colour functions (`save_palette`, `backfill_palettes`) deliberately stayed
+  behind. Splitting them is blocked on the harness, not on effort.
+
+### Verification
+34/34 test scripts pass — an **identical pass/fail set to a full run on unmodified `main`
+captured before any edit**, which is the only thing that makes "changed nothing" a claim rather
+than a hope. Both `.mjs` tests pass, `npm run build` clean, pyflakes reports no undefined names.
+Confirmed `Dockerfile` does `COPY backend/ ./` (whole folder) and there is no `.dockerignore`,
+so the four new files actually ship.
+
+*(Baseline note: an earlier baseline run reported all 34 scripts failing. That was macOS not
+having `timeout` — the loop was reporting a missing command, not the tests. Worth knowing before
+trusting any future "everything is broken" result from a shell loop on this machine.)*
+
+### Technical Debt / Open Questions
+- **The crop root cause is still open** and needs one retry from Ryan to surface.
+- The test harness's copy-one-file + string-patch approach now blocks every further extraction.
+  Making the DB path a setting instead is its own session, agreed.
+- `frontend/src/pages/Home.jsx` (1,855 lines, 36 pieces of state) is untouched.
+- `test_shuffle_locally.py` passes locally now, but CI still skips it with an explained
+  `::warning::` from V43. Worth re-checking whether that skip is still needed.
+
+### Commits
+`83f390c` (crop failure reporting), `c0d082e` (V45 part 1), plus this docs commit.
+
+### Starting Point for Next Session
+**Two things, in this order.** First, ask Ryan to attempt one crop and read the toast — that
+names the Drive failure, and the fix follows from what it says. Second, **Day 27 part 2**: rework
+the 34 test scripts to point `DB_PATH` somewhere harmless via an environment variable instead of
+find-and-replacing the file, which unblocks moving Drive, sync, tagging and the crop worker out
+of `app.py`.
