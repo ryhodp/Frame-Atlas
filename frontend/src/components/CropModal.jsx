@@ -31,6 +31,28 @@ const HANDLE_CORNERS = ['tl', 'tr', 'bl', 'br', 'tc', 'bc', 'lc', 'rc'];
 // top-left, top-right, bottom-right, bottom-left.
 const QUAD_LABELS = ['↖', '↗', '↘', '↙'];
 
+// The auto-start path closes this modal before the crops finish, so a toast is
+// the ONLY place their failure is ever reported — and the app wipes the
+// server's failure list a second later via /api/crop-progress/reset. A bare
+// count ("1 image failed") therefore destroyed the reason permanently. A whole
+// batch almost always fails for one shared reason, so the distinct reasons are
+// what's worth the space, not one line per image.
+function describeCropFailures(failed) {
+  const count = failed.length;
+  const noun = `${count} image${count === 1 ? '' : 's'}`;
+  const reasons = [...new Set(failed.map(f => f.error).filter(Boolean))];
+
+  if (!reasons.length) return `✗ ${noun} failed to crop (no reason reported)`;
+
+  const lead = count === 1 && failed[0].filename
+    ? `✗ ${failed[0].filename} failed to crop — ${reasons[0]}`
+    : `✗ ${noun} failed to crop — ${reasons[0]}`;
+
+  return reasons.length > 1
+    ? `${lead} (+${reasons.length - 1} other reason${reasons.length === 2 ? '' : 's'})`
+    : lead;
+}
+
 function snapshotItem(item) {
   return {
     cropBox: item.cropBox ? { ...item.cropBox } : null,
@@ -247,6 +269,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
     (async () => {
       try {
         const jobIds = [];
+        const queueFailures = [];
         for (const item of targets) {
           try {
             const res = await fetch(`/api/images/${item.fa.id}/crop`, {
@@ -260,14 +283,21 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               jobIds.push({ job_id: data.job_id, fa: item.fa });
             }
           } catch (e) {
-            console.error('Failed to queue crop:', e.message);
+            queueFailures.push({
+              filename: item.fa.filename,
+              error: e.message || 'Failed to queue crop.',
+            });
           }
         }
 
         if (jobIds.length === 0) {
           clearTimeout(safetyTimeout);
           dismissToast(inProgressToastId);
-          showToast('✗ Failed to start cropping — nothing was queued', 'error');
+          showToast(
+            queueFailures.length
+              ? describeCropFailures(queueFailures)
+              : '✗ Failed to start cropping — nothing was queued',
+            'error', 30000);
           return;
         }
 
@@ -285,7 +315,9 @@ export default function CropModal({ images, onClose, onImageCropped }) {
 
               dismissToast(inProgressToastId);
               if (failCount > 0) {
-                showToast(`✗ ${failCount} image${failCount === 1 ? '' : 's'} failed to crop`, 'error');
+                // 30s, not the 4s default: this message is the only surviving
+                // record of why, and it has to outlast a glance away.
+                showToast(describeCropFailures(progress.failed), 'error', 30000);
               } else {
                 showToast(`✓ ${okCount} image${okCount === 1 ? '' : 's'} cropped!`, 'success');
               }
