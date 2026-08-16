@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react';
 import { useToast } from '../ToastContext';
 
-export default function DuplicateReview({ onClose, onImageDeleted, onResync }) {
-  const [groups, setGroups] = useState(null);   // null = scanning
+export default function DuplicateReview({ onClose, onImageDeleted, onResync, initialGroups }) {
+  const [groups, setGroups] = useState(initialGroups || null);   // null = scanning
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [confirmBulk, setConfirmBulk] = useState(false);
   const { showToast, dismissToast } = useToast();
 
   useEffect(() => {
+    // If initialGroups provided (from background scan), use those directly
+    if (initialGroups) {
+      const preChecked = new Set();
+      initialGroups.forEach(g => {
+        g.images.slice(1).forEach(img => preChecked.add(img.id));
+      });
+      setSelected(preChecked);
+      return;
+    }
+
+    // Otherwise, scan now (old behavior)
     // Scan backfills fingerprints for any new images, then returns the groups
     fetch('/api/duplicates/scan', { method: 'POST' })
       .then(res => res.json())
@@ -25,7 +36,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync }) {
         setSelected(preChecked);
       })
       .catch(() => setError('Scan failed — check your connection and try again.'));
-  }, []);
+  }, [initialGroups]);
 
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };

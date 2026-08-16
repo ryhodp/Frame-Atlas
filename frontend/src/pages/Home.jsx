@@ -87,6 +87,7 @@ export default function Home() {
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [duplicateScanStatus, setDuplicateScanStatus] = useState(null); // null | 'scanning' | { groups: [...] }
 
   // ── Find Similar mode ────────────────────────────────────────────────────
   const [similarTo, setSimilarTo] = useState(null); // {id, filename} or null
@@ -385,6 +386,20 @@ export default function Home() {
     const onUp = () => endDrag();
     window.addEventListener('mouseup', onUp);
     return () => window.removeEventListener('mouseup', onUp);
+  }, [tagMode]);
+
+  // ── Keyboard shortcut: 'V' toggles Select Mode ────────────────────────────────
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      // Only trigger if user isn't typing in an input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        toggleTagMode();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [tagMode]);
 
   const addChip = (tag) => {
@@ -728,6 +743,28 @@ export default function Home() {
     })();
   };
 
+  // ── Background duplicate scanner ────────────────────────────────────────────
+  const startDuplicateScan = async () => {
+    setDuplicateScanStatus('scanning');
+    try {
+      // Call the duplicate scan API in the background
+      const res = await fetch('/api/images/find-duplicates', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setDuplicateScanStatus({ groups: data.groups || [] });
+        // Show a toast that results are ready
+        if (data.groups && data.groups.length > 0) {
+          // We'll show the modal when user clicks the notification
+        }
+      } else {
+        setDuplicateScanStatus(null);
+      }
+    } catch (e) {
+      console.error('Duplicate scan failed', e);
+      setDuplicateScanStatus(null);
+    }
+  };
+
   const DRAG_THRESHOLD = 4;
 
   const onGridMouseDown = (e) => {
@@ -920,7 +957,7 @@ export default function Home() {
               images and add to decks; the bar's tag panels stay admin-only. */}
           <button
             onClick={toggleTagMode}
-            title="Select Mode — bulk-select images to crop, tag, or add to a deck"
+            title="Select Mode — bulk-select images to crop, tag, or add to a deck (press V)"
             style={{
               height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
               background: tagMode ? 'rgba(184,206,161,0.14)' : '#18181b',
@@ -940,16 +977,18 @@ export default function Home() {
               <UploadButton onUploaded={() => fetchPage(0, false)} />
 
               <button
-                onClick={() => setShowDuplicates(true)}
-                title="Find duplicate images"
+                onClick={startDuplicateScan}
+                disabled={duplicateScanStatus === 'scanning'}
+                title={duplicateScanStatus === 'scanning' ? 'Scanning for duplicates...' : 'Find duplicate images (runs in background)'}
                 style={{
                   height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
-                  background: '#18181b',
-                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: duplicateScanStatus === 'scanning' ? 'rgba(217,164,65,0.14)' : '#18181b',
+                  border: `1px solid ${duplicateScanStatus === 'scanning' ? 'rgba(217,164,65,0.5)' : 'rgba(255,255,255,0.12)'}`,
                   borderRadius: '10px',
-                  cursor: 'pointer',
-                  color: '#9c988d',
-                  fontSize: '15px'
+                  cursor: duplicateScanStatus === 'scanning' ? 'default' : 'pointer',
+                  color: duplicateScanStatus === 'scanning' ? '#d9a441' : '#9c988d',
+                  fontSize: '15px',
+                  opacity: duplicateScanStatus === 'scanning' ? 0.7 : 1
                 }}
               >
                 ⧉
@@ -1990,13 +2029,45 @@ export default function Home() {
         />
       )}
 
-      {/* Duplicate review modal */}
-      {showDuplicates && (
+      {/* Duplicate review modal — show when results are ready and user clicks to view */}
+      {showDuplicates && duplicateScanStatus && typeof duplicateScanStatus === 'object' && (
         <DuplicateReview
-          onClose={() => setShowDuplicates(false)}
+          initialGroups={duplicateScanStatus.groups}
+          onClose={() => {
+            setShowDuplicates(false);
+            setDuplicateScanStatus(null);
+          }}
           onImageDeleted={handleImageDeleted}
           onResync={() => fetchPage(0, false)}
         />
+      )}
+
+      {/* Toast-style notification when duplicates are found — click to review */}
+      {duplicateScanStatus && typeof duplicateScanStatus === 'object' && !showDuplicates && duplicateScanStatus.groups && duplicateScanStatus.groups.length > 0 && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          right: '20px',
+          background: '#1a1c20',
+          border: '1px solid #44474f',
+          borderRadius: '10px',
+          padding: '12px 16px',
+          cursor: 'pointer',
+          fontSize: '13px',
+          color: '#efeadd',
+          zIndex: 1000,
+          maxWidth: '320px',
+          boxShadow: '0 12px 32px rgba(0,0,0,0.45)'
+        }}
+        onClick={() => setShowDuplicates(true)}
+        onMouseEnter={e => e.currentTarget.style.background = '#222226'}
+        onMouseLeave={e => e.currentTarget.style.background = '#1a1c20'}
+        >
+          <span style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+            ⧉ {duplicateScanStatus.groups.length} duplicate group{duplicateScanStatus.groups.length === 1 ? '' : 's'} found
+          </span>
+          <span style={{ fontSize: '11px', color: '#65625a' }}>Click to review</span>
+        </div>
       )}
 
       {/* Tag Mode drawer — right sidebar when tagMode is on and drawer is open */}
