@@ -4,6 +4,7 @@ import ImageDetail from '../components/ImageDetail';
 import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
 import UploadProgressBadge from '../components/UploadProgressBadge';
+import SelectModeHeader from '../components/SelectModeHeader';
 import TagModeBar from '../components/TagModeBar';
 import TagRemovalPreview from '../components/TagRemovalPreview';
 import CropModal from '../components/CropModal';
@@ -94,6 +95,9 @@ export default function Home() {
   // ── Select Mode (was "Tag Mode"): bulk-select images to tag, crop, or deck ──
   const [tagMode, setTagMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
+  const [selectMsg, setSelectMsg] = useState('');
 
   // ── V32: library-wide tag cleanup — the chip whose tag is being removed
   //         from every result of the current search, or null ─────────────────
@@ -577,7 +581,10 @@ export default function Home() {
   const toggleTagMode = () => {
     setTagMode(v => {
       const next = !v;
-      if (!next) setSelectedIds(new Set()); // turning OFF clears selection
+      if (!next) {
+        setSelectedIds(new Set()); // turning OFF clears selection
+        setTagDrawerOpen(false); // Also close the drawer
+      }
       return next;
     });
   };
@@ -659,6 +666,68 @@ export default function Home() {
     setSelectedImage(prev => (prev && idSet.has(prev.id)) ? null : prev);
   };
 
+  // ── Select all results wrapper for the header ─────────────────────────────
+  const everythingLoaded = !total || images.length >= total;
+  const allLoadedAndSelected = everythingLoaded && selectedIds.size > 0 && selectedIds.size >= images.length;
+
+  const handleSelectAllResults = useCallback(async () => {
+    if (selectingAll) return;
+    setSelectMsg('');
+    // Everything's already on screen — no round trip needed.
+    if (everythingLoaded) {
+      setSelectedIds(new Set(images.map(i => i.id)));
+      return;
+    }
+    setSelectingAll(true);
+    try {
+      const res = await fetch(`/api/search/ids?${buildFilterParams()}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'failed');
+      const ids = data.ids || [];
+      setSelectedIds(new Set(ids));
+    } catch (e) {
+      console.error('Select all results failed', e);
+      // Deliberately leave the selection untouched rather than quietly
+      // falling back to "the loaded ones" — silently selecting a smaller set
+      // than asked for is the exact trap this feature exists to fix.
+      setSelectMsg("Couldn't reach the server — nothing selected.");
+    }
+    setSelectingAll(false);
+  }, [similarTo, images, buildFilterParams, everythingLoaded, selectingAll]);
+
+  const openTagDrawer = () => setTagDrawerOpen(true);
+  const closeTagDrawer = () => setTagDrawerOpen(false);
+
+  const handleBulkDeleteClick = () => {
+    // Delete handler for the header's Delete button
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    // Ask for confirmation, then trigger the delete
+    if (!window.confirm(`Delete ${ids.length} photo${ids.length === 1 ? '' : 's'}? They'll be moved to Drive's _Removed folder.`)) return;
+
+    // Optimistically update UI
+    handleBulkDeleted(ids);
+    setSelectedIds(new Set());
+
+    // Delete in the background
+    (async () => {
+      try {
+        const res = await fetch('/api/images/bulk-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_ids: ids })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          fetchPage(0, false); // Re-sync on error
+        }
+      } catch (e) {
+        console.error('Bulk delete failed', e);
+        fetchPage(0, false); // Re-sync on error
+      }
+    })();
+  };
+
   const DRAG_THRESHOLD = 4;
 
   const onGridMouseDown = (e) => {
@@ -734,8 +803,10 @@ export default function Home() {
   });
   // Sidebar only reserves real width on tablet/desktop — on mobile it's an
   // overlay drawer, so the grid gets the full window width to itself.
+  // Add the drawer width (280px) when it's open.
   const sidebarOffset = isMobile ? 24 : 280;
-  const colCount = Math.max(2, Math.min(7, Math.floor((winW - sidebarOffset) / colWidth)));
+  const drawerOffset = tagDrawerOpen ? 280 : 0;
+  const colCount = Math.max(2, Math.min(7, Math.floor((winW - sidebarOffset - drawerOffset) / colWidth)));
   const columns = (() => {
     const cols = Array.from({ length: colCount }, () => ({ items: [], h: 0 }));
     for (const img of images) {
@@ -766,6 +837,28 @@ export default function Home() {
       }}>
         <UploadProgressBadge />
       </div>
+
+      {/* ── Select Mode Header (only when tagMode is on) ──────────────────────── */}
+      {tagMode && (
+        <SelectModeHeader
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          onSelectAllResults={handleSelectAllResults}
+          onExit={toggleTagMode}
+          onEditTags={openTagDrawer}
+          onCrop={() => {
+            const sel = images.filter(i => selectedIds.has(i.id));
+            if (sel.length) setCropImages(sel);
+          }}
+          onDelete={handleBulkDeleteClick}
+          selectingAll={selectingAll}
+          selectMsg={selectMsg}
+          totalResults={similarTo ? images.length : total}
+          images={images}
+          everythingLoaded={everythingLoaded}
+          allLoadedAndSelected={allLoadedAndSelected}
+        />
+      )}
 
       {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <div
@@ -1906,7 +1999,7 @@ export default function Home() {
         />
       )}
 
-      {/* Tag Mode bulk-selection toolbar */}
+      {/* Tag Mode drawer — right sidebar when tagMode is on and drawer is open */}
       {tagMode && (
         <TagModeBar
           images={images}
@@ -1923,6 +2016,8 @@ export default function Home() {
             const sel = images.filter(i => selectedIds.has(i.id));
             if (sel.length) setCropImages(sel);
           }}
+          isOpen={tagDrawerOpen}
+          onClose={closeTagDrawer}
         />
       )}
 

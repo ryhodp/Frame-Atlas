@@ -75,6 +75,8 @@ export default function TagModeBar({
   onBulkDeleted, // (deletedIds) — the selected photos were removed from the library
   onResync,      // () — re-run the active search; used when a delete's outcome is unknown
   onCrop,        // V18: open the crop review modal for the current selection
+  isOpen,        // NEW: drawer open/closed state
+  onClose,       // NEW: callback to close the drawer
 }) {
   // V18: Select Mode is open to everyone now (friends crop their own images
   // and add to their decks); the tag/filmography panels stay admin-only
@@ -478,104 +480,87 @@ export default function TagModeBar({
 
   return (
     <>
+      {/* Drawer overlay — click to close */}
+      {isOpen && (
+        <div
+          onClick={onClose}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'transparent',
+            zIndex: 890,
+            display: 'none' // drawer doesn't use an overlay, goes straight on the grid
+          }}
+        />
+      )}
+
+      {/* Right-side drawer */}
       <div
         data-tagmode-area
         style={{
-          position: 'fixed', left: isMobile ? 0 : `${SIDEBAR_WIDTH}px`, right: 0, bottom: 0,
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: isOpen ? '280px' : '0px',
           zIndex: 900,
           background: '#1a1c20',
-          borderTop: '1px solid #44474f',
-          boxShadow: '0 -12px 32px rgba(0,0,0,0.45)',
-          maxHeight: isMobile ? '80vh' : '46vh',
-          overflowY: 'auto'
+          borderLeft: isOpen ? '1px solid #44474f' : 'none',
+          boxShadow: isOpen ? '-12px 0 32px rgba(0,0,0,0.45)' : 'none',
+          overflowY: 'auto',
+          transition: 'width 0.2s ease, border-left 0.2s ease',
+          visibility: isOpen ? 'visible' : 'hidden'
         }}
       >
-        {/* Top row — selection controls, always visible */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '10px',
-          padding: isMobile ? '12px 14px' : '12px 20px',
-          borderBottom: count > 0 ? '1px solid #2a2c31' : 'none',
-          flexWrap: isMobile ? 'wrap' : 'nowrap',
-          rowGap: '8px'
-        }}>
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: '6px',
-            background: 'rgba(184,206,161,0.14)',
-            border: '1px solid rgba(184,206,161,0.5)',
-            borderRadius: '99px',
-            padding: '5px 12px',
-            fontSize: '12.5px', color: '#b8cea1', fontWeight: 500
-          }}>
-            {count} selected
-          </span>
-
-          {/* V32: "Select all loaded" used to grab only the thumbnails the
-              grid had scrolled far enough to load — 60 of 118 results, with
-              nothing on screen saying so. Now the button always means every
-              match, and the count in the label is the real one. */}
-          <button
-            onClick={selectAll}
-            disabled={selectingAll || allLoadedAndSelected}
-            title={everythingLoaded
-              ? 'Select every image in these results'
-              : 'Select every image these filters match — including the ones further down that haven\'t loaded yet'}
-            style={{ ...ghostBtn(), opacity: selectingAll ? 0.6 : 1 }}
-          >
-            {selectingAll ? 'Selecting…' : `Select all ${totalResults || images.length}`}
-          </button>
-          <button onClick={() => setSelectedIds(new Set())} style={ghostBtn()}>
-            Clear selection
-          </button>
-
-          {selectMsg && (
-            <span style={{ fontSize: '11.5px', color: '#ffb4ab' }}>{selectMsg}</span>
-          )}
-
-          {count > 0 && onCrop && (
-            <button
-              onClick={onCrop}
-              title="Auto-detect and remove letterbox bars / screenshot chrome from the selected images"
-              style={{
-                background: 'rgba(217,164,65,0.14)',
-                border: '1px solid rgba(217,164,65,0.5)',
-                color: '#d9a441', borderRadius: '8px', padding: '7px 14px',
-                cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit'
-              }}
-            >
-              ✂ Crop {count}
-            </button>
-          )}
-
-          {count > 0 && (
-            <button
-              onClick={openBulkDeleteConfirm}
-              title="Move the selected photos to Drive's _Removed folder and remove them from Frame Atlas"
-              style={{
-                background: 'rgba(255,180,171,0.14)',
-                border: '1px solid rgba(255,180,171,0.5)',
-                color: '#ffb4ab', borderRadius: '8px', padding: '7px 14px',
-                cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit'
-              }}
-            >
-              🗑 Delete {count}
-            </button>
-          )}
-
-          <div style={{ flex: 1 }} />
-
-          <button onClick={onExit} style={ghostBtn('#ffb4ab', 'rgba(255,180,171,0.35)')}>
-            Exit Select Mode
-          </button>
-        </div>
-
+        {/* Close button */}
         {count > 0 && (
           <div style={{
-            display: 'flex', flexWrap: 'wrap', gap: '20px',
-            padding: isMobile ? '16px 14px' : '16px 20px'
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            borderBottom: '1px solid #2a2c31',
+            flexShrink: 0
+          }}>
+            <span style={{
+              fontSize: '12px',
+              fontWeight: 600,
+              color: '#efeadd'
+            }}>
+              Edit tags
+            </span>
+            <button
+              onClick={onClose}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#65625a',
+                cursor: 'pointer',
+                fontSize: '16px',
+                padding: '2px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = '#9c988d'}
+              onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Drawer content */}
+        {count > 0 && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px',
+            padding: '16px'
           }}>
             {isAdmin && <>
             {/* Apply tag panel */}
-            <div style={{ minWidth: '280px', flex: '1 1 280px' }} data-tagmode-area>
+            <div style={{ }} data-tagmode-area>
               <div style={sectionLabel()}>APPLY TAG</div>
               <div style={{ display: 'flex', gap: '6px', position: 'relative' }}>
                 <div style={{ position: 'relative', flex: 1 }}>
@@ -650,7 +635,7 @@ export default function TagModeBar({
             </div>
 
             {/* Set/clear filmography panel */}
-            <div style={{ minWidth: '280px', flex: '1 1 280px' }} data-tagmode-area>
+            <div style={{ }} data-tagmode-area>
               <div style={sectionLabel()}>FILMOGRAPHY</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <input
@@ -711,7 +696,7 @@ export default function TagModeBar({
             </div>
 
             {/* Shared tags panel — only tags every selected image carries */}
-            <div style={{ minWidth: '260px', flex: '1 1 260px' }} data-tagmode-area>
+            <div style={{ }} data-tagmode-area>
               <div style={sectionLabel()}>SHARED TAGS (ALL {summary.total})</div>
               {/* V32: this list is a strict intersection, and before now it
                   never said so. Looking for a tag that plainly IS on some of
@@ -787,7 +772,7 @@ export default function TagModeBar({
 
             {/* Suggestions panel */}
             {suggestions.length > 0 && (
-              <div style={{ minWidth: '260px', flex: '1 1 260px' }}>
+              <div style={{ }}>
                 <div style={sectionLabel()}>SUGGESTIONS</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {suggestions.map(s => (
@@ -815,7 +800,7 @@ export default function TagModeBar({
             </>}
 
             {/* Add to Deck panel */}
-            <div style={{ minWidth: '220px', flex: '0 1 220px', position: 'relative' }} data-tagmode-area>
+            <div style={{ position: 'relative' }} data-tagmode-area>
               <div style={sectionLabel()}>ADD TO DECK</div>
               <button
                 onClick={toggleDeckPicker}
