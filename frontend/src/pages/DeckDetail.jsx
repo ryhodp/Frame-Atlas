@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import StoryboardView from '../components/StoryboardView';
 import PresentationMode from '../components/PresentationMode';
 import FeedbackPanel from '../components/FeedbackPanel';
+import AddPhotosModal from '../components/AddPhotosModal';
+import { describeAddResult } from '../deckAdd';
 import { useOfflineCache, hasRemoteUpdates } from '../hooks/useOfflineCache';
 import { useToast } from '../ToastContext';
 
@@ -65,6 +67,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
 export default function DeckDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const [deck, setDeck] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -85,6 +88,7 @@ export default function DeckDetail() {
   const [storyboard, setStoryboard] = useState(null); // { sceneId, title } or null
   const [shareOpen, setShareOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [addPhotosOpen, setAddPhotosOpen] = useState(false);
   const [presenting, setPresenting] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
@@ -133,6 +137,21 @@ export default function DeckDetail() {
       setLoading(false);
     }
   }, [id]);
+
+  // The picker hands back what the SERVER did, not what was asked for:
+  // /api/decks/<id>/images skips any photo already in the deck and reports the
+  // count separately. Saying "Added 12" when 12 were already there would be a
+  // lie the user can't check, so both numbers get reported.
+  const handlePhotosAdded = useCallback((result) => {
+    // No deck name passed — the page you're standing on already says which
+    // deck this is, so repeating it in the toast would just be noise.
+    const { tone, message } = describeAddResult(result);
+    showToast(tone === 'success' ? `✓ ${message}` : message, tone);
+    // Refetch rather than patch state: the server assigns storyboard_order and
+    // the deck_image_id each new row gets, and guessing either here would put
+    // the grid out of step with what a reorder or removal then acts on.
+    loadDeck();
+  }, [showToast, loadDeck]);
 
   // Wait for IndexedDB to open before the first load, otherwise an offline
   // cold start races the cache and falls through to "Deck not found".
@@ -410,6 +429,29 @@ export default function DeckDetail() {
 
         {deck.is_owner ? (
           <>
+            {/* First in the row and filled gold on purpose: filling a deck is
+                the thing you do most, and until V46 the ONLY way to do it was
+                Home → Select Mode → the bottom bar's "ADD TO DECK" panel, which
+                nobody found because Select Mode reads as a bulk-editing tool.
+                Disabled offline for the same reason as Export — this writes. */}
+            <button
+              onClick={() => !showingCached && setAddPhotosOpen(true)}
+              disabled={showingCached}
+              title={showingCached
+                ? "You're offline — this is a saved copy. Reconnect to add photos."
+                : 'Pick photos from your library to add to this lookbook'}
+              style={{
+                background: showingCached ? 'none' : '#d9a441',
+                border: `1px solid ${showingCached ? '#33353b' : '#d9a441'}`,
+                color: showingCached ? '#6b6d75' : '#3d2f00',
+                borderRadius: '8px', padding: '8px 16px',
+                cursor: showingCached ? 'default' : 'pointer',
+                fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
+                whiteSpace: 'nowrap', opacity: showingCached ? 0.6 : 1,
+              }}
+            >
+              + Add Photos
+            </button>
             <button
               onClick={() => setShareOpen(true)}
               style={{
@@ -519,6 +561,34 @@ export default function DeckDetail() {
       {!deck.is_owner && (
         <div style={{ fontSize: '12.5px', color: '#8e9099', marginBottom: '18px' }}>
           You can look through this lookbook, but only {deck.owner_name} can edit it.
+        </div>
+      )}
+
+      {/* A brand-new deck used to be a dead end: the only hint was the Present
+          button's tooltip saying "Add some photos to this lookbook first", which
+          told you what to do and gave you nothing to do it with. */}
+      {deck.is_owner && deck.images.length === 0 && !showingCached && (
+        <div style={{
+          border: '1px dashed #44474f', borderRadius: '12px',
+          padding: '32px 24px', textAlign: 'center', marginBottom: '28px',
+        }}>
+          <div style={{ fontSize: '15px', color: '#e2e2e6', fontWeight: 600 }}>
+            This lookbook is empty
+          </div>
+          <div style={{ fontSize: '13px', color: '#8e9099', margin: '8px 0 18px' }}>
+            Pull frames in from your library, then group them into scenes.
+          </div>
+          <button
+            onClick={() => setAddPhotosOpen(true)}
+            style={{
+              background: '#d9a441', color: '#3d2f00', border: 'none',
+              borderRadius: '8px', padding: '11px 24px',
+              fontSize: '14px', fontWeight: 700, fontFamily: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            + Add Photos
+          </button>
         </div>
       )}
 
@@ -648,6 +718,16 @@ export default function DeckDetail() {
           deckId={Number(id)}
           images={deck.images}
           onClose={() => setFeedbackOpen(false)}
+        />
+      )}
+
+      {addPhotosOpen && (
+        <AddPhotosModal
+          deckId={Number(id)}
+          deckName={deck.name}
+          existingImageIds={deck.images.map(img => img.id)}
+          onClose={() => setAddPhotosOpen(false)}
+          onAdded={handlePhotosAdded}
         />
       )}
 

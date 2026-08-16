@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import CompositionOverlay, { OVERLAY_MODES, OVERLAY_LABELS, OVERLAY_ROTATABLE } from './CompositionOverlay';
+import { fetchDecks, addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
 
 const CAT_LABELS = {
   'mood': 'Mood', 'lighting_quality': 'Lighting',
@@ -51,6 +52,15 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const [notes, setNotes] = useState(image?.notes || null);
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [notesDraft, setNotesDraft] = useState({ camera_rig: '', lens: '', lens_filter: '', stop: '', onset_notes: '' });
+
+  // V46: add this one photo to a deck without going back to Home and hunting
+  // for Select Mode. Deck list is fetched lazily, the first time the popover
+  // opens — most visits to this panel never touch it.
+  const [deckOpen, setDeckOpen] = useState(false);
+  const [decks, setDecks] = useState(null);   // null = not fetched yet
+  const [deckBusy, setDeckBusy] = useState(false);
+  const [deckMsg, setDeckMsg] = useState(null); // {tone, message}
+  const [newDeckName, setNewDeckName] = useState('');
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -130,6 +140,43 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   });
 
   const hasTags = tags.length > 0;
+
+  // ── Add to deck ─────────────────────────────────────────────────────────────
+  const toggleDeckPopover = async () => {
+    const opening = !deckOpen;
+    setDeckOpen(opening);
+    setDeckMsg(null);
+    if (opening && decks === null) setDecks(await fetchDecks());
+  };
+
+  const addToDeck = async (deck) => {
+    if (deckBusy) return;
+    setDeckBusy(true);
+    try {
+      const result = await addImagesToDeck(deck.id, [image.id]);
+      setDeckMsg(describeAddResult(result, deck.name));
+    } catch (e) {
+      setDeckMsg({ tone: 'error', message: e.message || 'Could not add to that deck.' });
+    }
+    setDeckBusy(false);
+  };
+
+  const addToNewDeck = async () => {
+    const name = newDeckName.trim();
+    if (!name || deckBusy) return;
+    setDeckBusy(true);
+    try {
+      const { deck, result } = await createDeckWithImages(name, [image.id]);
+      setDeckMsg(describeAddResult(result, deck.name));
+      setNewDeckName('');
+      // The new deck has to appear in the list, otherwise adding a second photo
+      // to it means creating a duplicate deck of the same name.
+      setDecks(await fetchDecks());
+    } catch (e) {
+      setDeckMsg({ tone: 'error', message: e.message || 'Could not create that deck.' });
+    }
+    setDeckBusy(false);
+  };
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   const toggleFavorite = async () => {
@@ -386,6 +433,106 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               ⟳
             </button>
           )}
+
+          {/* V46: put this frame straight into a lookbook. Before this, the only
+              route was Home → Select Mode → the bottom bar, so looking at one
+              great frame and wanting it in a deck meant closing this panel. */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={toggleDeckPopover}
+              title="Add this photo to a lookbook"
+              style={footBtn('#b8cea1')}
+              aria-expanded={deckOpen}
+            >
+              ⧉ Add to Deck
+            </button>
+
+            {deckOpen && (
+              <div style={{
+                // Opens DOWNWARD, unlike the visually identical picker in
+                // TagModeBar. That one lives in a bar pinned to the bottom of
+                // the screen so it has to open up; this button sits in a row at
+                // the TOP of the detail panel, and opening upward put the deck
+                // list off-screen with only the "new deck" field reachable.
+                position: 'absolute', top: 'calc(100% + 8px)', left: 0,
+                width: '250px', background: '#2a2c31', border: '1px solid #44474f',
+                borderRadius: '10px', boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+                zIndex: 40, maxHeight: '300px', overflowY: 'auto',
+              }}>
+                {decks === null && (
+                  <div style={{ padding: '10px 12px', fontSize: '11.5px', color: '#8e9099' }}>
+                    Loading your decks…
+                  </div>
+                )}
+                {decks !== null && decks.length === 0 && (
+                  <div style={{ padding: '10px 12px', fontSize: '11.5px', color: '#8e9099' }}>
+                    No decks yet — name one below.
+                  </div>
+                )}
+                {(decks || []).map(deck => (
+                  <button
+                    key={deck.id}
+                    onClick={() => addToDeck(deck)}
+                    disabled={deckBusy}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center',
+                      justifyContent: 'space-between', gap: '10px', padding: '8px 12px',
+                      background: 'transparent', border: 'none',
+                      cursor: deckBusy ? 'default' : 'pointer',
+                      textAlign: 'left', fontFamily: 'inherit',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#37393e'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <span style={{ fontSize: '13px', color: '#e2e2e6' }}>{deck.name}</span>
+                    <span style={{ fontSize: '10px', color: '#8e9099' }}>{deck.image_count}</span>
+                  </button>
+                ))}
+
+                <div style={{
+                  display: 'flex', gap: '6px', padding: '8px 10px',
+                  borderTop: (decks || []).length > 0 ? '1px solid #44474f' : 'none',
+                }}>
+                  <input
+                    value={newDeckName}
+                    onChange={e => setNewDeckName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') addToNewDeck(); }}
+                    placeholder="+ New deck…"
+                    style={{
+                      flex: 1, minWidth: 0, background: '#111317', color: '#e2e2e6',
+                      border: '1px solid #44474f', borderRadius: '6px',
+                      padding: '6px 8px', fontSize: '12px',
+                      fontFamily: 'inherit', outline: 'none',
+                    }}
+                  />
+                  <button
+                    onClick={addToNewDeck}
+                    disabled={!newDeckName.trim() || deckBusy}
+                    style={{
+                      background: newDeckName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
+                      color: newDeckName.trim() ? '#3d2f00' : '#8e9099',
+                      border: 'none', borderRadius: '6px', padding: '0 10px',
+                      fontSize: '12px', fontWeight: 500, fontFamily: 'inherit',
+                      cursor: newDeckName.trim() && !deckBusy ? 'pointer' : 'default',
+                    }}
+                  >
+                    Add
+                  </button>
+                </div>
+
+                {deckMsg && (
+                  <div style={{
+                    padding: '8px 12px', fontSize: '11.5px',
+                    borderTop: '1px solid #44474f',
+                    color: deckMsg.tone === 'error' ? '#cf7152'
+                      : deckMsg.tone === 'info' ? '#d9a441' : '#b8cea1',
+                  }}>
+                    {deckMsg.message}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {onFindSimilar && (
             <button

@@ -3,6 +3,7 @@ import { SIDEBAR_WIDTH } from './Sidebar';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../ToastContext';
+import { addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
 
 // ── Confirm step — small inline modal, dark panel look ────────────────────────
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -253,14 +254,16 @@ export default function TagModeBar({
     setAddingToDeck(true);
     const ids = Array.from(selectedIds);
     try {
-      await fetch(`/api/decks/${deckId}/images`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_ids: ids })
-      });
-      flashAddMsg(`Added ${ids.length} photo${ids.length === 1 ? '' : 's'} to "${deckName}"`);
+      // V46: report what the SERVER did. This used to announce
+      // `Added ${ids.length} photos` without reading the response at all — so
+      // selecting 12 photos that were already in the deck said "Added 12", and
+      // a failed request said it too. The endpoint has always returned
+      // {added, already_in_deck, invalid_ids}; nothing was looking.
+      const result = await addImagesToDeck(deckId, ids);
+      flashAddMsg(describeAddResult(result, deckName).message);
     } catch (e) {
       console.error('Add to deck failed', e);
+      flashAddMsg(e.message || 'Could not add those photos.');
     }
     setAddingToDeck(false);
   };
@@ -271,22 +274,16 @@ export default function TagModeBar({
     setAddingToDeck(true);
     const ids = Array.from(selectedIds);
     try {
-      const res = await fetch('/api/decks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      const deck = await res.json();
-      await fetch(`/api/decks/${deck.id}/images`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_ids: ids })
-      });
-      setDecks(prev => [{ ...deck, image_count: ids.length }, ...prev]);
+      const { deck, result } = await createDeckWithImages(name, ids);
+      // A brand-new deck can't already contain anything, so result.added is the
+      // real count here — but read it rather than assume, so a partial failure
+      // (an id the server rejected) still shows the true number.
+      setDecks(prev => [{ ...deck, image_count: result.added || 0 }, ...prev]);
       setNewDeckName('');
-      flashAddMsg(`Added ${ids.length} photo${ids.length === 1 ? '' : 's'} to "${name}"`);
+      flashAddMsg(describeAddResult(result, name).message);
     } catch (e) {
       console.error('Create deck and add failed', e);
+      flashAddMsg(e.message || 'Could not create that deck.');
     }
     setAddingToDeck(false);
   };
