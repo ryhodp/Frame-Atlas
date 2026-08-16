@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 
-// ── Circular progress ring — same visual as SyncManager's. ─────────────────
+// ── Circular progress ring — same visual as the admin Sync button's spirit. ─
 function ProgressRing({ pct, size = 96, stroke = 7, color }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;

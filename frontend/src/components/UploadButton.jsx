@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 
-export default function UploadButton({ onUploaded }) {
+const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
   const isMobile = useIsMobile();
   const [signedIn, setSignedIn] = useState(null); // null = still checking
   const [panelOpen, setPanelOpen] = useState(false);
@@ -109,6 +109,20 @@ export default function UploadButton({ onUploaded }) {
     });
   };
 
+  // Exposed to the page so dropping files anywhere on Home (not just inside
+  // this button's own panel) opens the panel and starts uploading right
+  // away — same upload path either way, just a bigger drop target.
+  const acceptFiles = (fileList) => {
+    const imageFiles = Array.from(fileList || []).filter(f => f.type.startsWith('image/'));
+    if (!imageFiles.length) return;
+    setResults([]);
+    setUploadProgress(0);
+    setPanelOpen(true);
+    doUpload(imageFiles, false);
+  };
+
+  useImperativeHandle(ref, () => ({ acceptFiles }));
+
   const handleClick = () => {
     if (signedIn === null) return; // auth check still in flight — ignore the click
     if (signedIn === false) {
@@ -129,8 +143,7 @@ export default function UploadButton({ onUploaded }) {
   const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
-    if (files.length) doUpload(files, false);
+    acceptFiles(e.dataTransfer.files);
   };
 
   const uploadAnyway = (filename) => {
@@ -323,4 +336,6 @@ export default function UploadButton({ onUploaded }) {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </>
   );
-}
+});
+
+export default UploadButton;

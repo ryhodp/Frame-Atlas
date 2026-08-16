@@ -4,7 +4,6 @@ import Sidebar from './components/Sidebar'
 import MobileHeader from './components/MobileHeader'
 import { useIsMobile } from './hooks/useIsMobile'
 import Home from './pages/Home'
-import SyncManager from './components/SyncManager'
 import DecksPage from './pages/DecksPage'
 import DeckDetail from './pages/DeckDetail'
 import SharePage from './pages/SharePage'
@@ -22,6 +21,7 @@ import SettingsPage from './pages/SettingsPage'
 import InviteAcceptPage from './pages/InviteAcceptPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import { ToastProvider } from './ToastContext'
+import { SyncProvider } from './SyncContext'
 import './App.css'
 
 // Inner shell so we can read the current route (useLocation only works inside
@@ -142,7 +142,7 @@ function Shell() {
         )}
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/sync" element={user.role === 'admin' ? <SyncManager /> : <Navigate to="/" replace />} />
+          <Route path="/sync" element={<Navigate to="/settings" replace />} />
           <Route path="/decks" element={<DecksPage />} />
           <Route path="/decks/:id" element={<DeckDetail />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
@@ -169,7 +169,9 @@ function App() {
     <Router>
       <AuthProvider>
         <ToastProvider>
-          <Shell />
+          <SyncProvider>
+            <Shell />
+          </SyncProvider>
         </ToastProvider>
       </AuthProvider>
     </Router>

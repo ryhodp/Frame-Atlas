@@ -190,7 +190,9 @@ sync_state = {
     'processed': 0,
     'total': 0,
     'current_file': '',
-    'errors': []
+    'errors': [],
+    'new_count': 0,      # V48: how many were actually new, for the completion toast
+    'removed_count': 0,  # V48: how many were removed (deleted from Drive), same reason
 }
 
 _tag_progress = {
@@ -1740,13 +1742,11 @@ def record_gemini_usage(user_id, usage_metadata, model_name=None):
 # TAGGING WORKER
 # ============================================================================
 
-def _run_tagging_job_inner(user_id=None):
-    """user_id=None tags every pending/failed image across every owner (the
-    admin's global 'tag now' / post-sync trigger). A specific user_id scopes
-    the run to just that person's own library (friend's 'Tag my photos').
-    Either way, each image is tagged with ITS OWNER's key — owners who
-    haven't saved a key are skipped, their photos left untagged but
-    searchable, at zero cost to anyone."""
+def _select_pending_for_tagging(user_id=None):
+    """The query half of a tagging run, split out from the loop that
+    actually calls Gemini (V48) — see trigger_tagging() for why this needs
+    to happen synchronously in the CALLER's thread rather than inside the
+    background worker thread."""
     conn = get_db()
     c = conn.cursor()
     query = """
@@ -1778,26 +1778,21 @@ def _run_tagging_job_inner(user_id=None):
         if clients[owner_id] is not None:
             images.append(row)
 
-    if not images:
-        with _tag_progress_lock:
-            _tag_progress.update({
-                'running': False, 'status': 'error',
-                'message': 'No Gemini API key available for the queued photos.'
-            })
-        _broadcast_progress()
-        return
+    return rows, images, clients
 
-    with _tag_progress_lock:
-        _tag_progress.update({
-            'running': True,
-            'total': len(images),
-            'done': 0,
-            'failed': 0,
-            'status': 'running',
-            'message': f'Tagging {len(images)} images…'
-        })
-    _broadcast_progress()
 
+def _run_tagging_job_inner(images, clients, user_id=None):
+    """user_id=None tags every pending/failed image across every owner (the
+    admin's global 'tag now' / post-sync trigger). A specific user_id scopes
+    the run to just that person's own library (friend's 'Tag my photos').
+    Either way, each image is tagged with ITS OWNER's key — owners who
+    haven't saved a key are skipped, their photos left untagged but
+    searchable, at zero cost to anyone.
+
+    Takes the already-resolved (images, clients) from
+    _select_pending_for_tagging() rather than querying again — see
+    trigger_tagging() for why that decision has to happen before this
+    function's thread even starts."""
     for img in images:
         img_id = img['id']
         owner_id = img['user_id']
@@ -1894,9 +1889,9 @@ def _run_tagging_job_inner(user_id=None):
     _broadcast_progress()
 
 
-def _run_tagging_job(user_id=None):
+def _run_tagging_job(images, clients, user_id=None):
     try:
-        _run_tagging_job_inner(user_id=user_id)
+        _run_tagging_job_inner(images, clients, user_id=user_id)
     except Exception as e:
         print(f"[tagging] Job failed: {e}")
         with _tag_progress_lock:
@@ -1905,10 +1900,60 @@ def _run_tagging_job(user_id=None):
 
 
 def trigger_tagging(user_id=None):
+    """V48: the "is there anything to tag" decision — the DB query and the
+    per-owner Gemini-key check — now happens SYNCHRONOUSLY, in the caller's
+    own thread, before this function returns. Only the actual per-image
+    tagging loop (the slow part, one Gemini call per photo) is handed off to
+    a background thread.
+
+    This matters because sync_folder_worker calls this from its own finally
+    block right before flipping sync_state['in_progress'] to False, and the
+    Home page's background-sync toast watches for that flip to know when to
+    check whether a tagging phase followed. Before this split, the decision
+    itself ran inside the spawned thread, so there was a real window where
+    frontend polling could see in_progress=False and _tag_progress still
+    showing yesterday's stale 'running': false — indistinguishable from "no
+    tagging needed" even though a tagging run was about to start (or, for a
+    handful of already-failing images, had already started AND finished).
+    Resolving it here means _tag_progress is always caught up by the time
+    in_progress flips, no polling delay needed on the frontend to paper over
+    the gap."""
     with _tag_progress_lock:
         if _tag_progress['running']:
             return
-    t = threading.Thread(target=_run_tagging_job, kwargs={'user_id': user_id}, daemon=True)
+
+    rows, images, clients = _select_pending_for_tagging(user_id)
+
+    if not images:
+        # "Nothing pending at all" (the routine case after a re-sync with no
+        # new photos) is not the same failure as "photos are pending but
+        # nobody has a usable key" — conflating them as one 'error' branch
+        # was actively wrong for the first case (admin always has a key)
+        # and made a background sync-then-tag toast look like it failed
+        # every time a sync brought in nothing new.
+        with _tag_progress_lock:
+            if not rows:
+                _tag_progress.update({'running': False, 'status': 'complete', 'message': 'Nothing to tag.'})
+            else:
+                _tag_progress.update({
+                    'running': False, 'status': 'error',
+                    'message': 'No Gemini API key available for the queued photos.'
+                })
+        _broadcast_progress()
+        return
+
+    with _tag_progress_lock:
+        _tag_progress.update({
+            'running': True,
+            'total': len(images),
+            'done': 0,
+            'failed': 0,
+            'status': 'running',
+            'message': f'Tagging {len(images)} images…'
+        })
+    _broadcast_progress()
+
+    t = threading.Thread(target=_run_tagging_job, kwargs={'images': images, 'clients': clients, 'user_id': user_id}, daemon=True)
     t.start()
 
 # ============================================================================
@@ -2539,6 +2584,8 @@ def sync_folder_worker(folder_id, user_id):
         sync_state['total'] = 0
         sync_state['current_file'] = ''
         sync_state['errors'] = []
+        sync_state['new_count'] = 0
+        sync_state['removed_count'] = 0
 
         # EVERYONE syncs through the shared service account (V17). Friends
         # share their folder with the service account's email (same as Ryan
@@ -2673,22 +2720,33 @@ def sync_folder_worker(folder_id, user_id):
         conn.commit()
         conn.close()
 
+        sync_state['new_count'] = new_count
+        sync_state['removed_count'] = removed_count
+
         print(f"Sync complete. {new_count} new images added"
               + (f", {removed_count} removed (deleted from Drive)" if removed_count else "") + ".")
 
     except Exception as e:
         sync_state['errors'].append(f"Sync failed: {str(e)}")
     finally:
-        sync_state['in_progress'] = False
         # Auto-tagging after sync: admin rides the shared key (Day 5). A
         # friend's photos auto-tag too, but ONLY if they've saved their own
         # Gemini key (V16) — scoped to just their images, on their key, so
         # it can never spend the admin's budget. Keyless friends' photos sit
         # untagged (searchable by filename, zero cost) until they add one.
+        #
+        # V48: called BEFORE sync_state['in_progress'] flips false, not
+        # after. trigger_tagging() now resolves "is there anything to tag"
+        # synchronously (see its own docstring), so by the time in_progress
+        # goes false, _tag_progress already reflects the real answer — the
+        # Home page's background sync-then-tag toast watches exactly that
+        # flip and needs it to be trustworthy the instant it sees it,
+        # without guessing via a timing delay.
         if user_id == 1:
             trigger_tagging()
         elif get_user_gemini_key(user_id):
             trigger_tagging(user_id=user_id)
+        sync_state['in_progress'] = False
 
 # ============================================================================
 # API ROUTES

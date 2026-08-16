@@ -2116,3 +2116,49 @@ names the Drive failure, and the fix follows from what it says. Second, **Day 27
 the 34 test scripts to point `DB_PATH` somewhere harmless via an environment variable instead of
 find-and-replacing the file, which unblocks moving Drive, sync, tagging and the crop worker out
 of `app.py`.
+
+---
+
+## Day 48 — August 16, 2026 *(V48 — Background Sync + Drag-Drop + Drawer Squeeze)*
+
+### What We Built (4 user requests, all shipped and tested)
+
+**1. Background sync & tagging with toast completion.** Built `SyncContext.jsx` at the app-shell level (above `<Routes>`) so sync/tag jobs keep running and still notify even if you navigate away mid-job. Two-phase watch chain: the context polls `/api/sync/status`, then when that flips `in_progress=false`, it immediately fetches `/api/tag-progress` (the backend resolves "is there anything to tag?" synchronously now, so there's no race condition). If tagging is running, it opens an SSE stream (`/api/tag-progress/stream`); if not, it shows a summary toast. Distinguishes three distinct outcomes: "nothing was queued", "tagged N, M failed", and "all N failed" — the last two raise visibility if tagging runs and crashes (an expired API key, etc.).
+
+**2. Page-level drag-and-drop file upload.** Extended `UploadButton.jsx` to a forwardRef component that exposes `acceptFiles(fileList)` as an imperative handle. Home page now has full-page drag-over handlers that delegate to this method — dropping files anywhere launches the upload, no need to click the upload button first. Added visual feedback: a semi-transparent dark overlay with "Drop to upload" appears during drag, lives only during drag-over.
+
+**3. Moved Sync from sidebar menu to Home.** Removed Sync nav link from `Sidebar.jsx`. Added a button on Home right next to "Find duplicates" — it shows live progress during the sync/tag job with a small spinner and text like "Syncing 10/20" or "Tagging 4/10". Auto-updates via the context's phase + progress counts.
+
+**4. Edit Tags drawer squeeze instead of overlay.** Wrapped the grid in a container with `marginRight: drawerOffset` and a smooth transition. The `colCount` calculation already factors in the drawer width, so fewer, wider columns reflow automatically as the drawer animates in. No images are now covered by the drawer — they shift left instead.
+
+**5. Bonus: Fixed Duplicate Scan concurrency.** Home.jsx had a typo — it was calling `/api/images/find-duplicates` instead of `/api/duplicates/scan`. Fixed the URL. Verified empirically that Duplicate Scan and tagging run safely together (Flask 3.0.0 + Werkzeug 3.1.8 default to `threaded=True`), so concurrent work now actually works.
+
+### One Race Condition Fixed at the Source
+Found and fixed a real race: after sync finished, the frontend would poll sync/status, see `in_progress=false`, then immediately check tag-progress. But if the "is there anything to tag?" decision was running in a background thread, the frontend might read stale state from the previous job. **Solution:** moved `_select_pending_for_tagging()` to execute synchronously in `trigger_tagging()` before spawning the worker thread. By the time `sync_state.in_progress` flips false, `_tag_progress` has the right answer — no delay needed.
+
+### Code Changes
+- **New file:** `frontend/src/SyncContext.jsx` — 204 lines, global sync/tag job manager
+- **Modified:** `backend/app.py` — added sync-to-tag handoff, refactored `_select_pending_for_tagging()` to run sync, updated `trigger_tagging()` signature and sync_state fields (`new_count`, `removed_count`)
+- **Modified:** `frontend/src/App.jsx` — wrapped Shell in SyncProvider, changed /sync route to redirect to /settings
+- **Modified:** `frontend/src/pages/Home.jsx` — page-level drag handlers, Sync button, grid margin transition, Duplicate Scan URL fix
+- **Modified:** `frontend/src/components/UploadButton.jsx` — converted to forwardRef with `acceptFiles()` imperative handle
+- **Modified:** `frontend/src/components/Sidebar.jsx` — removed Sync nav link
+- **Modified:** `frontend/src/pages/SettingsPage.jsx` — added Sync Source section
+- **Deleted:** `frontend/src/components/SyncManager.jsx` — replaced by app-level SyncContext
+- **Modified:** `frontend/src/pages/AccountPage.jsx` — minor updates for settings refactor
+
+### Verification
+- ✅ All 36 backend test scripts pass (34 Python + 2 Node)
+- ✅ Frontend builds clean (`npm run build`)
+- ✅ Manual browser testing: sync button works, toast appears on completion, drawer squeezes, drag-drop uploads, duplicate scan runs in parallel
+- ✅ Two-phase job completion correctly handled in all branches: nothing to tag, partial/full tagging failures, and success cases
+
+### Technical Debt / Open Questions
+- No blocking issues. All four user requests shipped and verified end-to-end.
+- Toast messages are user-friendly but could be more granular (e.g. "added 5, removed 2" from sync). Current wording is clear enough for v1.
+
+### Commits
+Not committed — changes staged locally, ready for Ryan's review before push.
+
+### Starting Point for Next Session
+**Pick the next feature.** All four user requests from this session are complete and tested. The remaining backlog from earlier days is still open (mobile responsive, admin analytics, crew management, offline deck caching, etc.).

@@ -24,6 +24,14 @@ export default function SettingsPage() {
   const [backupError, setBackupError] = useState('')
   const [backingUp, setBackingUp] = useState(false)
 
+  // V48: sync used to make you pick a folder from a dropdown every visit,
+  // even though there's only ever been one to pick — /api/folders is
+  // hardcoded to the single admin folder. This is just where that one-time
+  // connection lives now that the actual "Sync Now" action moved to Home.
+  const [syncSetup, setSyncSetup] = useState(null) // /api/account/setup-status payload
+  const [connectingFolder, setConnectingFolder] = useState(false)
+  const [connectFolderError, setConnectFolderError] = useState('')
+
   const loadBackupStatus = () => {
     fetch('/api/backups/status')
       .then(async r => {
@@ -49,8 +57,45 @@ export default function SettingsPage() {
       .then(data => setGoogleStatus(!!data.signed_in))
       .catch(() => setGoogleStatus(false))
 
-    if (isAdmin) loadBackupStatus()
+    if (isAdmin) {
+      loadBackupStatus()
+      loadSyncSetup()
+    }
   }, [isAdmin])
+
+  const loadSyncSetup = () => {
+    fetch('/api/account/setup-status')
+      .then(r => r.json())
+      .then(setSyncSetup)
+      .catch(() => {})
+  }
+
+  const handleConnectDefaultFolder = async () => {
+    setConnectingFolder(true)
+    setConnectFolderError('')
+    try {
+      const foldersRes = await fetch('/api/folders')
+      const { folders } = await foldersRes.json()
+      const folder = folders?.[0]
+      if (!folder) {
+        setConnectFolderError('No folder is configured on the server.')
+        return
+      }
+      const res = await fetch('/api/sync/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_id: folder.id, folder_name: folder.name })
+      })
+      if (!res.ok) {
+        setConnectFolderError('Could not save the folder connection.')
+        return
+      }
+      loadSyncSetup()
+    } catch {
+      setConnectFolderError('Could not reach the server.')
+    }
+    setConnectingFolder(false)
+  }
 
   const handleBackupNow = async () => {
     setBackingUp(true)
@@ -112,6 +157,53 @@ export default function SettingsPage() {
         <Row label="Email" value={user?.email || '—'} />
         <Row label="Role" value={isAdmin ? 'Admin' : 'Member'} />
       </div>
+
+      {isAdmin && (
+        <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+            SYNC SOURCE
+          </div>
+
+          {syncSetup === null ? (
+            <p style={{ fontSize: '13px', color: '#65625a', margin: 0 }}>Loading…</p>
+          ) : syncSetup.folder_connected ? (
+            <>
+              <Row label="Folder" value={`📁 ${syncSetup.folder_name}`} />
+              <Row
+                label="Last synced"
+                value={syncSetup.last_sync
+                  ? new Date(syncSetup.last_sync + 'Z').toLocaleString('en-US', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                  : 'Never yet'}
+              />
+              <p style={{ fontSize: '11.5px', color: '#65625a', margin: '10px 0 0', lineHeight: 1.5 }}>
+                To sync now, use the ⟲ button next to Duplicate Scan on Home — it runs in the
+                background and lets you know when it's done.
+              </p>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.5 }}>
+                No folder connected yet. Frame Atlas only ever reads from the one folder
+                shared with its service account — connect it once here.
+              </p>
+              {connectFolderError && (
+                <p style={{ fontSize: '12px', color: '#ffb4ab', margin: '0 0 10px' }}>{connectFolderError}</p>
+              )}
+              <button
+                onClick={handleConnectDefaultFolder}
+                disabled={connectingFolder}
+                style={{
+                  background: 'rgba(184,206,161,0.18)', border: '1px solid rgba(184,206,161,0.5)',
+                  color: '#b8cea1', borderRadius: '6px', padding: '7px 14px', fontSize: '12px',
+                  cursor: 'pointer', fontFamily: 'inherit', opacity: connectingFolder ? 0.6 : 1
+                }}
+              >
+                {connectingFolder ? 'Connecting…' : 'Connect Folder'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {isAdmin && (
         <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>

@@ -9,6 +9,7 @@ import TagModeBar from '../components/TagModeBar';
 import TagRemovalPreview from '../components/TagRemovalPreview';
 import CropModal from '../components/CropModal';
 import { useAuth } from '../AuthContext';
+import { useSync } from '../SyncContext';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
 
@@ -54,6 +55,7 @@ const exactLabel = (e) => (e < 25 ? 'very loose' : e < 50 ? 'loose' : e < 75 ? '
 
 export default function Home() {
   const { isAdmin } = useAuth();
+  const sync = useSync();
   const isMobile = useIsMobile();
   const [chips, setChips] = useState([]);
   const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
@@ -112,6 +114,12 @@ export default function Home() {
   const dragStateRef = useRef(null); // { startX, startY, dragging, baseSelected }
   const rangeAnchorRef = useRef(null); // last tile clicked — the far end of a shift-click range
   const justDraggedRef = useRef(false); // true for the brief window between mouseup-after-drag and the resulting click
+
+  // ── V48: drop photos anywhere on the page, not just onto the Upload
+  //         button's own panel — delegates to the same upload flow ──────────
+  const uploadButtonRef = useRef(null);
+  const [pageDragOver, setPageDragOver] = useState(false);
+  const pageDragDepthRef = useRef(0); // dragenter/dragleave fire on every child too; only the count hitting 0 means "actually left"
 
   const searchRef = useRef(null);
   const autoDebounce = useRef(null);
@@ -748,7 +756,7 @@ export default function Home() {
     setDuplicateScanStatus('scanning');
     try {
       // Call the duplicate scan API in the background
-      const res = await fetch('/api/images/find-duplicates', { method: 'POST' });
+      const res = await fetch('/api/duplicates/scan', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         setDuplicateScanStatus({ groups: data.groups || [] });
@@ -763,6 +771,36 @@ export default function Home() {
       console.error('Duplicate scan failed', e);
       setDuplicateScanStatus(null);
     }
+  };
+
+  // Dragenter/dragleave fire on every child element the cursor crosses, not
+  // just once for the whole page — a depth counter is what tells "moved to a
+  // child" apart from "actually left the window" (only the latter should
+  // hide the overlay). Gated to admin + a real file drag so it never
+  // intercepts, say, a tag chip being dragged around Select Mode.
+  const isFileDrag = (e) => isAdmin && !!e.dataTransfer?.types?.includes('Files');
+
+  const handlePageDragEnter = (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    pageDragDepthRef.current += 1;
+    setPageDragOver(true);
+  };
+  const handlePageDragOver = (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+  };
+  const handlePageDragLeave = (e) => {
+    if (!isFileDrag(e)) return;
+    pageDragDepthRef.current = Math.max(0, pageDragDepthRef.current - 1);
+    if (pageDragDepthRef.current === 0) setPageDragOver(false);
+  };
+  const handlePageDrop = (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    pageDragDepthRef.current = 0;
+    setPageDragOver(false);
+    uploadButtonRef.current?.acceptFiles(e.dataTransfer.files);
   };
 
   const DRAG_THRESHOLD = 4;
@@ -855,14 +893,51 @@ export default function Home() {
   })();
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: '#0a0a0b',
-      color: '#efeadd',
-      fontFamily: "'Hanken Grotesk', system-ui, sans-serif"
-    }}>
+    <div
+      onDragEnter={handlePageDragEnter}
+      onDragOver={handlePageDragOver}
+      onDragLeave={handlePageDragLeave}
+      onDrop={handlePageDrop}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: '#0a0a0b',
+        color: '#efeadd',
+        fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+        position: 'relative'
+      }}>
+
+      {/* Whole-page drop target hint — admin only, appears the moment a file
+          drag enters anywhere on Home, not just over the Upload button's own
+          panel. Drops delegate to that same panel's upload flow. */}
+      {pageDragOver && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 500,
+          background: 'rgba(10,10,11,0.82)',
+          border: '3px dashed #c9a253',
+          margin: '10px',
+          borderRadius: '16px',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: '10px', pointerEvents: 'none'
+        }}>
+          <div style={{ fontSize: '32px' }}>⬆</div>
+          <div style={{ fontSize: '16px', fontWeight: 600, color: '#efeadd' }}>Drop to upload</div>
+          <div style={{ fontSize: '12.5px', color: '#9c988d' }}>Photos go straight into your Drive folder and start tagging automatically</div>
+        </div>
+      )}
+
+      {/* Main content column — margin-right makes room for the Edit Tags
+          drawer so the grid actually narrows and reflows into fewer, wider
+          columns as it opens, instead of the drawer just landing on top of
+          whatever was already there. colCount above is computed against
+          this same drawerOffset, so the column count and the space they
+          have to fill always agree. */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0,
+        marginRight: `${drawerOffset}px`,
+        transition: 'margin-right 0.2s ease'
+      }}>
 
       {/* ── Upload Progress Badge ───────────────────────────────────────────── */}
       <div style={{
@@ -974,7 +1049,7 @@ export default function Home() {
           {/* Upload and Duplicate review still edit the admin's own library */}
           {isAdmin && (
             <>
-              <UploadButton onUploaded={() => fetchPage(0, false)} />
+              <UploadButton ref={uploadButtonRef} onUploaded={() => fetchPage(0, false)} />
 
               <button
                 onClick={startDuplicateScan}
@@ -992,6 +1067,51 @@ export default function Home() {
                 }}
               >
                 ⧉
+              </button>
+
+              <button
+                onClick={sync.startSync}
+                disabled={sync.running}
+                title={
+                  sync.syncing ? 'Syncing from Google Drive…'
+                  : sync.tagging ? 'Tagging new photos…'
+                  : 'Sync photos from Google Drive (runs in background)'
+                }
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '7px',
+                  height: isMobile ? '38px' : '46px', flexShrink: 0,
+                  padding: sync.running ? '0 12px' : 0,
+                  width: sync.running ? 'auto' : (isMobile ? '38px' : '46px'),
+                  justifyContent: 'center',
+                  background: sync.running ? 'rgba(217,164,65,0.14)' : '#18181b',
+                  border: `1px solid ${sync.running ? 'rgba(217,164,65,0.5)' : 'rgba(255,255,255,0.12)'}`,
+                  borderRadius: '10px',
+                  cursor: sync.running ? 'default' : 'pointer',
+                  color: sync.running ? '#d9a441' : '#9c988d',
+                  fontSize: '15px',
+                  opacity: sync.running ? 0.9 : 1,
+                  transition: 'width 0.2s ease'
+                }}
+              >
+                {sync.running ? (
+                  <span style={{
+                    width: '12px', height: '12px', flexShrink: 0,
+                    border: '2px solid rgba(217,164,65,0.3)', borderTopColor: '#d9a441',
+                    borderRadius: '50%', display: 'inline-block',
+                    animation: 'spin 0.7s linear infinite'
+                  }} />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 2v6h-6M3 12a9 9 0 0115-6.7L21 8M3 22v-6h6M21 12a9 9 0 01-15 6.7L3 16"/>
+                  </svg>
+                )}
+                {sync.running && (
+                  <span style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+                    {sync.syncing
+                      ? (sync.syncTotal > 0 ? `Syncing ${sync.syncProcessed}/${sync.syncTotal}` : 'Syncing…')
+                      : (sync.tagTotal > 0 ? `Tagging ${sync.tagDone}/${sync.tagTotal}` : 'Tagging…')}
+                  </span>
+                )}
               </button>
             </>
           )}
@@ -1972,6 +2092,8 @@ export default function Home() {
         )}
 
         <div style={{ height: '30px' }} />
+      </div>
+
       </div>
 
       {/* Detail panel */}
