@@ -26,6 +26,7 @@ from google.oauth2.service_account import Credentials
 from google.oauth2.credentials import Credentials as UserCredentials
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
@@ -1986,7 +1987,8 @@ def get_oauth_flow(redirect_uri):
 def get_user_credentials(user_id):
     """Refreshed google-auth Credentials for this user's own Google sign-in
     (Day 8, generalized Day 14 Stage 2 — used to be admin-only/hardcoded to
-    user 1). Returns None if that user hasn't connected Google yet."""
+    user 1). Returns None if that user hasn't connected Google yet, OR
+    (V46) if their connection has died and needs reconnecting — see below."""
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT google_oauth_token FROM users WHERE id = ?', (user_id,))
@@ -1997,7 +1999,33 @@ def get_user_credentials(user_id):
 
     creds = UserCredentials.from_authorized_user_info(json.loads(row['google_oauth_token']), UPLOAD_SCOPES)
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            # invalid_grant: Token has been expired or revoked. This is
+            # Google's doing, not a bug here — the most common cause is the
+            # OAuth consent screen still sitting in "Testing" publishing
+            # status in Google Cloud Console, which caps every refresh token
+            # at 7 days no matter how often the app is used (fix: Console ->
+            # OAuth consent screen -> Publishing status -> In production).
+            # Before this, every caller kept retrying against the same dead
+            # token forever and surfacing Google's raw JSON blob wherever it
+            # happened to be caught (a crop's error toast, the monthly DB
+            # backup log) — and /api/account/google-status kept reporting
+            # "signed_in" since it only ever checked the column for NULL, so
+            # there was no visible signal telling anyone to reconnect.
+            # Clearing the token here makes every caller treat this exactly
+            # like "never connected", which already degrades correctly
+            # everywhere (each call site already null-checks the result) —
+            # reconnecting in Settings is the fix either way.
+            print(f"[auth] Google token for user {user_id} expired or was revoked — "
+                  f"cleared, reconnect required: {e}")
+            conn = get_db()
+            c = conn.cursor()
+            c.execute('UPDATE users SET google_oauth_token = NULL WHERE id = ?', (user_id,))
+            conn.commit()
+            conn.close()
+            return None
         conn = get_db()
         c = conn.cursor()
         c.execute('UPDATE users SET google_oauth_token = ? WHERE id = ?', (creds.to_json(), user_id))
