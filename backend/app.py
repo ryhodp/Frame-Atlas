@@ -529,6 +529,89 @@ def _is_duplicate_column_error(e):
     for weeks. This tells the two apart so only the unexpected case logs."""
     return 'duplicate column' in str(e).lower()
 
+# V49 (Day 48): every column added by an ALTER TABLE in init_db(), by table.
+#
+# This list exists because a migration can fail SILENTLY AND PERMANENTLY on
+# production while passing everywhere it's tested. decks.updated_at did
+# exactly that for three weeks: its ALTER used a non-constant DEFAULT, which
+# SQLite allows on an empty table and refuses on one that already has rows.
+# Every test builds a fresh, empty database, so the migration always worked
+# under test and never worked on the one database with real decks in it.
+#
+# The lesson generalises past this column: a test suite that always starts
+# from an empty database cannot see any migration bug that only bites a
+# populated one. So the guard can't be another test. It has to run where the
+# real data is, at boot, and check the schema that ACTUALLY exists rather
+# than the one the migrations above intended to create.
+#
+# When adding a migration, add its column here too.
+EXPECTED_COLUMNS = {
+    'images': (
+        'tagging_status', 'md5_checksum', 'phash', 'source_url',
+        'camera_rig', 'lens', 'lens_filter', 'stop', 'onset_notes',
+    ),
+    'users': (
+        'google_oauth_token', 'email', 'last_login_at',
+        'failed_login_count', 'login_locked_until',
+    ),
+    'decks': ('invite_token', 'updated_at', 'feedback_enabled'),
+    'deck_members': ('permission',),
+    'colors': ('share', 'palette_version'),
+}
+
+
+def missing_columns(conn):
+    """Return [(table, column), ...] for every expected column that isn't
+    actually in the database. Pure read — PRAGMA only, no writes — so it's
+    safe to call at boot and straightforward to assert on in a test.
+
+    A table that doesn't exist at all is reported as missing every one of its
+    columns rather than being skipped: 'the table is gone' is strictly worse
+    than 'a column is gone', and silently passing that case would defeat the
+    point of the check."""
+    missing = []
+    for table, columns in EXPECTED_COLUMNS.items():
+        try:
+            present = {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}
+        except Exception as e:
+            print(f'[schema] WARNING: could not inspect table {table}: {e}')
+            present = set()
+        for col in columns:
+            if col not in present:
+                missing.append((table, col))
+    return missing
+
+
+def check_schema(conn):
+    """Verify the live database really has every column the code expects, and
+    say so LOUDLY if it doesn't.
+
+    Deliberately does not raise or exit (Ryan's call): a missing column breaks
+    the features that touch it, but search, tagging and the rest of the app
+    keep working, and taking the whole site down over one column would turn a
+    partial outage into a total one. The logging is the product here — this
+    only helps if the line is impossible to scroll past, since the failure it
+    describes is otherwise completely invisible until someone clicks the one
+    broken button."""
+    missing = missing_columns(conn)
+    if not missing:
+        print('[schema] OK — all expected columns present.')
+        return missing
+
+    print('[schema] ' + '=' * 62)
+    print(f'[schema] CRITICAL: {len(missing)} expected column(s) MISSING from the database.')
+    for table, col in missing:
+        print(f'[schema]     {table}.{col}')
+    print('[schema] Any feature touching these will fail with HTTP 500.')
+    print('[schema] A migration above did not apply. Most likely cause: an')
+    print('[schema] ALTER TABLE with a non-constant DEFAULT, which SQLite')
+    print('[schema] refuses once the table has rows (it allows it when empty,')
+    print('[schema] which is why the tests would not have caught it).')
+    print(f'[schema] sqlite version here: {sqlite3.sqlite_version}')
+    print('[schema] ' + '=' * 62)
+    return missing
+
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -932,14 +1015,64 @@ def init_db():
         if not _is_duplicate_column_error(e):
             print(f"[migration] WARNING: unexpected error adding permission column to deck_members: {e}")
 
-    # V23: track when a deck was last modified for the "new changes" banner
+    # V23: track when a deck was last modified for the "new changes" banner.
+    #
+    # V49 (Day 48): this shipped as `... TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
+    # and NEVER RAN ON PRODUCTION. SQLite refuses a non-constant DEFAULT in
+    # ALTER TABLE ADD COLUMN when the table HAS ROWS to fill in ("Cannot add a
+    # column with non-constant default") — but allows it on an EMPTY table,
+    # where there is nothing to materialise.
+    #
+    # That distinction is the whole bug, and it is about DATA, not about
+    # SQLite versions or environments (verified directly: same failure on
+    # 3.50.4 and on Railway, decided purely by whether rows exist). Every
+    # test script builds a fresh database, so `decks` is always empty when
+    # init_db() runs and the ALTER always succeeds. Ryan's production database
+    # already held real decks when this migration first shipped in V23, so it
+    # failed there — and kept failing on every boot afterwards, because those
+    # rows never went away.
+    #
+    # Consequence: opening a deck, the public /api/share/<token> view, and
+    # every deck mutation returned 500 from V25 (2026-07-26) until this fix —
+    # three weeks — while V38/V40/V41/V42 all shipped "verified" on top of a
+    # feature that was dead on the live site. No test could have caught it;
+    # the test suite's own fresh-database setup is what hid it.
+    #
+    # No DEFAULT is the fix: that form is always legal, rows or not. The value
+    # is then seeded per-row from created_at rather than "now", so a deck's
+    # history stays honest and restoring this column can't light up a false
+    # "New changes" banner on every deck a collaborator has open.
+    #
+    # DO NOT put a non-constant DEFAULT (CURRENT_TIMESTAMP, CURRENT_DATE,
+    # CURRENT_TIME, or any parenthesised expression) in an ALTER TABLE here.
+    # A constant — 0, 'pending', 'viewer' — is always fine; every other
+    # migration in this function already uses one. It will pass every test and
+    # then fail on the one database that has data in it. `scripts/
+    # test_schema_guard_locally.py` greps for this, and check_schema() below
+    # reports it loudly at boot if one ever slips through.
     try:
-        c.execute("ALTER TABLE decks ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        c.execute("ALTER TABLE decks ADD COLUMN updated_at TIMESTAMP")
         conn.commit()
         print("[migration] Added updated_at column to decks")
     except Exception as e:
         if not _is_duplicate_column_error(e):
             print(f"[migration] WARNING: unexpected error adding updated_at column to decks: {e}")
+
+    # Seed the column for any deck that predates it (and repair every row on
+    # the production DB, where the column has been missing entirely). Runs on
+    # every boot but only ever touches NULL rows, so it self-disables once
+    # they're filled — no separate "did this run?" flag needed. Guarded
+    # because it must not take the app down if `decks` is somehow absent.
+    try:
+        seeded = c.execute(
+            "UPDATE decks SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP) "
+            "WHERE updated_at IS NULL"
+        ).rowcount
+        conn.commit()
+        if seeded:
+            print(f"[migration] Seeded updated_at from created_at on {seeded} deck(s)")
+    except Exception as e:
+        print(f"[migration] WARNING: could not seed updated_at on decks: {e}")
 
     # V25: where a web-clipped image came from, so a still pulled off a blog
     # can be traced back to its page later. NULL for Drive syncs and uploads.
@@ -1114,6 +1247,12 @@ def init_db():
     ):
         c.execute(_idx_sql)
     conn.commit()
+
+    # Last thing before the connection closes: confirm the migrations above
+    # actually produced the schema the rest of the app is written against.
+    # Runs after every migration has had its turn, so anything reported here
+    # genuinely did not apply rather than merely not having run yet.
+    check_schema(conn)
 
     conn.close()
 
