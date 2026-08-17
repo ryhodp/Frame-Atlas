@@ -1,7 +1,14 @@
 """V19: quick check for /api/analytics/users (admin-only cross-account analytics)."""
 import importlib.util, io, json, os, sys, tempfile
 
-REPO = "/Users/ryanhoang/Desktop/frame-atlas"
+# Derived from this file's own location, like every other test_*_locally.py.
+# This was hardcoded to a path on one developer's Mac, so it could only ever
+# run there: on CI the checkout lives at /home/runner/work/..., the open()
+# below raised FileNotFoundError, and this script failed every run since the
+# Tests workflow was added. It was one of the two reasons CI had never been
+# green (the other was a setdefault/assert mismatch in
+# test_personal_drive_connect_locally.py).
+REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(REPO, 'backend'))
 workdir = tempfile.mkdtemp(prefix="frame_atlas_admin_analytics_")
 db_path = os.path.join(workdir, "library.db")
