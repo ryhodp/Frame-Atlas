@@ -2158,7 +2158,102 @@ Found and fixed a real race: after sync finished, the frontend would poll sync/s
 - Toast messages are user-friendly but could be more granular (e.g. "added 5, removed 2" from sync). Current wording is clear enough for v1.
 
 ### Commits
-Not committed — changes staged locally, ready for Ryan's review before push.
+`049b7e7` (V48) — committed and pushed to Railway this session.
+
+### A Process Failure Worth Recording
+The four features above were finished, tested, and then **left uncommitted**, while the
+session was wrapped up with the words "ready for commit whenever you're ready." Ryan read that
+as done, went to the live site, and reported all four as broken — because the live site was
+still running V47 and could not have had any of them. Nothing was wrong with the code.
+
+The lesson is about wording, not process: "ready to commit" and "not deployed, you will not see
+any of this yet" describe the same state and land completely differently on someone who doesn't
+think in terms of local-vs-deployed. Say the second one.
+
+---
+
+## Day 48 (cont'd) — August 16, 2026 *(V49 — decks were broken in production for three weeks)*
+
+### Found While Deploying V48
+
+Ryan tried to add photos to a deck on the live site and got `HTTP 500`. Railway's logs named it
+immediately: `sqlite3.OperationalError: no such column: updated_at`.
+
+**`decks.updated_at` had never existed in the production database.** Every deck feature that
+touches it had been returning 500 since **V25 (2026-07-26)** — three weeks:
+
+| | Live site before this fix |
+|---|---|
+| Deck **list** | worked — which is exactly why it looked healthy |
+| **Opening** a deck (`GET /api/decks/<id>`) | 500 |
+| **Adding photos** (`POST /api/decks/<id>/images`) | 500 |
+| **Public share links** (`/api/share/<token>`) | 500 |
+| PDF export, Presentation, Client feedback, Scene reorder | all sit behind opening a deck |
+
+So **V38, V40, V41 and V42 all shipped "verified" on top of a feature that was dead in
+production.** Each was genuinely verified — locally, where it genuinely worked.
+
+### Root Cause, and the Wrong Answer That Came First
+
+The V23 migration was:
+
+```sql
+ALTER TABLE decks ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+```
+
+**SQLite refuses a non-constant DEFAULT in `ALTER TABLE ADD COLUMN` when the table HAS ROWS, and
+allows it when the table is EMPTY.** Measured directly on 3.50.4: empty succeeds, two rows fails
+with the exact production error.
+
+That is a **data** condition, not a version or platform one. The first diagnosis this session —
+written into a message to Ryan as "Railway runs an older SQLite than your Mac" — was **wrong**,
+and was only caught because the new regression test failed on a machine where the theory said it
+should pass. Worth remembering: the reproduction disproved the hypothesis, which is the whole
+reason to build one before believing an explanation.
+
+**Why three weeks of tests never saw it:** every `test_*_locally.py` builds a throwaway database
+from scratch, so `decks` is empty when `init_db()` runs and the ALTER always succeeds. Ryan's
+production database already held decks, so it always failed — every boot, permanently. The
+generalised lesson, which outlives this column: *a suite that always starts from an empty
+database cannot detect a migration that only breaks on a populated one.*
+
+It was silent on top of that until V44 added `PYTHONUNBUFFERED=1` — before then the migration's
+own warning could not physically reach Railway's logs. V44 is the only reason this was findable.
+
+### The Fix
+- **Drop the `DEFAULT`.** That form is legal whether or not the table has rows.
+- **Seed each row from its own `created_at`**, not `CURRENT_TIMESTAMP` (Ryan's call): deck
+  history stays honest, and restoring the column can't light up a false "New changes" banner on
+  every deck a collaborator has open. Only touches NULL rows, so it self-disables.
+- `init_db()` runs on every boot, so **deploying the fix repaired the live database** — no manual
+  surgery. Confirmed in Railway's logs: `Added updated_at column to decks` →
+  `Seeded updated_at from created_at on 2 deck(s)` → `[schema] OK`.
+
+### Prevention (Ryan chose: startup check, log loudly, keep running)
+- **`check_schema()`** runs at the end of `init_db()` and verifies every migration-added column in
+  `EXPECTED_COLUMNS` actually exists, printing an unmissable block if any don't. It deliberately
+  does **not** raise or exit — one missing column must not take search and tagging down with it.
+  **When adding a migration, add its column to `EXPECTED_COLUMNS`.**
+- **`scripts/test_schema_guard_locally.py`** (22 checks). Reproduces the production state — a
+  `decks` table *with rows* and no `updated_at` — and asserts the repair, the `created_at`
+  seeding, idempotency across boots, and the guard itself. **Confirmed to go RED against the
+  pre-fix code**, not merely green against the new code.
+- That file also **greps every `ALTER TABLE` for a non-constant `DEFAULT`**. Needing no database
+  at all, it is immune to the empty-database blind spot that hid this, and catches the next one
+  at source. Only one migration in `app.py` had the problem; every other default is a constant.
+
+### Technical Debt / Open Questions
+- **The three weeks of deck features have still never been exercised against real production
+  data.** PDF export, presentation mode, client feedback and scene reorder are all now reachable
+  for the first time — they are unverified in production, not known-good.
+- CI still runs only on fresh databases. The schema guard closes the specific hole; a populated-
+  database fixture would close the general one.
+- The V48 crop/Drive root cause from Day 27 remains open and still needs one crop attempt.
+
+### Commits
+`e83847b` (V49), plus this docs commit.
 
 ### Starting Point for Next Session
-**Pick the next feature.** All four user requests from this session are complete and tested. The remaining backlog from earlier days is still open (mobile responsive, admin analytics, crew management, offline deck caching, etc.).
+**Verify the recovered deck features against real data** — open a deck, export a PDF, run
+presentation mode, and load a share link on the live site. All four have been unreachable in
+production since July 26 and none has ever run against Ryan's actual library.
