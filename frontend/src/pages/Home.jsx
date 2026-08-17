@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import ImageDetail from '../components/ImageDetail';
 import DuplicateReview from '../components/DuplicateReview';
 import UploadButton from '../components/UploadButton';
-import UploadProgressBadge from '../components/UploadProgressBadge';
 import SelectModeHeader from '../components/SelectModeHeader';
 import TagModeBar from '../components/TagModeBar';
 import TagRemovalPreview from '../components/TagRemovalPreview';
@@ -939,16 +938,13 @@ export default function Home() {
         transition: 'margin-right 0.2s ease'
       }}>
 
-      {/* ── Upload Progress Badge ───────────────────────────────────────────── */}
-      <div style={{
-        padding: isMobile ? '10px 14px' : '12px 20px',
-        borderBottom: '1px solid rgba(255,255,255,0.065)',
-        minHeight: '24px',
-        display: 'flex',
-        alignItems: 'center'
-      }}>
-        <UploadProgressBadge />
-      </div>
+      {/* V49: UploadProgressBadge and the always-present strip it sat in are
+          gone. Background tagging is now reported by the Sync button's own
+          inline progress plus a completion toast (SyncContext), so this was a
+          second indicator for the same job — and it reserved a bordered
+          24px-tall row on every page load whether or not it had anything to
+          say. See SyncContext.jsx for the stale-"complete" guard that kept
+          the badge stuck open showing an empty gear. */}
 
       {/* ── Select Mode Header (only when tagMode is on) ──────────────────────── */}
       {tagMode && (

@@ -10,6 +10,12 @@ const SyncContext = createContext(null);
 // still fires the completion toast even if you've already navigated off to
 // Decks or Analytics while it works. A phase tracked inside Home's own
 // state would stop polling the moment Home unmounted.
+//
+// V49: this also absorbed UploadProgressBadge (V22), which was a SECOND
+// component subscribing to the SAME /api/tag-progress/stream to show the
+// same job in a different corner of Home. Two indicators for one job is
+// confusing on its own, but the badge also had the bug described on
+// `sawTaggingRunRef` below and sat on screen showing an empty gear forever.
 export function SyncProvider({ children }) {
   const { isAdmin } = useAuth();
   const { showToast } = useToast();
@@ -24,14 +30,25 @@ export function SyncProvider({ children }) {
   const tagEsRef = useRef(null);
   const lastSyncErrorRef = useRef(null);
 
+  // True once we've actually WATCHED a tagging run be in progress.
+  //
+  // This guard is the whole reason the old badge misbehaved. The server keeps
+  // its last job's outcome in memory and replays it to every new stream
+  // subscriber, so a page load long after a job ended still receives
+  // {running: false, status: 'complete'}. Treating that as "a job just
+  // finished" means a stale toast on every refresh — and it's exactly what
+  // pinned UploadProgressBadge open on a gear icon with no label. We only
+  // report an ending we saw the beginning of.
+  const sawTaggingRunRef = useRef(false);
+
+  // Read inside the stream handler, which closes over its first render.
+  // A ref, not the phase state, so the handler always sees the live value.
+  const syncingRef = useRef(false);
+  useEffect(() => { syncingRef.current = phase === 'syncing'; }, [phase]);
+
   const stopSyncPoll = useCallback(() => {
     clearInterval(syncPollRef.current);
     syncPollRef.current = null;
-  }, []);
-
-  const stopTagStream = useCallback(() => {
-    tagEsRef.current?.close();
-    tagEsRef.current = null;
   }, []);
 
   // Appends a note about a non-fatal sync warning (e.g. one bad file) to an
@@ -40,59 +57,84 @@ export function SyncProvider({ children }) {
   const withSyncWarning = (msg) =>
     lastSyncErrorRef.current ? `${msg} (${lastSyncErrorRef.current})` : msg;
 
-  // ── Phase 2: watch tagging through to completion via SSE ──────────────
-  const watchTagging = useCallback((initialData) => {
-    setPhase('tagging');
-    setTagDone(initialData.done || 0);
-    setTagTotal(initialData.total || 0);
-
-    const finish = (data) => {
-      stopTagStream();
-      setPhase('idle');
-      const failed = data.failed || 0;
-      const total = data.total || 0;
-      const tagged = Math.max(0, (data.done || 0) - failed);
-      let msg;
-      let type = 'success';
-      if (data.status === 'error' && tagged === 0) {
-        msg = `Sync finished, but tagging didn't run: ${data.message || 'unknown error'}`;
-        type = 'error';
-      } else if (tagged > 0) {
-        msg = `✓ Synced and tagged ${tagged} photo${tagged === 1 ? '' : 's'}${failed ? ` — ${failed} failed to tag` : ''}.`;
-      } else if (total > 0) {
-        // Distinct from "nothing was queued": photos WERE queued and every
-        // single one failed (e.g. an expired Gemini key) — silently calling
-        // that "nothing to tag" would hide a real problem.
-        msg = `Sync complete, but tagging failed for all ${total} photo${total === 1 ? '' : 's'}.`;
-        type = 'error';
-      } else {
-        msg = '✓ Sync complete — nothing new to tag.';
-      }
-      showToast(withSyncWarning(msg), type, 5000);
-    };
-
-    // Snapshot already landed on a terminal state (e.g. a near-instant
-    // "nothing pending" resolution) — nothing to stream.
-    if (initialData.status === 'complete' || initialData.status === 'error') {
-      finish(initialData);
-      return;
+  // Reports a finished tagging run. Split out because it's reached from two
+  // directions: the live stream below, and the sync handoff for a run that
+  // was already over by the time sync's own poll noticed.
+  const finishTagging = useCallback((data) => {
+    setPhase('idle');
+    const failed = data.failed || 0;
+    const total = data.total || 0;
+    const tagged = Math.max(0, (data.done || 0) - failed);
+    let msg;
+    let type = 'success';
+    if (data.status === 'error' && tagged === 0) {
+      msg = `Tagging didn't run: ${data.message || 'unknown error'}`;
+      type = 'error';
+    } else if (tagged > 0) {
+      msg = `✓ Tagged ${tagged} photo${tagged === 1 ? '' : 's'}${failed ? ` — ${failed} failed` : ''}.`;
+    } else if (total > 0) {
+      // Distinct from "nothing was queued": photos WERE queued and every
+      // single one failed (e.g. an expired Gemini key) — silently calling
+      // that "nothing to tag" would hide a real problem.
+      msg = `Tagging failed for all ${total} photo${total === 1 ? '' : 's'}.`;
+      type = 'error';
+    } else {
+      msg = '✓ Nothing new to tag.';
     }
+    showToast(withSyncWarning(msg), type, 5000);
+    lastSyncErrorRef.current = null;
+  }, [showToast]);
 
-    if (tagEsRef.current) return; // already watching
+  // ── One persistent tagging stream for the whole session ────────────────
+  //
+  // Deliberately NOT opened only around a sync: tagging also starts from a
+  // drag-and-drop upload or a browser clip, at any moment, with no sync
+  // involved. Watching continuously is what lets those show progress at all
+  // — it's the one job UploadProgressBadge did that this context didn't.
+  //
+  // Admin-only because /api/tag-progress/stream is @admin_required; a friend
+  // subscribing would just collect 403s (the old badge rendered for everyone
+  // and did exactly that). Friends have /api/tag-progress/mine, which is a
+  // separate feature, not wired up here.
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+
     const es = new EventSource('/api/tag-progress/stream');
     tagEsRef.current = es;
+
     es.onmessage = (e) => {
+      let d;
       try {
-        const d = JSON.parse(e.data);
-        setTagDone(d.done || 0);
-        setTagTotal(d.total || 0);
-        if (d.status === 'complete' || d.status === 'error') finish(d);
+        d = JSON.parse(e.data);
       } catch {
-        /* ignore malformed keepalive/frame */
+        return; // malformed keepalive frame
+      }
+      setTagDone(d.done || 0);
+      setTagTotal(d.total || 0);
+
+      if (d.running) {
+        sawTaggingRunRef.current = true;
+        // Don't stomp the syncing phase — sync's own progress is the more
+        // useful thing to show while Drive is still being read, and the
+        // handoff below switches us over when it's done.
+        if (!syncingRef.current) setPhase('tagging');
+      } else if (d.status === 'complete' || d.status === 'error') {
+        if (sawTaggingRunRef.current) {
+          sawTaggingRunRef.current = false;
+          finishTagging(d);
+        }
       }
     };
-    es.onerror = () => { stopTagStream(); setPhase('idle'); };
-  }, [showToast, stopTagStream]);
+
+    // EventSource reconnects on its own; closing here would end the watch
+    // permanently on one dropped connection.
+    es.onerror = () => {};
+
+    return () => {
+      es.close();
+      tagEsRef.current = null;
+    };
+  }, [isAdmin, finishTagging]);
 
   // ── Phase 1: poll sync status until done, then hand off to tagging ─────
   const watchSync = useCallback(() => {
@@ -113,27 +155,37 @@ export function SyncProvider({ children }) {
           // trigger_tagging() before flipping sync_state.in_progress false —
           // so the instant this poll sees in_progress:false, _tag_progress
           // is already caught up. No arbitrary delay needed to avoid racing
-          // a tagging run that started (and, for a handful of images,
-          // could otherwise finish) faster than a fixed wait would catch.
+          // a tagging run that started faster than a fixed wait would catch.
           try {
             const t = await fetch('/api/tag-progress').then(r => r.json());
             if (t.running) {
-              watchTagging(t);
-            } else {
-              setPhase('idle');
-              const added = s.new_count || 0;
-              const removed = s.removed_count || 0;
-              const parts = [];
-              if (added) parts.push(`${added} new photo${added === 1 ? '' : 's'}`);
-              if (removed) parts.push(`${removed} removed`);
-              showToast(
-                withSyncWarning(parts.length ? `✓ Synced — ${parts.join(', ')}.` : '✓ Already up to date.'),
-                'success', 4000
-              );
+              // The persistent stream above drives it from here.
+              sawTaggingRunRef.current = true;
+              setPhase('tagging');
+              return;
             }
+            if ((t.total || 0) > 0 && (t.status === 'complete' || t.status === 'error')) {
+              // A short batch can finish before this poll comes back around.
+              // Report the tagging outcome rather than the sync summary,
+              // otherwise a run where every photo failed (dead Gemini key)
+              // would be announced as a plain success.
+              sawTaggingRunRef.current = false;
+              finishTagging(t);
+              return;
+            }
+            setPhase('idle');
+            const added = s.new_count || 0;
+            const removed = s.removed_count || 0;
+            const parts = [];
+            if (added) parts.push(`${added} new photo${added === 1 ? '' : 's'}`);
+            if (removed) parts.push(`${removed} removed`);
+            showToast(
+              withSyncWarning(parts.length ? `✓ Synced — ${parts.join(', ')}.` : '✓ Already up to date.'),
+              'success', 4000
+            );
+            lastSyncErrorRef.current = null;
           } catch {
             setPhase('idle');
-          } finally {
             lastSyncErrorRef.current = null;
           }
         }
@@ -141,7 +193,7 @@ export function SyncProvider({ children }) {
         /* transient — next tick retries */
       }
     }, 800);
-  }, [showToast, stopSyncPoll, watchTagging]);
+  }, [showToast, stopSyncPoll, finishTagging]);
 
   const startSync = useCallback(async () => {
     lastSyncErrorRef.current = null;
@@ -159,11 +211,11 @@ export function SyncProvider({ children }) {
     }
   }, [watchSync, showToast]);
 
-  // Resume watching if a sync or tag job was already running before this
-  // page loaded (e.g. a refresh mid-sync) — same resilience the old
-  // dedicated Sync page had.
+  // Resume watching if a SYNC was already running before this page loaded
+  // (e.g. a refresh mid-sync). Tagging needs no equivalent — the persistent
+  // stream above picks an in-flight run up on its own.
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin) return undefined;
     (async () => {
       try {
         const s = await fetch('/api/sync/status').then(r => r.json());
@@ -171,15 +223,10 @@ export function SyncProvider({ children }) {
           setSyncProcessed(s.processed || 0);
           setSyncTotal(s.total || 0);
           watchSync();
-          return;
         }
       } catch { /* ignore */ }
-      try {
-        const t = await fetch('/api/tag-progress').then(r => r.json());
-        if (t.running) watchTagging(t);
-      } catch { /* ignore */ }
     })();
-    return () => { stopSyncPoll(); stopTagStream(); };
+    return () => { stopSyncPoll(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
