@@ -2403,7 +2403,52 @@ rather than carrying a stale action item nobody can action.
 ### Commits
 `e4ac7f1` was the last red run; this commit is the fix.
 
+### CORRECTION to the section above: there were TWO causes, not one
+The entry above says "one script of 35 was failing." **That was wrong**, and the fix based on it
+did not turn CI green — the next run failed again. The text is left as written rather than
+quietly edited, because the mistake is the point: I read one failure annotation, found a
+sufficient explanation, and stopped looking. The run's annotations had listed **two** failing
+scripts all along.
+
+**Second cause — `scripts/test_admin_analytics_locally.py`, line 4:**
+
+```python
+REPO = "/Users/ryanhoang/Desktop/frame-atlas"
+```
+
+An absolute path to one developer's Mac. On CI the checkout is at
+`/home/runner/work/Frame-Atlas/Frame-Atlas`, so `open(os.path.join(REPO, "backend", "app.py"))`
+on line 9 raised `FileNotFoundError` and the script exited 1 before running a single check. Fixed
+to derive from `__file__` like the other 34 (32 use `os.path.dirname(__file__)`, 2 the abspath
+form). Audited all of `scripts/` — it was the only hardcoded path.
+
+**The trap worth remembering:** this script passed locally *no matter where it was run from*.
+Copying the repo to `/tmp` and running it there still passed, because the absolute path pointed
+back at the real repo — the copy's own files were never read. "Green locally" carried **zero**
+information about this script, and the foreign-path check that looked like verification was
+measuring nothing. Proof only came from pointing `REPO` at CI's own checkout path on this machine
+and reproducing the identical `FileNotFoundError`.
+
+**Result: the Tests workflow is GREEN — `c2cfa7e`, both jobs, first passing run since the
+workflow was created on 2026-08-10.**
+
+### The Pattern Across This Session
+Four bugs in two days, all the same species: **correct in every environment anyone looked at,
+broken in the one that counts.**
+
+| Bug | Fine where | Broken where |
+|---|---|---|
+| `decks.updated_at` missing (V49) | any empty test DB | the one DB with rows in it |
+| Stuck gear badge | a running job | a finished one |
+| `setdefault` vs asserted literal | a machine with the var unset | CI, which sets it |
+| Hardcoded `/Users/ryanhoang/...` | this Mac, from anywhere | any other machine |
+
+None was found by the test suite; each was found by someone looking at the real thing. The
+recurring failure on my part was **explaining before reproducing** — three separate confident
+wrong causes this session (deck outage "unlikely", then "older SQLite on Railway", then "one
+script failing"). Each was caught only by building the reproduction anyway.
+
 ### Starting Point for Next Session
 **Verify the recovered deck features against real data** — open a deck, export a PDF, run
 presentation mode, and load a share link on the live site. That is the only substantive item
-outstanding; the crop investigation is closed and CI should be green.
+outstanding; the crop investigation is closed and CI is green.
