@@ -2257,3 +2257,88 @@ own warning could not physically reach Railway's logs. V44 is the only reason th
 **Verify the recovered deck features against real data** — open a deck, export a PDF, run
 presentation mode, and load a share link on the live site. All four have been unreachable in
 production since July 26 and none has ever run against Ryan's actual library.
+
+---
+
+## Day 48 (cont'd) — August 16–17, 2026 *(V49 part 2 — the stuck gear badge)*
+
+### What Ryan Reported
+After confirming the four V48 features worked ("dragging photos onto home worked, the panel
+pushes photos, that's perfect. sync and duplicate seem to work"), he asked what the small orange
+pill in the top-left corner was — a gold-bordered chip showing a **gear icon, no text, and an ×**.
+
+### It Was a Broken Component, Not a Working One
+`UploadProgressBadge.jsx` (V22, 2026-07-17, untouched by this session). It renders background-job
+progress and had **no case for the finished state**:
+
+- `isActive` = `running || (status && status !== 'idle')` — a finished job reports
+  `{running: false, status: 'complete'}`, so **isActive was true**.
+- All four display branches require the job to be *actively running*, so none matched:
+  `displayText` came out `''` and `displayIcon` fell through the render's ternary to a **literal
+  gear glyph**.
+- Result: a pill announcing nothing. Dismissing it didn't stick either — the server replays its
+  last job's outcome to every new stream subscriber, so a reload re-showed it.
+
+Broken for a month, but **V48 is what made it constant**: tagging now runs after every sync and
+every drag-and-drop upload, so the finished state is reached many times a day instead of only
+after a manual tagging pass.
+
+### It Also Exposed a Duplication V48 Introduced
+`SyncContext` (V48) and `UploadProgressBadge` (V22) were **both subscribed to
+`/api/tag-progress/stream`**, reporting one job in two places in two styles. But the badge was
+not purely redundant: it caught tagging started by an **upload or a browser clip while Home was
+already open**, which SyncContext's one-shot mount check missed. Deleting it outright would have
+lost that.
+
+### The Fix (Ryan chose "fold it into the new indicator" over a minimal patch)
+- Deleted `UploadProgressBadge.jsx` and the always-present bordered 24px strip on Home it lived
+  in, which reserved a row whether or not it had anything to say.
+- `SyncContext` now holds **ONE persistent EventSource** for the whole session rather than
+  opening one per sync — so upload/clip-triggered tagging is noticed, and there is one stream
+  where there were two.
+- **`sawTaggingRunRef` is the load-bearing part: only report an ending whose beginning we
+  witnessed.** The server replays `complete` to every new connection, so without this guard a
+  fresh page load fires a toast about work that finished hours ago — the badge's exact bug in a
+  new costume. This is the single thing to preserve if this file is ever refactored.
+- The sync→tag handoff keeps its V48 behaviour, including reporting a batch where *every* photo
+  failed (dead Gemini key) rather than announcing a plain success.
+- Admin-gating confirmed correct, not assumed: `/api/tag-progress` and `/api/tag-progress/stream`
+  are both `@admin_required`, so the old badge (rendered for everyone) was collecting 403s for
+  friends. Friends have the separate `/api/tag-progress/mine`, not wired into this context.
+
+### Verification
+Driven in a real browser against a seeded local server, after reproducing the exact trigger state
+(`{running: false, status: 'complete'}`, confirmed via the API):
+- no badge and **no toast on page load**, despite the server still reporting a finished job
+- live **"Tagging 9/10"** in the Sync button during a run
+- an accurate **"Tagging failed for all 10 photos."** on completion (the harness uses a dummy
+  Gemini key, so all 10 genuinely fail)
+
+36 test scripts pass; clean `npm run build`. Post-deploy, verified against the **shipped bundle**
+rather than a green build: the badge's strings are absent from `index-a7f0c74f.js` and the new
+indicator's are present, and the boot log reports `[schema] OK`.
+
+*Testing note for future sessions:* re-running a sync does NOT re-tag — images already marked
+`failed` aren't re-selected, so the second click reports "Already up to date" and no tagging
+occurs. To exercise the tagging path again, reset `images.tagging_status` to `'pending'` in the
+throwaway DB first. Racing the API to catch a 5s toast is unreliable; screenshot the UI directly.
+
+### Technical Debt / Open Questions
+- Carried forward unchanged: the deck features recovered in V49 part 1 (**PDF export,
+  presentation mode, client feedback, share links**) still have **never run against Ryan's real
+  library** — reachable now, but unverified, not known-good.
+- Carried forward: the **Day 27 crop/Drive root cause** still needs one crop attempt from Ryan to
+  name itself in the toast.
+- Carried forward: CI still only runs against fresh databases.
+- `Home.jsx` is now 1,850+ lines and gained page-level drag handlers this session; the V45 note
+  about it being untouched by the refactor still stands.
+
+### Commits
+`1fe8c3b` (V49 part 2), plus this docs commit. Full session: `049b7e7` (V48), `e83847b` (V49
+schema repair), `c562d5f` (docs), `1fe8c3b`.
+
+### Starting Point for Next Session
+Unchanged from the entry above, and it is the highest-value thing outstanding: **verify the
+recovered deck features against real data** — open a deck, export a PDF, run presentation mode,
+and load a share link on the live site. Then the Day 27 crop diagnosis, which needs one attempt
+from Ryan before any code is written.
