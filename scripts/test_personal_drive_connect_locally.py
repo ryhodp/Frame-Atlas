@@ -28,7 +28,19 @@ def main():
     assert patched != src, "Could not find DB_PATH line to patch"
     open(os.path.join(workdir, "app.py"), "w").write(patched)
 
-    os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "dummy-client-id")
+    # Assigned outright, NOT setdefault: check 1 below asserts this exact
+    # literal, so deferring to an ambient value makes the test pass or fail
+    # depending on the machine it runs on. It did: CI sets
+    # GOOGLE_OAUTH_CLIENT_ID=dummy-ci-client-id at the job level, setdefault
+    # therefore did nothing, and the assertion compared the workflow's value
+    # against this file's — the sole reason the Tests workflow had failed on
+    # every run since it was added (2026-08-10, commit 28fc600). Nothing was
+    # ever wrong with the app. GOOGLE_PICKER_API_KEY below was already
+    # written this way, which is why it never had the problem.
+    #
+    # Rule for this file: if an assertion names a literal, ASSIGN the
+    # variable. setdefault is only safe for values nothing asserts on.
+    os.environ["GOOGLE_OAUTH_CLIENT_ID"] = "dummy-client-id"
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", "dummy")
     os.environ.setdefault("GEMINI_API_KEY", "dummy")
     os.environ["GOOGLE_PICKER_API_KEY"] = "dummy-picker-key"

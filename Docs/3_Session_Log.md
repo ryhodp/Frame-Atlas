@@ -2342,3 +2342,68 @@ Unchanged from the entry above, and it is the highest-value thing outstanding: *
 recovered deck features against real data** — open a deck, export a PDF, run presentation mode,
 and load a share link on the live site. Then the Day 27 crop diagnosis, which needs one attempt
 from Ryan before any code is written.
+
+---
+
+## Day 48 (cont'd) — August 17, 2026 *(CI had never once passed; Day 27 crop closed)*
+
+### "Some jobs were not successful" — the Tests workflow, every run since it was created
+
+Ryan forwarded a GitHub failure email. The workflow had failed on **13 of 13 runs, going back to
+the commit that introduced it** (`28fc600`, 2026-08-10) — so the notification emails had been
+arriving for a week and none of this week's work caused them. **CI has never been green.**
+
+One script of 35 was failing, and the failure was in the test's own setup, not the app:
+
+```python
+os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "dummy-client-id")   # line 30
+...
+assert body["google_client_id"] == "dummy-client-id", body           # line 53
+```
+
+`setdefault` only assigns when the variable is unset. `.github/workflows/tests.yml` sets
+`GOOGLE_OAUTH_CLIENT_ID: dummy-ci-client-id` at the job level, so on CI the setdefault did
+nothing and the assertion compared the workflow's literal against the test file's. On a dev
+machine, where nothing sets that variable, the test assigns its own value and passes.
+
+Same shape as the V49 deck bug earlier in this session: **code whose behaviour depends on the
+environment it happens to run in, green in every place anyone looked.** Third instance in two
+days, which is worth noticing as a pattern rather than three coincidences.
+
+**Fix:** assign the variable outright instead of `setdefault`. `GOOGLE_PICKER_API_KEY` on the
+very next line was already written that way, which is exactly why it never had the problem. The
+rule is written into the file: **if an assertion names a literal, ASSIGN the variable —
+`setdefault` is only safe for values nothing asserts on.** Checked every other
+`test_*_locally.py` for the same setdefault-then-assert-the-literal pattern; this was the only
+one.
+
+**Verified** by reconstructing CI's environment locally rather than pushing and hoping: a clean
+venv built from `backend/requirements.txt` alone, plus the workflow's four env vars. The script
+failed before the change and passes after, and the whole suite passes under that environment —
+and still passes with **no** env vars set at all, so it is no longer environment-dependent in
+either direction.
+
+### Day 27 Crop Failure — CLOSED, not fixed
+Ryan: *"I don't know if we'll be able to check the crop failure from day 27 because that was a
+while ago and crops have been working great recently."* Agreed and closed as unreproducible.
+Nothing is lost by doing so: V45 (`83f390c`) already shipped the instrumentation, so a failure
+now surfaces its own Drive reason in a toast held 30s instead of a bare count. **If it recurs it
+explains itself; there is nothing to proactively investigate.** Removing it from the backlog
+rather than carrying a stale action item nobody can action.
+
+### Technical Debt / Open Questions
+- **Still the top item: the recovered deck features have never run against Ryan's real library.**
+  PDF export, presentation mode, client feedback and share links were unreachable in production
+  from 2026-07-26 until yesterday.
+- CI is expected green from this commit on. **If a future run fails, reproduce it with a clean
+  venv + the workflow's env vars before touching anything** — that method found this in minutes
+  and needs no GitHub log access (the logs API 403s without auth).
+- Carried forward: CI still only exercises fresh, empty databases.
+
+### Commits
+`e4ac7f1` was the last red run; this commit is the fix.
+
+### Starting Point for Next Session
+**Verify the recovered deck features against real data** — open a deck, export a PDF, run
+presentation mode, and load a share link on the live site. That is the only substantive item
+outstanding; the crop investigation is closed and CI should be green.
