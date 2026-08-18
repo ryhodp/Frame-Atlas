@@ -612,6 +612,105 @@ def check_schema(conn):
     return missing
 
 
+def run_self_test(conn):
+    """V50 (Day 48 cont'd): exercises the ACTUAL queries a real request
+    would run, against a disposable "canary" row in the REAL database —
+    not a fresh one built for a test, and not just a check that the right
+    columns exist.
+
+    Why this exists on top of check_schema(): that function would have
+    caught decks.updated_at going missing INSTANTLY. It would NOT catch a
+    different-shaped bug in the same feature — a column that exists but a
+    query built on it is wrong (a backwards WHERE, the wrong table, a typo
+    that still parses). check_schema() asks "does the shape exist?"; this
+    asks "does calling the real function actually work?" — by calling
+    _deck_access() and touch_deck() directly, the same functions every real
+    request calls, not a hand-copied imitation of them that could itself
+    drift out of sync.
+
+    The canary is ALWAYS removed in a finally block, even if a check raises
+    partway through, so a run of this can never leave debris in Ryan's real
+    deck list. Nothing it does is visible to any real user at any point —
+    insert, probe, delete, all within this one function call.
+
+    Skipped (not failed, and not logged as a failure) when:
+      - a required column is already known missing — that's check_schema's
+        finding to report; running these queries against a schema already
+        known broken would just reproduce the same failure with less clarity
+      - there are no users yet (decks.user_id is NOT NULL; a fresh,
+        pre-setup install has nothing to attach a canary deck to)
+
+    Non-fatal by design, matching check_schema(): one broken feature must
+    not take the rest of the app down with it."""
+    c = conn.cursor()
+    results = []  # (check name, ok, detail-or-None)
+
+    user_row = c.execute('SELECT id FROM users LIMIT 1').fetchone()
+    if not user_row:
+        print('[selftest] Skipped — no users yet (fresh install).')
+        return results
+    user_id = user_row[0]
+
+    CANARY_NAME = '__frame_atlas_selftest_canary__'
+    deck_id = None
+    try:
+        c.execute('INSERT INTO decks (user_id, name) VALUES (?, ?)', (user_id, CANARY_NAME))
+        conn.commit()
+        deck_id = c.lastrowid
+
+        # 1. The exact read every "open a deck" request makes.
+        try:
+            deck_row, is_owner = _deck_access(c, deck_id, user_id)
+            ok = deck_row is not None and is_owner
+            results.append(('deck open (_deck_access)', ok, None if ok else 'row not returned as owner'))
+        except Exception as e:
+            results.append(('deck open (_deck_access)', False, str(e)))
+
+        # 2. The exact write every deck mutation makes (rename, add photo,
+        #    reorder, ...) to bump the "last changed" stamp.
+        try:
+            touch_deck(c, deck_id)
+            conn.commit()
+            results.append(('deck touch (touch_deck)', True, None))
+        except Exception as e:
+            results.append(('deck touch (touch_deck)', False, str(e)))
+
+        # 3. The public /api/share/<token> lookup — same query shape,
+        #    exercised the same way get_shared_deck() actually calls it.
+        try:
+            probe_token = 'selftest-canary-token'
+            c.execute('UPDATE decks SET share_token = ? WHERE id = ?', (probe_token, deck_id))
+            conn.commit()
+            shared_row = c.execute(
+                'SELECT id, name, created_at, updated_at, share_token, user_id, feedback_enabled '
+                'FROM decks WHERE share_token = ?', (probe_token,)
+            ).fetchone()
+            ok = shared_row is not None
+            results.append(('public share lookup', ok, None if ok else 'row not found by token'))
+        except Exception as e:
+            results.append(('public share lookup', False, str(e)))
+
+    finally:
+        if deck_id is not None:
+            try:
+                c.execute('DELETE FROM decks WHERE id = ?', (deck_id,))
+                conn.commit()
+            except Exception as e:
+                print(f'[selftest] WARNING: could not remove canary deck {deck_id}: {e}')
+
+    failures = [(name, detail) for name, ok, detail in results if not ok]
+    if failures:
+        print('[selftest] ' + '=' * 62)
+        print(f'[selftest] CRITICAL: {len(failures)} live check(s) FAILED against the real database.')
+        for name, detail in failures:
+            print(f'[selftest]     {name}: {detail}')
+        print('[selftest] The real feature behind each of these will fail for real requests too.')
+        print('[selftest] ' + '=' * 62)
+    else:
+        print(f'[selftest] OK — {len(results)} live check(s) passed against the real database.')
+    return results
+
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -1252,7 +1351,14 @@ def init_db():
     # actually produced the schema the rest of the app is written against.
     # Runs after every migration has had its turn, so anything reported here
     # genuinely did not apply rather than merely not having run yet.
-    check_schema(conn)
+    missing = check_schema(conn)
+
+    # V50: then confirm the QUERIES built on that schema actually work,
+    # against a disposable row in THIS real database. Skipped, not run, when
+    # a column is already known missing — check_schema() already reported
+    # it, and every query here would just fail the same way with less detail.
+    if not missing:
+        run_self_test(conn)
 
     conn.close()
 
