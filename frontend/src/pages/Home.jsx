@@ -395,7 +395,8 @@ export default function Home() {
     return () => window.removeEventListener('mouseup', onUp);
   }, [tagMode]);
 
-  // ── Keyboard shortcut: 'V' toggles Select Mode ────────────────────────────────
+  // ── Keyboard shortcuts: 'V' toggles Select Mode; with photos selected,
+  //    'T' opens the tag drawer, 'C' crops, Delete/Backspace deletes ─────────
   useEffect(() => {
     const onKeyDown = (e) => {
       // Only trigger if user isn't typing in an input
@@ -403,11 +404,29 @@ export default function Home() {
       if (e.key === 'v' || e.key === 'V') {
         e.preventDefault();
         toggleTagMode();
+        return;
+      }
+      // The Crop review modal binds its own 'T' (Tighten) and Backspace/Delete
+      // (Skip photo) shortcuts with no stopPropagation — while it's open these
+      // keys must NOT also reach the page underneath (T would fight over the
+      // tag drawer, Delete would pop a bulk-delete confirm mid-review).
+      if (!tagMode || selectedIds.size === 0 || cropImages) return;
+      if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        openTagDrawer();
+      } else if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        const sel = images.filter(i => selectedIds.has(i.id));
+        if (sel.length) setCropImages(sel);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        handleBulkDeleteClick();
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [tagMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tagMode, selectedIds, images, cropImages]);
 
   const addChip = (tag) => {
     if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }

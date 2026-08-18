@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import ImageDetail from '../components/ImageDetail';
+import SelectModeHeader from '../components/SelectModeHeader';
+import TagModeBar from '../components/TagModeBar';
+import CropModal from '../components/CropModal';
+import { rangeIdsBetween } from '../selectionRange';
 
 // Three personalities in one page. view="favorites" shows starred images
 // (click the star to unstar); view="flagged" shows the flag queue with clear
@@ -42,6 +46,15 @@ export default function CollectionPage({ view }) {
   const [days, setDays] = useState(DEFAULT_RECENT_DAYS);
   const daysDebounce = useRef(null);
 
+  // ── Select Mode: bulk-select images here to tag, crop, or delete — same
+  //    pattern as Home.jsx's grid, minus the drag-rectangle select (these
+  //    views are small, unpaginated lists, so click + shift-click covers it) ──
+  const [tagMode, setTagMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
+  const [cropImages, setCropImages] = useState(null);
+  const rangeAnchorRef = useRef(null); // last tile clicked — the far end of a shift-click range
+
   const load = (daysArg) => {
     setLoading(true);
     const url = view === 'recent' ? `/api/views/recent?days=${daysArg ?? days}` : `/api/views/${view}`;
@@ -56,6 +69,13 @@ export default function CollectionPage({ view }) {
     setSelectedImage(null);
     setConfirmClearAll(false);
     setDays(DEFAULT_RECENT_DAYS);
+    // Switching between Favorites/Flagged/Recent swaps out the whole image
+    // list from under any in-progress selection — drop it rather than carry
+    // stale ids into a different view.
+    setTagMode(false);
+    setSelectedIds(new Set());
+    setTagDrawerOpen(false);
+    setCropImages(null);
     load(DEFAULT_RECENT_DAYS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
@@ -72,6 +92,38 @@ export default function CollectionPage({ view }) {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // ── Keyboard shortcuts: 'V' toggles Select Mode; with photos selected,
+  //    'T' opens the tag drawer, 'C' crops, Delete/Backspace deletes ─────────
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        toggleTagMode();
+        return;
+      }
+      // The Crop review modal binds its own 'T' (Tighten) and Backspace/Delete
+      // (Skip photo) shortcuts with no stopPropagation — while it's open these
+      // keys must NOT also reach the page underneath (T would fight over the
+      // tag drawer, Delete would pop a bulk-delete confirm mid-review).
+      if (!tagMode || selectedIds.size === 0 || cropImages) return;
+      if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        openTagDrawer();
+      } else if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        const sel = images.filter(i => selectedIds.has(i.id));
+        if (sel.length) setCropImages(sel);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        handleBulkDeleteClick();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tagMode, selectedIds, images, cropImages]);
 
   // Detail-panel edits: patch the tile; if the image no longer belongs in
   // this view (unstarred on Favorites, unflagged on Flagged), drop it.
@@ -141,6 +193,94 @@ export default function CollectionPage({ view }) {
     setConfirmClearAll(false);
   };
 
+  // ── Select Mode: toggling in/out, tile clicks ───────────────────────────────
+  const toggleTagMode = () => {
+    setTagMode(v => {
+      const next = !v;
+      if (!next) {
+        setSelectedIds(new Set()); // turning OFF clears selection
+        setTagDrawerOpen(false);
+      }
+      return next;
+    });
+  };
+
+  // Shift-click adds a whole run of photos at once — see selectionRange.js for
+  // why the run follows list order, not screen position. Shift only ever
+  // ADDS; it never unselects.
+  const toggleTileSelection = (id, extendRange) => {
+    if (extendRange) {
+      const rangeIds = rangeIdsBetween(images, rangeAnchorRef.current, id);
+      if (rangeIds.length) {
+        setSelectedIds(prev => new Set([...prev, ...rangeIds]));
+        rangeAnchorRef.current = id;
+        return;
+      }
+    }
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    rangeAnchorRef.current = id;
+  };
+
+  // These views never paginate — `load()` always fetches the whole list in
+  // one shot — so "select all" never needs a server round trip the way
+  // Home.jsx's does.
+  const handleSelectAllResults = () => {
+    setSelectedIds(new Set(images.map(i => i.id)));
+  };
+
+  const openTagDrawer = () => setTagDrawerOpen(true);
+  const closeTagDrawer = () => setTagDrawerOpen(false);
+
+  // Apply a bulk tag/filmography patch to any currently-loaded images
+  const handleBulkTagsChanged = (ids, patchFn) => {
+    const idSet = new Set(ids);
+    setImages(prev => prev.map(img => idSet.has(img.id) ? patchFn(img) : img));
+    setSelectedImage(prev => (prev && idSet.has(prev.id)) ? patchFn(prev) : prev);
+  };
+
+  // Unlike Home.jsx's search results, tags/filmography never change whether a
+  // photo belongs on Favorites/Flagged/Recent, so there's nothing to re-sync.
+  const handleBulkMutated = () => {};
+
+  // A bulk delete already tells us exactly which ids are gone.
+  const handleBulkDeleted = (ids) => {
+    const idSet = new Set(ids);
+    setImages(prev => prev.filter(img => !idSet.has(img.id)));
+    setSelectedImage(prev => (prev && idSet.has(prev.id)) ? null : prev);
+  };
+
+  const handleBulkDeleteClick = () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Delete ${ids.length} photo${ids.length === 1 ? '' : 's'}? They'll be moved to Drive's _Removed folder.`)) return;
+
+    // Optimistically update UI
+    handleBulkDeleted(ids);
+    setSelectedIds(new Set());
+
+    // Delete in the background
+    (async () => {
+      try {
+        const res = await fetch('/api/images/bulk-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_ids: ids })
+        });
+        if (!res.ok) load(); // Re-sync on error
+      } catch (e) {
+        console.error('Bulk delete failed', e);
+        load(); // Re-sync on error
+      }
+    })();
+  };
+
+  const everythingLoaded = true; // these views are never paginated
+  const allLoadedAndSelected = selectedIds.size > 0 && selectedIds.size >= images.length;
+
   // Same masonry layout as Home: shortest column first, no cropping
   const colCount = Math.max(2, Math.min(5, Math.floor((winW - 280) / 320)));
   const columns = (() => {
@@ -158,6 +298,28 @@ export default function CollectionPage({ view }) {
       fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
       color: '#efeadd'
     }}>
+      {/* ── Select Mode header (only when tagMode is on) ──────────────────── */}
+      {tagMode && (
+        <SelectModeHeader
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          onSelectAllResults={handleSelectAllResults}
+          onExit={toggleTagMode}
+          onEditTags={openTagDrawer}
+          onCrop={() => {
+            const sel = images.filter(i => selectedIds.has(i.id));
+            if (sel.length) setCropImages(sel);
+          }}
+          onDelete={handleBulkDeleteClick}
+          selectingAll={false}
+          selectMsg=""
+          totalResults={images.length}
+          images={images}
+          everythingLoaded={everythingLoaded}
+          allLoadedAndSelected={allLoadedAndSelected}
+        />
+      )}
+
       {/* Page header */}
       <div style={{
         padding: '24px 24px 16px',
@@ -264,16 +426,24 @@ export default function CollectionPage({ view }) {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', userSelect: tagMode ? 'none' : 'auto' }}>
           {columns.map((col, ci) => (
             <div key={ci} style={{
               flex: 1, minWidth: 0,
               display: 'flex', flexDirection: 'column', gap: '10px'
             }}>
-              {col.map(img => (
+              {col.map(img => {
+                const isSelected = tagMode && selectedIds.has(img.id);
+                return (
                 <div
                   key={img.id}
-                  onClick={() => setSelectedImage(img)}
+                  onClick={(e) => {
+                    if (tagMode) {
+                      toggleTileSelection(img.id, e.shiftKey);
+                    } else {
+                      setSelectedImage(img);
+                    }
+                  }}
                   style={{
                     position: 'relative',
                     width: '100%',
@@ -282,7 +452,7 @@ export default function CollectionPage({ view }) {
                     borderRadius: '6px',
                     overflow: 'hidden',
                     cursor: 'pointer',
-                    border: '1px solid rgba(255,255,255,0.04)',
+                    border: isSelected ? '2px solid #b8cea1' : '1px solid rgba(255,255,255,0.04)',
                     transition: 'transform 0.15s ease'
                   }}
                   onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.01)'}
@@ -307,8 +477,9 @@ export default function CollectionPage({ view }) {
                     pointerEvents: 'none'
                   }} />
 
-                  {/* View marker — on Favorites, the star itself unfavorites on click */}
-                  {cfg.icon && (view === 'favorites' ? (
+                  {/* View marker — on Favorites, the star itself unfavorites on click
+                      (only outside Select Mode, so it doesn't fight tile-selection clicks) */}
+                  {cfg.icon && (view === 'favorites' && !tagMode ? (
                     <button
                       onClick={(e) => unfavorite(img, e)}
                       title="Unfavorite"
@@ -331,8 +502,8 @@ export default function CollectionPage({ view }) {
                     </span>
                   ))}
 
-                  {/* Flagged view: one-click clear on the tile */}
-                  {view === 'flagged' && (
+                  {/* Flagged view: one-click clear on the tile (hidden in Select Mode) */}
+                  {view === 'flagged' && !tagMode && (
                     <button
                       onClick={(e) => clearFlag(img, e)}
                       title="Clear this flag (keeps the image)"
@@ -349,24 +520,25 @@ export default function CollectionPage({ view }) {
                     </button>
                   )}
 
-                  {img.caption && (
-                    <div style={{
-                      position: 'absolute', left: '9px', bottom: '9px',
-                      right: view === 'flagged' ? '92px' : '9px',
-                      fontSize: '10.5px', lineHeight: '1.35',
-                      color: 'rgba(239,234,221,0.9)',
-                      overflow: 'hidden',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      textShadow: '0 1px 3px rgba(0,0,0,0.6)',
-                      pointerEvents: 'none'
+                  {/* Select Mode selection checkmark — top-left, clear of the
+                      star/flag marker which lives top-right */}
+                  {isSelected && (
+                    <span style={{
+                      position: 'absolute', top: '6px', left: '7px',
+                      width: '18px', height: '18px', borderRadius: '50%',
+                      background: '#b8cea1',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.5)'
                     }}>
-                      {img.caption}
-                    </div>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                        stroke="#243516" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </span>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           ))}
         </div>
@@ -378,6 +550,41 @@ export default function CollectionPage({ view }) {
           onClose={() => setSelectedImage(null)}
           onUpdated={handleImageUpdated}
           onDeleted={handleImageDeleted}
+          onCrop={(img) => setCropImages([img])}
+        />
+      )}
+
+      {/* Crop review modal — auto-detects letterbox/chrome, applies on approve */}
+      {cropImages && (
+        <CropModal
+          images={cropImages}
+          onClose={(started) => {
+            setCropImages(null);
+            if (started && tagMode) toggleTagMode();
+          }}
+          onImageCropped={(id, patch) => handleImageUpdated(id, patch)}
+        />
+      )}
+
+      {/* Select Mode drawer — right sidebar when tagMode is on and drawer is open */}
+      {tagMode && (
+        <TagModeBar
+          images={images}
+          totalResults={images.length}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          onSelectAllResults={handleSelectAllResults}
+          onExit={toggleTagMode}
+          onBulkChanged={handleBulkTagsChanged}
+          onBulkMutated={handleBulkMutated}
+          onBulkDeleted={handleBulkDeleted}
+          onResync={load}
+          onCrop={() => {
+            const sel = images.filter(i => selectedIds.has(i.id));
+            if (sel.length) setCropImages(sel);
+          }}
+          isOpen={tagDrawerOpen}
+          onClose={closeTagDrawer}
         />
       )}
     </div>
