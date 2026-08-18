@@ -2452,3 +2452,79 @@ script failing"). Each was caught only by building the reproduction anyway.
 **Verify the recovered deck features against real data** — open a deck, export a PDF, run
 presentation mode, and load a share link on the live site. That is the only substantive item
 outstanding; the crop investigation is closed and CI is green.
+
+---
+
+## Day 48 (cont'd) — August 17–18, 2026 *(V50 — a mechanism, since a memory note didn't hold)*
+
+### Ryan Asked the Right Question
+After three wrong causes in one session (the deck outage called "unlikely," the SQLite-version
+theory, "one test failing" when there were two), Ryan asked directly: *"so did you fix the issue
+of why you were wrong each time?"* Honest answer: a memory note had been written at 00:08 the
+same night, and the third mistake happened at 11:17 — eleven hours later. **The note did not
+change anything.** Restated as a checkable rule rather than a sentiment (see the `[[diagnose-
+before-fixing]]` memory file), but a note is not a fix; only something that runs is.
+
+### What Got Built: `run_self_test()`
+Asked which gap to close — the app never testing itself against real production data, or the
+test suite only ever using empty databases. Ryan chose the first: **a startup self-test that
+exercises the real code against the real database.**
+
+`check_schema()` (V49, the day before) confirms every expected COLUMN exists. It is structurally
+unable to catch a different bug in the same feature: a column that exists but a query built on it
+is wrong — a backwards WHERE, the wrong table aliased, a name that typos into a different real
+column and still parses. `run_self_test()` closes that gap by calling `_deck_access()` and
+`touch_deck()` — the ACTUAL functions a real request calls, not a hand-copied imitation of them —
+against a disposable "canary" deck row inserted into the real database for exactly this purpose,
+then always removed in a `finally` block regardless of outcome.
+
+Non-fatal and loud, matching `check_schema()`: one broken feature must not take the rest of the
+app down with it. Skipped (not failed) with no users yet, and skipped by `init_db()` when
+`check_schema()` already found a missing column, so the same root cause is never reported twice
+under two different labels.
+
+**Proof it actually catches something `check_schema()` cannot:** `scripts/
+test_self_test_locally.py` (13 checks) deliberately monkeypatches `_deck_access()` to look at the
+wrong deck id — schema fully intact, every column present — and confirms `run_self_test()` reports
+the failure while `check_schema()` would show a clean bill of health. Also caught two real bugs
+while writing the test itself: the test's own connection needs `get_db()`'s Row factory (a raw
+`sqlite3.connect()` makes every dict-style access fail with an unrelated TypeError), and the
+"schema is broken" skip path can't be tested by rebooting into a broken schema, because V49's own
+fix self-heals it before boot finishes — had to exercise `init_db()`'s exact guard logic directly
+instead of trying to catch the database in a state that no longer persists.
+
+**Verified live, not just in a script:** deployed to Railway and confirmed in the actual boot log
+against Ryan's real database — `[schema] OK` followed by `[selftest] OK — 3 live check(s) passed
+against the real database`, with zero canary rows left in the real decks table afterward.
+
+### The Same Two CI Bugs From Earlier Today, Corrected Properly
+(Documented in the prior entry with its own correction appended — cross-referenced here rather
+than repeated.) Both fixes verified live: CI green (`c2cfa7e`, first pass since the workflow's
+creation), Railway deployed the exact commit (`87dcadb`), confirmed via `mcp__railway__get_logs`
+rather than inferred from a green CI badge alone.
+
+### Technical Debt / Open Questions
+- `run_self_test()` is scoped to decks only — the exact feature that broke. Not a general
+  self-test framework; extending it to other features (search, tagging, Drive sync) is separate
+  work, not something to assume is already covered.
+- Still the top outstanding item, unchanged for the third entry running: **the recovered deck
+  features have never run against Ryan's real library.** No mechanism substitutes for him actually
+  opening a PDF export or a presentation.
+- `check_schema()` and `run_self_test()` together cover schema-shape and one feature's real
+  queries. They do not and cannot cover UI-only bugs like the stuck gear badge (V49 part 2) — that
+  class of bug has no mechanism proposed for it in this session, and Ryan should know that gap is
+  still there, found only by looking.
+- Noticed but not investigated: a modified, uncommitted `frontend/src/pages/CollectionPage.jsx`
+  was present in the working tree at session end (Select Mode wired into Favorites/Flagged/Recent
+  — a complete, functional-looking feature) that this session did not write. Several other
+  claude-code processes were running concurrently against this same directory during the
+  session. Left untouched deliberately — not this session's work to commit, stash, or discard.
+
+### Commits
+`87dcadb` (V50), plus this docs commit.
+
+### Starting Point for Next Session
+Unchanged: **verify the recovered deck features against real data.** Additionally: confirm with
+Ryan what the uncommitted `CollectionPage.jsx` changes are (a parallel session's in-progress
+Select-Mode-on-Favorites/Flagged/Recent feature, by the look of it) before doing anything with
+that file.
