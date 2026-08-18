@@ -920,7 +920,7 @@ export default function Home() {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: '#0a0a0b',
+        background: '#1c1e22',
         color: '#efeadd',
         fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
         position: 'relative'
