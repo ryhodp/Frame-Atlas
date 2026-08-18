@@ -4,6 +4,7 @@ import SelectModeHeader from '../components/SelectModeHeader';
 import TagModeBar from '../components/TagModeBar';
 import CropModal from '../components/CropModal';
 import { rangeIdsBetween } from '../selectionRange';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 // Three personalities in one page. view="favorites" shows starred images
 // (click the star to unstar); view="flagged" shows the flag queue with clear
@@ -37,6 +38,7 @@ const DEFAULT_RECENT_DAYS = 7;
 
 export default function CollectionPage({ view }) {
   const cfg = VIEW_CONFIG[view];
+  const isMobile = useIsMobile();
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
@@ -173,6 +175,20 @@ export default function CollectionPage({ view }) {
       }
     } catch (err) {
       console.error('Unfavorite failed', err);
+    }
+  };
+
+  // Recent/Flagged: quick-favorite straight from the tile, same star Home.jsx's
+  // grid has. Favorites view doesn't need this — its own star already toggles
+  // (and removes the image on unstar) via `unfavorite` above.
+  const toggleFavorite = async (img, e) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/images/${img.id}/favorite`, { method: 'POST' });
+      const data = await res.json();
+      handleImageUpdated(img.id, { is_favorite: data.is_favorite });
+    } catch (err) {
+      console.error('Toggle favorite failed', err);
     }
   };
 
@@ -455,8 +471,16 @@ export default function CollectionPage({ view }) {
                     border: isSelected ? '2px solid #b8cea1' : '1px solid rgba(255,255,255,0.04)',
                     transition: 'transform 0.15s ease'
                   }}
-                  onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.01)'}
-                  onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.transform = 'scale(1.01)';
+                    const star = e.currentTarget.querySelector('[data-quickfav]');
+                    if (star && !img.is_favorite) star.style.opacity = '1';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.transform = 'scale(1)';
+                    const star = e.currentTarget.querySelector('[data-quickfav]');
+                    if (star && !img.is_favorite) star.style.opacity = '0';
+                  }}
                 >
                   {img.thumbnail && (
                     <img
@@ -476,6 +500,42 @@ export default function CollectionPage({ view }) {
                     background: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.7) 100%)',
                     pointerEvents: 'none'
                   }} />
+
+                  {/* Quick-favorite star — Recent/Flagged only (Favorites view's own
+                      star below already does this, plus unstars on click). Hidden
+                      entirely in Select Mode so it doesn't fight tile-selection
+                      clicks — same rule Home.jsx's grid follows. Flagged view's own
+                      ⚑ marker permanently occupies top-right on every tile there
+                      (not just an occasional favorited+flagged overlap), so the
+                      star goes top-LEFT there instead of fighting it. */}
+                  {view !== 'favorites' && !tagMode && (
+                    <button
+                      data-quickfav
+                      onClick={(e) => toggleFavorite(img, e)}
+                      title={img.is_favorite ? 'Unfavorite' : 'Favorite'}
+                      style={{
+                        position: 'absolute', top: '0px',
+                        [view === 'flagged' ? 'left' : 'right']: '0px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        padding: isMobile ? '11px' : '4px', lineHeight: 1, zIndex: 2,
+                        fontSize: img.is_favorite ? '13px' : '14px',
+                        color: img.is_favorite ? '#dcbd76' : 'rgba(239,234,221,0.65)',
+                        opacity: img.is_favorite ? 1 : (isMobile ? 0.55 : 0),
+                        transition: 'opacity 120ms ease',
+                        filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                      }}
+                    >★</button>
+                  )}
+                  {view !== 'favorites' && tagMode && img.is_favorite && (
+                    <span style={{
+                      position: 'absolute', top: '6px',
+                      // Flagged view's own ⚑ marker already sits at right:7 —
+                      // shift left of it instead of stacking on top.
+                      right: view === 'flagged' ? '26px' : '7px',
+                      color: '#dcbd76', fontSize: '13px',
+                      filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                    }}>★</span>
+                  )}
 
                   {/* View marker — on Favorites, the star itself unfavorites on click
                       (only outside Select Mode, so it doesn't fight tile-selection clicks) */}
