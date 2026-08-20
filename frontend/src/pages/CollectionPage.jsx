@@ -5,11 +5,12 @@ import TagModeBar from '../components/TagModeBar';
 import CropModal from '../components/CropModal';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { PAGE_BG } from '../theme';
 
-// Three personalities in one page. view="favorites" shows starred images
-// (click the star to unstar); view="flagged" shows the flag queue with clear
-// buttons (clearing only removes the marker — nothing here ever deletes an
-// image); view="recent" shows images added within a slider-adjustable window.
+// Two personalities in one page. view="favorites" shows starred images
+// (click the star to unstar); view="recent" shows images added within a
+// slider-adjustable window. (A third, view="flagged", was removed in V55 —
+// see the session log if this file's history is ever needed.)
 const VIEW_CONFIG = {
   favorites: {
     title: 'Favorites',
@@ -17,13 +18,6 @@ const VIEW_CONFIG = {
     icon: '★',
     accent: '#dcbd76',
     emptyText: 'No favorites yet — open any image and hit ☆ Favorite.',
-  },
-  flagged: {
-    title: 'Flagged',
-    subtitle: 'Images you’ve flagged for review. Clearing removes only the flag — the image stays in your library.',
-    icon: '⚑',
-    accent: '#cf7152',
-    emptyText: 'Nothing flagged — the queue is clear.',
   },
   recent: {
     title: 'Recently Added',
@@ -43,8 +37,6 @@ export default function CollectionPage({ view }) {
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
   const [winW, setWinW] = useState(window.innerWidth);
-  const [confirmClearAll, setConfirmClearAll] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const [days, setDays] = useState(DEFAULT_RECENT_DAYS);
   const daysDebounce = useRef(null);
 
@@ -69,11 +61,10 @@ export default function CollectionPage({ view }) {
 
   useEffect(() => {
     setSelectedImage(null);
-    setConfirmClearAll(false);
     setDays(DEFAULT_RECENT_DAYS);
-    // Switching between Favorites/Flagged/Recent swaps out the whole image
-    // list from under any in-progress selection — drop it rather than carry
-    // stale ids into a different view.
+    // Switching between Favorites/Recent swaps out the whole image list from
+    // under any in-progress selection — drop it rather than carry stale ids
+    // into a different view.
     setTagMode(false);
     setSelectedIds(new Set());
     setTagDrawerOpen(false);
@@ -128,12 +119,11 @@ export default function CollectionPage({ view }) {
   }, [tagMode, selectedIds, images, cropImages]);
 
   // Detail-panel edits: patch the tile; if the image no longer belongs in
-  // this view (unstarred on Favorites, unflagged on Flagged), drop it.
-  // Recent isn't affected by favorite/flag edits, so nothing gets dropped there.
+  // this view (unstarred on Favorites), drop it. Recent isn't affected by
+  // favorite edits, so nothing gets dropped there.
   const handleImageUpdated = (id, patch) => {
     const stillBelongs = (img) => {
       if (view === 'favorites') return !!img.is_favorite;
-      if (view === 'flagged') return !!img.is_flagged;
       return true;
     };
     setImages(prev => prev
@@ -148,22 +138,7 @@ export default function CollectionPage({ view }) {
     setSelectedImage(prev => (prev && prev.id === id) ? null : prev);
   };
 
-  // Flagged-only: clear one flag straight from the tile
-  const clearFlag = async (img, e) => {
-    e.stopPropagation();
-    try {
-      const res = await fetch(`/api/images/${img.id}/flag`, { method: 'POST' });
-      const data = await res.json();
-      if (!data.is_flagged) {
-        setImages(prev => prev.filter(i => i.id !== img.id));
-        setSelectedImage(prev => (prev && prev.id === img.id) ? null : prev);
-      }
-    } catch (err) {
-      console.error('Clear flag failed', err);
-    }
-  };
-
-  // Favorites-only: unstar one straight from the tile, same instant pattern as clearFlag
+  // Favorites-only: unstar one straight from the tile, same instant pattern
   const unfavorite = async (img, e) => {
     e.stopPropagation();
     try {
@@ -178,8 +153,8 @@ export default function CollectionPage({ view }) {
     }
   };
 
-  // Recent/Flagged: quick-favorite straight from the tile, same star Home.jsx's
-  // grid has. Favorites view doesn't need this — its own star already toggles
+  // Recent: quick-favorite straight from the tile, same star Home.jsx's grid
+  // has. Favorites view doesn't need this — its own star already toggles
   // (and removes the image on unstar) via `unfavorite` above.
   const toggleFavorite = async (img, e) => {
     e.stopPropagation();
@@ -190,23 +165,6 @@ export default function CollectionPage({ view }) {
     } catch (err) {
       console.error('Toggle favorite failed', err);
     }
-  };
-
-  // Flagged-only: clear the whole queue in one call
-  const clearAllFlags = async () => {
-    setClearing(true);
-    try {
-      const res = await fetch('/api/flags/clear-all', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setImages([]);
-        setSelectedImage(null);
-      }
-    } catch (err) {
-      console.error('Clear all flags failed', err);
-    }
-    setClearing(false);
-    setConfirmClearAll(false);
   };
 
   // ── Select Mode: toggling in/out, tile clicks ───────────────────────────────
@@ -259,7 +217,7 @@ export default function CollectionPage({ view }) {
   };
 
   // Unlike Home.jsx's search results, tags/filmography never change whether a
-  // photo belongs on Favorites/Flagged/Recent, so there's nothing to re-sync.
+  // photo belongs on Favorites/Recent, so there's nothing to re-sync.
   const handleBulkMutated = () => {};
 
   // A bulk delete already tells us exactly which ids are gone.
@@ -311,6 +269,8 @@ export default function CollectionPage({ view }) {
 
   return (
     <div style={{
+      background: PAGE_BG,
+      minHeight: '100%',
       fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
       color: '#efeadd'
     }}>
@@ -378,50 +338,6 @@ export default function CollectionPage({ view }) {
           </div>
         )}
 
-        {/* Clear-all — flagged view only, with an inline confirm step */}
-        {view === 'flagged' && images.length > 0 && (
-          !confirmClearAll ? (
-            <button
-              onClick={() => setConfirmClearAll(true)}
-              style={{
-                background: 'none', border: '1px solid rgba(207,113,82,0.35)',
-                color: '#cf7152', borderRadius: '7px', padding: '8px 14px',
-                cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', flexShrink: 0
-              }}
-            >
-              Clear all flags
-            </button>
-          ) : (
-            <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
-              <span style={{ fontSize: '11.5px', color: '#cf7152' }}>
-                Unflag all {images.length}? Images stay in the library.
-              </span>
-              <button
-                onClick={clearAllFlags}
-                disabled={clearing}
-                style={{
-                  background: 'rgba(207,113,82,0.18)', border: '1px solid rgba(207,113,82,0.6)',
-                  color: '#cf7152', borderRadius: '6px', padding: '7px 12px',
-                  cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
-                  opacity: clearing ? 0.6 : 1
-                }}
-              >
-                {clearing ? 'Clearing…' : 'Yes, clear all'}
-              </button>
-              <button
-                onClick={() => setConfirmClearAll(false)}
-                disabled={clearing}
-                style={{
-                  background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-                  color: '#9c988d', borderRadius: '6px', padding: '7px 12px',
-                  cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
-                }}
-              >
-                Cancel
-              </button>
-            </span>
-          )
-        )}
       </div>
 
       {/* Grid */}
@@ -501,21 +417,17 @@ export default function CollectionPage({ view }) {
                     pointerEvents: 'none'
                   }} />
 
-                  {/* Quick-favorite star — Recent/Flagged only (Favorites view's own
-                      star below already does this, plus unstars on click). Hidden
+                  {/* Quick-favorite star — Recent only (Favorites view's own star
+                      below already does this, plus unstars on click). Hidden
                       entirely in Select Mode so it doesn't fight tile-selection
-                      clicks — same rule Home.jsx's grid follows. Flagged view's own
-                      ⚑ marker permanently occupies top-right on every tile there
-                      (not just an occasional favorited+flagged overlap), so the
-                      star goes top-LEFT there instead of fighting it. */}
+                      clicks — same rule Home.jsx's grid follows. */}
                   {view !== 'favorites' && !tagMode && (
                     <button
                       data-quickfav
                       onClick={(e) => toggleFavorite(img, e)}
                       title={img.is_favorite ? 'Unfavorite' : 'Favorite'}
                       style={{
-                        position: 'absolute', top: '0px',
-                        [view === 'flagged' ? 'left' : 'right']: '0px',
+                        position: 'absolute', top: '0px', right: '0px',
                         background: 'none', border: 'none', cursor: 'pointer',
                         padding: isMobile ? '11px' : '4px', lineHeight: 1, zIndex: 2,
                         fontSize: img.is_favorite ? '13px' : '14px',
@@ -528,10 +440,7 @@ export default function CollectionPage({ view }) {
                   )}
                   {view !== 'favorites' && tagMode && img.is_favorite && (
                     <span style={{
-                      position: 'absolute', top: '6px',
-                      // Flagged view's own ⚑ marker already sits at right:7 —
-                      // shift left of it instead of stacking on top.
-                      right: view === 'flagged' ? '26px' : '7px',
+                      position: 'absolute', top: '6px', right: '7px',
                       color: '#dcbd76', fontSize: '13px',
                       filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
                     }}>★</span>
@@ -562,26 +471,8 @@ export default function CollectionPage({ view }) {
                     </span>
                   ))}
 
-                  {/* Flagged view: one-click clear on the tile (hidden in Select Mode) */}
-                  {view === 'flagged' && !tagMode && (
-                    <button
-                      onClick={(e) => clearFlag(img, e)}
-                      title="Clear this flag (keeps the image)"
-                      style={{
-                        position: 'absolute', bottom: '8px', right: '8px',
-                        background: 'rgba(10,10,11,0.75)',
-                        border: '1px solid rgba(207,113,82,0.5)',
-                        color: '#cf7152', borderRadius: '6px',
-                        padding: '4px 10px', fontSize: '11px',
-                        cursor: 'pointer', fontFamily: 'inherit'
-                      }}
-                    >
-                      Clear flag
-                    </button>
-                  )}
-
                   {/* Select Mode selection checkmark — top-left, clear of the
-                      star/flag marker which lives top-right */}
+                      star marker which lives top-right */}
                   {isSelected && (
                     <span style={{
                       position: 'absolute', top: '6px', left: '7px',

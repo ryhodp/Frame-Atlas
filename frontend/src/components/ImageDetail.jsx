@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import CompositionOverlay, { OVERLAY_MODES, OVERLAY_LABELS, OVERLAY_ROTATABLE } from './CompositionOverlay';
 import { fetchDecks, addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
+import { PAGE_BG } from '../theme';
 
 const CAT_LABELS = {
   'mood': 'Mood', 'lighting_quality': 'Lighting',
@@ -33,7 +34,6 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
 
   const [tags, setTags] = useState(image?.tags || []);
   const [isFavorite, setIsFavorite] = useState(!!image?.is_favorite);
-  const [isFlagged, setIsFlagged] = useState(!!image?.is_flagged);
 
   const [editingTags, setEditingTags] = useState(false);
   const [newTagCat, setNewTagCat] = useState(''); // blank = misc, matches the backend default
@@ -80,7 +80,6 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     setFullError(false);
     setTags(image.tags || []);
     setIsFavorite(!!image.is_favorite);
-    setIsFlagged(!!image.is_flagged);
     setEditingTags(false);
     setFilm(image.filmography || null);
     setEditingFilm(false);
@@ -189,19 +188,6 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
       onUpdated?.(image.id, { is_favorite: data.is_favorite });
     } catch {
       setIsFavorite(!next);
-    }
-  };
-
-  const toggleFlag = async () => {
-    const next = !isFlagged;
-    setIsFlagged(next);
-    try {
-      const res = await fetch(`/api/images/${image.id}/flag`, { method: 'POST' });
-      const data = await res.json();
-      setIsFlagged(!!data.is_flagged);
-      onUpdated?.(image.id, { is_flagged: data.is_flagged });
-    } catch {
-      setIsFlagged(!next);
     }
   };
 
@@ -326,7 +312,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         style={{
           position: 'fixed', right: 0, top: 0, bottom: 0,
           width: isMobile ? '100vw' : 'clamp(360px, 45%, 600px)',
-          background: '#0a0a0b',
+          background: PAGE_BG,
           borderLeft: '1px solid rgba(255,255,255,0.065)',
           zIndex: 1000,
           display: 'flex', flexDirection: 'column',
@@ -368,16 +354,6 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             }}
           >
             {isFavorite ? '★ Favorited' : '☆ Favorite'}
-          </button>
-          <button
-            onClick={toggleFlag}
-            style={{
-              ...footBtn('#cf7152'),
-              background: isFlagged ? 'rgba(207,113,82,0.18)' : 'none',
-              borderColor: isFlagged ? 'rgba(207,113,82,0.6)' : 'rgba(207,113,82,0.3)'
-            }}
-          >
-            ⚑ {isFlagged ? 'Flagged' : 'Flag'}
           </button>
 
           {/* Composition-guide overlay: icon button opens a popover of modes;

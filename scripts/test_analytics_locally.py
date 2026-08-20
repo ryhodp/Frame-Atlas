@@ -5,9 +5,12 @@ Same trick as test_storyboard_locally.py: boots a patched copy of the server
 against a throwaway database, seeds it with a handful of SYNTHETIC images
 (generated locally with Pillow — the whole app has been login-gated since
 Day 14, so the old trick of pulling real images from the live site no longer
-works without credentials), then exercises /api/analytics, /api/views/*,
-/api/flags/clear-all, and confirms the debug endpoints are gone (and
-/api/models is not).
+works without credentials), then exercises /api/analytics, /api/views/*, and
+confirms the debug endpoints are gone (and /api/models is not).
+
+(V55: the Flagged view/clear-all checks that used to live here were removed
+along with the feature itself — see the session log. This file otherwise
+covers exactly what it always did.)
 
 Usage (from the frame-atlas folder):
     scripts/.venv/bin/python scripts/test_analytics_locally.py
@@ -64,14 +67,11 @@ def main():
 
     # Curate the test state:
     #   ids[0] — favorite, tagged, added 10 days ago (too old for "recent")
-    #   ids[1] — favorite + flagged, tagged
-    #   ids[2] — flagged
-    #   ids[3], ids[4] — plain recent images
-    # Day 14: favorites/flags are per-user tables now, not columns on images.
+    #   ids[1] — favorite, tagged
+    #   ids[2], ids[3], ids[4] — plain recent images
+    # Day 14: favorites are a per-user table now, not a column on images.
     for image_id in (ids[0], ids[1]):
         c.execute("INSERT INTO user_favorites (user_id, image_id) VALUES (1, ?)", (image_id,))
-    for image_id in (ids[1], ids[2]):
-        c.execute("INSERT INTO user_flags (user_id, image_id) VALUES (1, ?)", (image_id,))
     c.execute("UPDATE images SET date_added = datetime('now', '-10 days') WHERE id = ?", (ids[0],))
     for image_id, cat, val in [
         (ids[0], "mood", "lonely"),
@@ -85,7 +85,7 @@ def main():
                   (image_id, cat, val))
     conn.commit()
     conn.close()
-    print(f"Inserted {len(ids)} synthetic images with curated favorites/flags/tags: {ids}")
+    print(f"Inserted {len(ids)} synthetic images with curated favorites/tags: {ids}")
 
     client = mod.app.test_client()
     setup_r = client.post('/api/setup', json={'email': 'test@test.com', 'password': 'testpass123'})
@@ -104,13 +104,7 @@ def main():
     assert any(t["value"] == "tense" for t in tagged["tags"]), tagged["tags"]
     print("1. /api/views/favorites: right images, same rich payload as /api/search.")
 
-    # 2. Flagged view
-    r = client.get("/api/views/flagged")
-    flg = r.get_json()
-    assert flg["total"] == 2 and {img["id"] for img in flg["images"]} == {ids[1], ids[2]}, flg
-    print("2. /api/views/flagged: right images.")
-
-    # 3. Recent view: 7-day window excludes the 10-day-old image; limit works
+    # 2. Recent view: 7-day window excludes the 10-day-old image; limit works
     r = client.get("/api/views/recent?days=7")
     rec = r.get_json()
     rec_ids = {img["id"] for img in rec["images"]}
@@ -120,17 +114,17 @@ def main():
     r = client.get("/api/views/recent?days=7&limit=2")
     rec = r.get_json()
     assert len(rec["images"]) == 2 and rec["total"] == 4, "limit caps images, total stays honest"
-    print("3. /api/views/recent: 7-day window excludes old image, days/limit params work.")
+    print("2. /api/views/recent: 7-day window excludes old image, days/limit params work.")
 
-    # 4. Unknown view 404s; junk params fall back to defaults instead of crashing
+    # 3. Unknown view 404s; junk params fall back to defaults instead of crashing
     assert client.get("/api/views/nonsense").status_code == 404
     assert client.get("/api/views/recent?days=potato&limit=banana").status_code == 200
-    print("4. Unknown view 404s; junk query params don't crash.")
+    print("3. Unknown view 404s; junk query params don't crash.")
 
-    # 5. Analytics rollups
+    # 4. Analytics rollups
     a = client.get("/api/analytics").get_json()
     t = a["totals"]
-    assert t["images"] == 5 and t["favorites"] == 2 and t["flagged"] == 2, t
+    assert t["images"] == 5 and t["favorites"] == 2, t
     assert t["added_last_7_days"] == 4 and t["tags"] == 6 and t["decks"] == 0, t
     assert t["distinct_tags"] == 5, t  # lonely, tense, film-still, interior, night
     # "lonely" used twice -> top of the mood category
@@ -142,32 +136,21 @@ def main():
     growth = a["growth"]
     assert growth[-1]["total"] == 5 and sum(g["added"] for g in growth) == 5, growth
     assert [g["month"] for g in growth] == sorted(g["month"] for g in growth)
-    print("5. /api/analytics: totals, category counts, and cumulative growth all correct.")
+    print("4. /api/analytics: totals, category counts, and cumulative growth all correct.")
 
-    # 6. Clear-all flags: clears both, second call is a harmless no-op
-    r = client.post("/api/flags/clear-all")
-    assert r.get_json() == {"success": True, "cleared": 2}, r.get_json()
-    assert client.get("/api/views/flagged").get_json()["total"] == 0
-    assert client.post("/api/flags/clear-all").get_json()["cleared"] == 0
-    # Images were NOT deleted — favorites and library untouched
-    assert client.get("/api/views/favorites").get_json()["total"] == 2
-    a = client.get("/api/analytics").get_json()
-    assert a["totals"]["images"] == 5 and a["totals"]["flagged"] == 0
-    print("6. /api/flags/clear-all: unflags everything, deletes nothing, idempotent.")
-
-    # 7. Debug endpoints are gone; /api/models survives (Day 13 decision)
+    # 5. Debug endpoints are gone; /api/models survives (Day 13 decision)
     assert client.get("/api/debug").status_code == 404
     assert client.get("/api/debug/failed-images").status_code == 404
     assert client.get("/api/models").status_code != 404, "/api/models must stay routed"
-    print("7. /api/debug* removed; /api/models still routed (Gemini diagnostic).")
+    print("5. /api/debug* removed; /api/models still routed (Gemini diagnostic).")
 
-    # 8. Search still works after the hydration refactor
+    # 6. Search still works after the hydration refactor
     s = client.get("/api/search?per=10").get_json()
     assert s["total"] == 5 and len(s["images"]) == 5
     assert any(t["value"] == "lonely" for img in s["images"] for t in img["tags"])
     s = client.get(f"/api/search?chips=lonely,tense").get_json()
     assert s["total"] == 1 and s["images"][0]["id"] == ids[1], "AND-filter regression"
-    print("8. /api/search unaffected by the shared-hydration refactor (incl. AND filters).")
+    print("6. /api/search unaffected by the shared-hydration refactor (incl. AND filters).")
 
     print("\nAll analytics/utility-view checks passed. ✅")
 

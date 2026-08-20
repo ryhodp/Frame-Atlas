@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { PAGE_BG } from '../theme';
 
 // ── Full-screen storyboard for one scene (or Unsorted) ────────────────────────
 // Frames appear in sequence order with a number badge and an always-visible
@@ -84,7 +85,7 @@ export default function StoryboardView({ deckId, sceneId, title, images, onClose
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000,
-      background: '#0a0a0b',
+      background: PAGE_BG,
       display: 'flex', flexDirection: 'column'
     }}>
       {/* Header bar */}

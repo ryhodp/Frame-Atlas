@@ -22,6 +22,7 @@ import InviteAcceptPage from './pages/InviteAcceptPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import { ToastProvider } from './ToastContext'
 import { SyncProvider } from './SyncContext'
+import { PAGE_BG } from './theme'
 import './App.css'
 
 // Inner shell so we can read the current route (useLocation only works inside
@@ -72,7 +73,7 @@ function Shell() {
 
   if (backendHealthy === null || needsSetup === null || authLoading) {
     return (
-      <div style={{ minHeight: '100vh', background: '#0a0a0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ minHeight: '100vh', background: PAGE_BG, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <p style={{ textAlign: 'center', color: '#8e9099' }}>Connecting to backend...</p>
       </div>
     )
@@ -82,7 +83,7 @@ function Shell() {
   // say so plainly instead of showing a login form that can't possibly work.
   if (!backendHealthy && !offline) {
     return (
-      <div style={{ minHeight: '100vh', background: '#0a0a0b', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+      <div style={{ minHeight: '100vh', background: PAGE_BG, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
         <div style={{ textAlign: 'center', maxWidth: '380px' }}>
           <p style={{ color: '#e2e2e6', fontSize: '15px', marginBottom: '8px' }}>Can't reach Frame Atlas</p>
           <p style={{ color: '#8e9099', fontSize: '13px', lineHeight: 1.6 }}>
@@ -112,7 +113,7 @@ function Shell() {
   return (
     <div style={{
       display: 'flex', flexDirection: isMobile ? 'column' : 'row',
-      background: '#0a0a0b', color: '#efeadd',
+      background: PAGE_BG, color: '#efeadd',
       height: '100vh', overflow: 'hidden',
     }}>
       {isMobile && <MobileHeader onMenuClick={() => setMobileNavOpen(true)} />}
@@ -148,7 +149,6 @@ function Shell() {
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/favorites" element={<CollectionPage key="favorites" view="favorites" />} />
-          <Route path="/flagged" element={<CollectionPage key="flagged" view="flagged" />} />
           <Route path="/recent" element={<CollectionPage key="recent" view="recent" />} />
           <Route path="/invites" element={user.role === 'admin' ? <AdminInvitesPage /> : <Navigate to="/" replace />} />
           <Route path="/account" element={<AccountPage />} />

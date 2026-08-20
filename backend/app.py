@@ -1511,18 +1511,21 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-def fav_flag_cols(user_id, alias='images'):
-    """SQL fragment computing is_favorite/is_flagged for one user against the
-    per-user user_favorites/user_flags tables — slots into any `images` SELECT
-    in place of the old boolean columns. user_id is always an int pulled from
-    the session (never request input), so inlining it directly is safe and
-    avoids threading extra positional params through call sites that already
-    build dynamic WHERE clauses."""
+def favorite_col(user_id, alias='images'):
+    """SQL fragment computing is_favorite for one user against the per-user
+    user_favorites table — slots into any `images` SELECT in place of the old
+    boolean column. user_id is always an int pulled from the session (never
+    request input), so inlining it directly is safe and avoids threading an
+    extra positional param through call sites that already build dynamic
+    WHERE clauses.
+
+    (V55: used to also compute is_flagged against user_flags for the since-
+    removed Flagged feature. That table and the legacy is_flagged column on
+    `images` deliberately still exist — see the removal note above
+    get_utility_view() — but nothing queries or serves is_flagged anymore, so
+    this function only computes the one column it's now named for.)"""
     uid = int(user_id)
-    return (
-        f"EXISTS(SELECT 1 FROM user_favorites uf WHERE uf.user_id = {uid} AND uf.image_id = {alias}.id) AS is_favorite, "
-        f"EXISTS(SELECT 1 FROM user_flags fl WHERE fl.user_id = {uid} AND fl.image_id = {alias}.id) AS is_flagged"
-    )
+    return f"EXISTS(SELECT 1 FROM user_favorites uf WHERE uf.user_id = {uid} AND uf.image_id = {alias}.id) AS is_favorite"
 
 # ── V44 (Day 26): LOGIN THROTTLING ──────────────────────────────────────────
 # Before this there was no limit at all: passwords could be guessed as fast as
@@ -2510,7 +2513,7 @@ def start_backup_scheduler():
 
 def build_image_dict(row, tags, palette, filmography, public=False):
     """Turns one `images` row (must include id, filename, thumbnail_blob,
-    caption, aspect_ratio, is_favorite, is_flagged, md5_checksum, and — V39 —
+    caption, aspect_ratio, is_favorite, md5_checksum, and — V39 —
     camera_rig, lens, lens_filter, stop, onset_notes) into the JSON shape
     used by /api/search, /api/images/<id>/similar, and the decks endpoints.
     Keep everything on this single helper so image objects can never drift
@@ -2547,7 +2550,6 @@ def build_image_dict(row, tags, palette, filmography, public=False):
         'ar_label': normalize_ar_label(ar_float),
         'ar_float': round(ar_float, 4),
         'is_favorite': bool(row['is_favorite']),
-        'is_flagged': bool(row['is_flagged']),
         'tags': tags,
         'palette': palette,
         'filmography': filmography,
@@ -3769,7 +3771,7 @@ def search():
 
     rows = c.execute(f'''
         SELECT id, filename, thumbnail_blob, caption, aspect_ratio, md5_checksum,
-               camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(uid)}
+               camera_rig, lens, lens_filter, stop, onset_notes, {favorite_col(uid)}
         FROM images {where}
         ORDER BY {order_by} LIMIT ? OFFSET ?
     ''', params + order_params + [per, page * per]).fetchall()
@@ -3860,7 +3862,7 @@ def get_images():
     conn = get_db()
     c = conn.cursor()
     c.execute(f'''
-        SELECT id, filename, thumbnail_blob, aspect_ratio, date_added, {fav_flag_cols(user_id)}
+        SELECT id, filename, thumbnail_blob, aspect_ratio, date_added, {favorite_col(user_id)}
         FROM images WHERE user_id = ? ORDER BY date_added DESC
     ''', (user_id,))
     images = []
@@ -3870,7 +3872,7 @@ def get_images():
             'id': row[0], 'filename': row[1],
             'thumbnail': f'data:image/jpeg;base64,{thumb_b64}',
             'aspect_ratio': row[3], 'date_added': row[4],
-            'is_favorite': row[5], 'is_flagged': row[6]
+            'is_favorite': row[5]
         })
     conn.close()
     return jsonify({'images': images})
@@ -3991,7 +3993,7 @@ def get_similar_images(image_id):
         SELECT e.image_id, e.clip_vector,
                i.id, i.filename, i.thumbnail_blob, i.caption, i.aspect_ratio, i.md5_checksum,
                i.camera_rig, i.lens, i.lens_filter, i.stop, i.onset_notes,
-               {fav_flag_cols(uid, alias='i')}
+               {favorite_col(uid, alias='i')}
         FROM embeddings e
         JOIN images i ON i.id = e.image_id
         WHERE e.image_id != ? AND e.clip_vector IS NOT NULL AND i.user_id = ?
@@ -4462,12 +4464,14 @@ def clip_image():
 
 
 # ============================================================================
-# DAY 8 (V7): IMAGE ACTIONS — favorite, flag, tags, download, delete
+# DAY 8 (V7): IMAGE ACTIONS — favorite, tags, download, delete
 # ============================================================================
 
 def _toggle_membership(table, user_id, image_id):
-    """Shared on/off toggle for user_favorites/user_flags: insert if absent,
-    delete if present. Returns the new state (True = now in the table)."""
+    """Shared on/off toggle for a user's membership table (currently just
+    user_favorites — a 'flag' feature using this on user_flags was removed
+    in V55): insert if absent, delete if present. Returns the new state
+    (True = now in the table)."""
     conn = get_db()
     c = conn.cursor()
     if not c.execute('SELECT 1 FROM images WHERE id = ? AND user_id = ?', (image_id, user_id)).fetchone():
@@ -4492,13 +4496,6 @@ def toggle_favorite(image_id):
     if result is None:
         return jsonify({'error': 'Image not found'}), 404
     return jsonify({'success': True, 'is_favorite': result})
-
-@app.route('/api/images/<int:image_id>/flag', methods=['POST'])
-def toggle_flag(image_id):
-    result = _toggle_membership('user_flags', session['user_id'], image_id)
-    if result is None:
-        return jsonify({'error': 'Image not found'}), 404
-    return jsonify({'success': True, 'is_flagged': result})
 
 @app.route('/api/images/<int:image_id>/tags', methods=['POST', 'DELETE'])
 @admin_required
@@ -5557,14 +5554,14 @@ def _fetch_image_dict(c, image_id, owner_user_id, public=False):
     through build_image_dict(). Used by the decks endpoints, which need the
     same image JSON shape as /api/search and /api/images/<id>/similar but
     are fetching images one at a time (via deck_images), not in bulk.
-    is_favorite/is_flagged reflect the deck OWNER (not the viewer — the public
-    share view has no logged-in viewer at all).
+    is_favorite reflects the deck OWNER (not the viewer — the public share
+    view has no logged-in viewer at all).
 
     `public` passes straight through to build_image_dict() — see its
     docstring (V43/Day 25)."""
     row = c.execute(f'''
         SELECT id, filename, thumbnail_blob, caption, aspect_ratio, md5_checksum,
-               camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(owner_user_id)}
+               camera_rig, lens, lens_filter, stop, onset_notes, {favorite_col(owner_user_id)}
         FROM images WHERE id = ?
     ''', (image_id,)).fetchone()
     if not row:
@@ -6718,19 +6715,28 @@ def get_utility_view(view):
     """Filtered image lists for the Day 13 utility views.
 
     /api/views/favorites          — all starred images
-    /api/views/flagged            — all flagged images
     /api/views/recent?days=7      — images added in the last N days
                                     (?limit=30 caps how many come back)
 
     Returns the same full image dicts as /api/search, so the frontend can
     reuse the grid + detail panel unchanged.
+
+    (A third view, 'flagged', was removed in V55 along with its two routes
+    below and the whole Flagged nav item — see the session log. The initial
+    V55 pass left is_flagged actively computed and served everywhere anyway
+    (fav_flag_cols() ran an EXISTS subquery against user_flags for every
+    image row on every request, and every image dict still carried the
+    result) — real per-request cost for a value nothing read anymore.
+    Corrected in the same session: the SQL helper (renamed favorite_col())
+    now only computes is_favorite, and no response includes is_flagged. The
+    user_flags table and the legacy is_flagged column on `images` deliberately
+    stay as inert storage — cheap to keep, and there in case a flag-style
+    feature comes back.)
     """
     uid = session['user_id']
 
     if view == 'favorites':
         where, params = 'user_id = ? AND id IN (SELECT image_id FROM user_favorites WHERE user_id = ?)', [uid, uid]
-    elif view == 'flagged':
-        where, params = 'user_id = ? AND id IN (SELECT image_id FROM user_flags WHERE user_id = ?)', [uid, uid]
     elif view == 'recent':
         try:
             days = max(1, int(request.args.get('days', 7)))
@@ -6755,7 +6761,7 @@ def get_utility_view(view):
     c = conn.cursor()
     rows = c.execute(f'''
         SELECT id, filename, thumbnail_blob, caption, aspect_ratio, md5_checksum,
-               camera_rig, lens, lens_filter, stop, onset_notes, {fav_flag_cols(uid)}
+               camera_rig, lens, lens_filter, stop, onset_notes, {favorite_col(uid)}
         FROM images WHERE {where}
         ORDER BY date_added DESC {limit_sql}
     ''', params + limit_params).fetchall()
@@ -6764,18 +6770,6 @@ def get_utility_view(view):
     images_out = hydrate_image_rows(c, rows)
     conn.close()
     return jsonify({'images': images_out, 'total': total})
-
-@app.route('/api/flags/clear-all', methods=['POST'])
-def clear_all_flags():
-    """Unflag every image this user has flagged. Only ever removes the flag
-    marker — no image is ever deleted by this."""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('DELETE FROM user_flags WHERE user_id = ?', (session['user_id'],))
-    cleared = c.rowcount
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True, 'cleared': cleared})
 
 # ============================================================================
 # V14: SHUFFLED HOME FEED — VIEW LOG
@@ -6833,7 +6827,6 @@ def analytics():
     totals = {
         'images': c.execute('SELECT COUNT(*) FROM images WHERE user_id = ?', (uid,)).fetchone()[0],
         'favorites': c.execute('SELECT COUNT(*) FROM user_favorites WHERE user_id = ?', (uid,)).fetchone()[0],
-        'flagged': c.execute('SELECT COUNT(*) FROM user_flags WHERE user_id = ?', (uid,)).fetchone()[0],
         'added_last_7_days': c.execute(
             "SELECT COUNT(*) FROM images WHERE user_id = ? AND date_added >= datetime('now', '-7 days')", (uid,)
         ).fetchone()[0],

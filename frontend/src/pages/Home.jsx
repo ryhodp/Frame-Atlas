@@ -11,6 +11,7 @@ import { useAuth } from '../AuthContext';
 import { useSync } from '../SyncContext';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
+import { PAGE_BG } from '../theme';
 
 const PRESET_SWATCHES = [
   '#D9A441', '#E08840', '#B33A3A', '#C75B8B',
@@ -920,7 +921,7 @@ export default function Home() {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: '#1c1e22',
+        background: PAGE_BG,
         color: '#efeadd',
         fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
         position: 'relative'
@@ -2037,13 +2038,6 @@ export default function Home() {
                       filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
                     }}>★</span>
                   )}
-                  {img.is_flagged && (
-                    <span style={{
-                      position: 'absolute', top: '6px', right: '7px',
-                      color: '#cf7152', fontSize: '12px'
-                    }}>⚑</span>
-                  )}
-
                   {/* Similarity badge — only shown while browsing "Find Similar" results */}
                   {similarTo && typeof img.similarity === 'number' && (
                     <span style={{
@@ -2058,7 +2052,7 @@ export default function Home() {
                     </span>
                   )}
 
-                  {/* Tag Mode selection checkmark — top-right, offset clear of star/flag */}
+                  {/* Tag Mode selection checkmark — top-right, offset clear of the star */}
                   {isSelected && (
                     <span style={{
                       position: 'absolute', top: '6px', right: '28px',

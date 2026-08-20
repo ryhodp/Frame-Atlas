@@ -416,7 +416,6 @@ function MyLibraryPanels({ data }) {
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
         <StatCard label="Images" value={totals.images} />
         <StatCard label="Favorites" value={totals.favorites} accent="#dcbd76" />
-        <StatCard label="Flagged" value={totals.flagged} accent={totals.flagged > 0 ? '#cf7152' : undefined} />
         <StatCard label="Added this week" value={totals.added_last_7_days} />
         <StatCard label="Tags applied" value={totals.tags} />
         <StatCard label="Decks" value={totals.decks} />

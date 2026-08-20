@@ -10,7 +10,6 @@ const ICONS = {
   analytics: <><path d="M4 20V10M12 20V4M20 20v-7" /></>,
   recent: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></>,
   favorites: <path d="M12 3l2.9 6 6.6.6-5 4.4 1.5 6.5L12 17l-5.9 3.5L7.6 14l-5-4.4 6.6-.6L12 3z" />,
-  flagged: <><path d="M5 3v18" /><path d="M5 4h11l-3 4 3 4H5" /></>,
   invite: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0113 0" /><path d="M18 8v6M15 11h6" /></>,
   library: <><path d="M4 19V5a1 1 0 011-1h5v16H5a1 1 0 01-1-1z" /><path d="M14 19V8a1 1 0 011-1h4a1 1 0 011 1v11a1 1 0 01-1 1h-4a1 1 0 01-1-1z" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1 1.55V21a2 2 0 01-4 0v-.09a1.7 1.7 0 00-1-1.55 1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.55-1H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.55V3a2 2 0 014 0v.09a1.7 1.7 0 001 1.55 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9a1.7 1.7 0 001.55 1H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.55 1z" /></>,
@@ -30,7 +29,6 @@ const BASE_NAV_LINKS = [
   { to: '/analytics', label: 'Analytics', icon: 'analytics' },
   { to: '/recent', label: 'Recent', icon: 'recent' },
   { to: '/favorites', label: 'Favorites', icon: 'favorites' },
-  { to: '/flagged', label: 'Flagged', icon: 'flagged' },
 ]
 
 const ADMIN_NAV_LINKS = [

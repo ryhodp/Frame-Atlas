@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useOfflineCache } from '../hooks/useOfflineCache';
+import { PAGE_BG } from '../theme';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -136,93 +137,98 @@ export default function DecksPage() {
   };
 
   return (
-    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: isMobile ? '20px 16px' : '32px 24px' }}>
-      {showingCached && (
-        <div style={{
-          background: 'rgba(140,150,170,0.12)', border: '1px solid rgba(140,150,170,0.35)',
-          borderRadius: '8px', padding: '12px 14px', marginBottom: '16px',
-          fontSize: '12px', color: '#aab2c0'
-        }}>
-          ⚡ Offline — showing {decks.length} deck{decks.length === 1 ? '' : 's'} saved to this device.
-        </div>
-      )}
+    // Full-bleed color on an outer wrapper, THEN the centered content column —
+    // background on the maxWidth div alone would leave the old near-black
+    // showing on both sides on anything wider than 1400px.
+    <div style={{ background: PAGE_BG, minHeight: '100%' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: isMobile ? '20px 16px' : '32px 24px' }}>
+        {showingCached && (
+          <div style={{
+            background: 'rgba(140,150,170,0.12)', border: '1px solid rgba(140,150,170,0.35)',
+            borderRadius: '8px', padding: '12px 14px', marginBottom: '16px',
+            fontSize: '12px', color: '#aab2c0'
+          }}>
+            ⚡ Offline — showing {decks.length} deck{decks.length === 1 ? '' : 's'} saved to this device.
+          </div>
+        )}
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: '16px' }}>
-        <h1 style={{ fontSize: isMobile ? '24px' : '32px', lineHeight: isMobile ? '30px' : '40px', fontWeight: 700, color: '#e2e2e6', margin: 0 }}>
-          Decks
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: '16px' }}>
+          <h1 style={{ fontSize: isMobile ? '24px' : '32px', lineHeight: isMobile ? '30px' : '40px', fontWeight: 700, color: '#e2e2e6', margin: 0 }}>
+            Decks
+          </h1>
 
-        {/* + New Deck — inline name input + create button */}
-        <div style={{ display: 'flex', gap: '6px', width: isMobile ? '100%' : 'auto' }}>
-          <input
-            value={newDeckName}
-            onChange={e => setNewDeckName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') createDeck(); }}
-            placeholder="New deck name…"
-            style={{
-              background: '#1a1c20', color: '#e2e2e6',
-              border: '1px solid #44474f',
-              borderRadius: '8px', padding: '9px 12px',
-              fontSize: '14px', fontFamily: 'inherit', outline: 'none',
-              width: isMobile ? undefined : '220px',
-              flex: isMobile ? 1 : 'none',
-              minWidth: 0
-            }}
-          />
-          <button
-            onClick={createDeck}
-            disabled={!newDeckName.trim() || creating}
-            style={{
-              background: newDeckName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
-              color: newDeckName.trim() ? '#3d2f00' : '#8e9099',
-              border: 'none', borderRadius: '8px',
-              padding: '9px 16px', fontSize: '14px', fontWeight: 500,
-              cursor: newDeckName.trim() ? 'pointer' : 'default',
-              fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0
-            }}
-          >
-            {creating ? 'Creating…' : '+ New Deck'}
-          </button>
-        </div>
-      </div>
-
-      {loading ? (
-        <div style={{ color: '#8e9099', fontSize: '14px' }}>Loading decks…</div>
-      ) : decks.length === 0 ? (
-        <div style={{
-          color: '#8e9099', fontSize: '14px',
-          background: '#1a1c20', border: '1px solid #44474f',
-          borderRadius: '12px', padding: '32px', textAlign: 'center'
-        }}>
-          No decks yet. Create one above to start building a lookbook.
-        </div>
-      ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(260px, 1fr))',
-          gap: isMobile ? '12px' : '20px'
-        }}>
-          {decks.map(deck => (
-            <DeckCard
-              key={deck.id}
-              deck={deck}
-              onOpen={() => navigate(`/decks/${deck.id}`)}
-              onDelete={() => setDeleteTarget(deck)}
+          {/* + New Deck — inline name input + create button */}
+          <div style={{ display: 'flex', gap: '6px', width: isMobile ? '100%' : 'auto' }}>
+            <input
+              value={newDeckName}
+              onChange={e => setNewDeckName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') createDeck(); }}
+              placeholder="New deck name…"
+              style={{
+                background: '#1a1c20', color: '#e2e2e6',
+                border: '1px solid #44474f',
+                borderRadius: '8px', padding: '9px 12px',
+                fontSize: '14px', fontFamily: 'inherit', outline: 'none',
+                width: isMobile ? undefined : '220px',
+                flex: isMobile ? 1 : 'none',
+                minWidth: 0
+              }}
             />
-          ))}
+            <button
+              onClick={createDeck}
+              disabled={!newDeckName.trim() || creating}
+              style={{
+                background: newDeckName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
+                color: newDeckName.trim() ? '#3d2f00' : '#8e9099',
+                border: 'none', borderRadius: '8px',
+                padding: '9px 16px', fontSize: '14px', fontWeight: 500,
+                cursor: newDeckName.trim() ? 'pointer' : 'default',
+                fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0
+              }}
+            >
+              {creating ? 'Creating…' : '+ New Deck'}
+            </button>
+          </div>
         </div>
-      )}
 
-      {deleteTarget && (
-        <ConfirmModal
-          text={<>Delete "<strong>{deleteTarget.name}</strong>" and everything in it? This removes all its scenes and photo groupings — the photos themselves stay in your library.</>}
-          confirmLabel="Delete"
-          danger
-          busy={busy}
-          onConfirm={confirmDelete}
-          onCancel={() => !busy && setDeleteTarget(null)}
-        />
-      )}
+        {loading ? (
+          <div style={{ color: '#8e9099', fontSize: '14px' }}>Loading decks…</div>
+        ) : decks.length === 0 ? (
+          <div style={{
+            color: '#8e9099', fontSize: '14px',
+            background: '#1a1c20', border: '1px solid #44474f',
+            borderRadius: '12px', padding: '32px', textAlign: 'center'
+          }}>
+            No decks yet. Create one above to start building a lookbook.
+          </div>
+        ) : (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(260px, 1fr))',
+            gap: isMobile ? '12px' : '20px'
+          }}>
+            {decks.map(deck => (
+              <DeckCard
+                key={deck.id}
+                deck={deck}
+                onOpen={() => navigate(`/decks/${deck.id}`)}
+                onDelete={() => setDeleteTarget(deck)}
+              />
+            ))}
+          </div>
+        )}
+
+        {deleteTarget && (
+          <ConfirmModal
+            text={<>Delete "<strong>{deleteTarget.name}</strong>" and everything in it? This removes all its scenes and photo groupings — the photos themselves stay in your library.</>}
+            confirmLabel="Delete"
+            danger
+            busy={busy}
+            onConfirm={confirmDelete}
+            onCancel={() => !busy && setDeleteTarget(null)}
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
+import { PAGE_BG } from '../theme';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -76,7 +77,7 @@ export function AuthShell({ title, subtitle, children }) {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#0a0a0b', padding: '24px'
+      background: PAGE_BG, padding: '24px'
     }}>
       <div style={{
         width: 'min(380px, 100%)',
