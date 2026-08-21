@@ -17,13 +17,27 @@ Inspired by Arc Browser, Obsidian, and Apple Photos. Every UI decision should ma
 
 These are the exact color values. Use them by name, not by hex, wherever possible.
 
+**Reality check (V55, Aug 2026):** most of this table's hex values do match what
+the code actually ships — `primary`, `outline`, `outline-variant`, `on-surface`,
+`surface-container-low`, `surface-container-high` and `error` were all verified
+directly against the frontend. Two exceptions, corrected below. And "use them
+by name" was never actually wired up: the whole frontend still hand-types raw
+hex on every element rather than importing named tokens. The one exception is
+`frontend/src/theme.js`, added in V55, which exports a single constant
+(`PAGE_BG`) for the page-background value below — everything else in this
+table is still copy-pasted hex at each call site, so a real token file
+covering the rest of the palette is still future work, not done. A couple of
+surfaces sit close to a token here without matching it exactly (the sidebar
+background is `#111114`, not `#1a1c20`) — treat this table as the intended
+palette, not a byte-exact catalog of every pixel in the app.
+
 ### Surfaces (backgrounds and panels)
 | Name | Hex | Use it for |
 |---|---|---|
-| `surface` | `#111317` | Default page background |
-| `surface-dim` | `#111317` | Same as surface — dimmed contexts |
+| `surface` | `#1c1e22` | Default page background — app shell, auth screens, Home, Favorites/Recent, Decks, image detail panel, Storyboard editor. Was `#111317` on paper; the real value has been `#0a0a0b` historically and is `#1c1e22` as of V55 (lightened so dark/letterboxed photos don't disappear into it — see `frontend/src/theme.js`'s `PAGE_BG`) |
+| `surface-dim` | `#1c1e22` | Same as surface — dimmed contexts |
 | `surface-bright` | `#37393e` | Highlighted surface areas |
-| `surface-container-lowest` | `#0c0e12` | Deepest background (behind everything) |
+| `surface-container-lowest` | `#0a0a0b` | Near-black surface used for floating card/modal panels (Duplicate Review, Upload) and dark input fields — NOT literally "behind everything"; the Crop tool's full-screen editor also keeps this shade on purpose (precision photo editing wants more contrast than the lighter page background gives it). Was documented as `#0c0e12`; corrected to the value actually in use |
 | `surface-container-low` | `#1a1c20` | Cards, panels resting on surface |
 | `surface-container-high` | `#2a2c31` | Elevated panels, dropdowns |
 | `surface-container-highest` | `#37393e` | Topmost floating elements |
@@ -129,8 +143,8 @@ Three-column layout on desktop:
 └─────────────┴──────────────────────────┴─────────────┘
 ```
 
-- **Left sidebar:** `surface-container-low` background (`#1a1c20`), `outline-variant` right border
-- **Center:** `surface` background (`#111317`), masonry grid with `gutter-grid` (24px) gaps
+- **Left sidebar:** `surface-container-low`-ish background (actual value `#111114`, close to but not exactly `#1a1c20`), `outline-variant` right border
+- **Center:** `surface` background (`#1c1e22`), masonry grid with `gutter-grid` (24px) gaps
 - **Right inspector:** Slides in from right on image click, `surface-container-low` background, does not push content (overlaps)
 
 ---

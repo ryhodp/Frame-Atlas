@@ -4,7 +4,6 @@ import base64
 import secrets
 import io
 import gzip
-import math
 import re
 import sqlite3
 import time
@@ -21,7 +20,6 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image, ImageOps
-import google.auth.transport.requests
 from google.oauth2.service_account import Credentials
 from google.oauth2.credentials import Credentials as UserCredentials
 from google_auth_oauthlib.flow import Flow
@@ -4309,6 +4307,7 @@ def upload_images():
     try:
         service = get_user_drive_service(1)
     except Exception as e:
+        print(f"[auth] Upload's get_user_drive_service(1) failed: {e}")
         return jsonify({
             'error': 'google_auth_failed',
             'message': 'Your Google authentication token is invalid or expired. Please disconnect and reconnect in Settings.'
