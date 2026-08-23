@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { error as errorColor, onPrimary, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerMuted } from '../theme';
 
 // How many ids we hand the server in one request. Matches SQL_PARAM_CHUNK in
 // backend/app.py — big id lists get sliced up there too, and batching here as
@@ -101,8 +102,8 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#1a1c20',
-          border: '1px solid #44474f',
+          background: surfaceContainerLow,
+          border: `1px solid ${outlineVariant}`,
           borderRadius: '14px',
           width: 'min(920px, 100%)',
           maxHeight: '86vh',
@@ -112,11 +113,11 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
         }}
       >
         {/* Header */}
-        <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid #2a2c31' }}>
-          <div style={{ fontSize: '16px', fontWeight: 700, color: '#efeadd' }}>
+        <div style={{ padding: '18px 22px 14px', borderBottom: `1px solid ${surfaceContainerHigh}` }}>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: onSurfaceWarm }}>
             Remove the tag “{value}”
           </div>
-          <div style={{ fontSize: '12.5px', color: '#9c988d', marginTop: '6px', lineHeight: 1.55 }}>
+          <div style={{ fontSize: '12.5px', color: onSurfaceMuted, marginTop: '6px', lineHeight: 1.55 }}>
             Below are the photos that would lose this tag. Only the tag comes off —
             every photo stays in your library exactly where it is.
           </div>
@@ -125,17 +126,17 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
           {loading && (
-            <div style={{ fontSize: '12.5px', color: '#8e9099', padding: '30px 0', textAlign: 'center' }}>
+            <div style={{ fontSize: '12.5px', color: outline, padding: '30px 0', textAlign: 'center' }}>
               Finding the photos…
             </div>
           )}
 
           {!loading && error && (
-            <div style={{ fontSize: '12.5px', color: '#ffb4ab', padding: '20px 0' }}>{error}</div>
+            <div style={{ fontSize: '12.5px', color: errorColor, padding: '20px 0' }}>{error}</div>
           )}
 
           {!loading && !error && groups.length === 0 && (
-            <div style={{ fontSize: '12.5px', color: '#9c988d', padding: '20px 0', lineHeight: 1.6 }}>
+            <div style={{ fontSize: '12.5px', color: onSurfaceMuted, padding: '20px 0', lineHeight: 1.6 }}>
               None of the photos in this search actually carry a tag called “{value}”.
               <br />
               That usually means the search was a describe-it search rather than a tag
@@ -162,17 +163,17 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
                       type="checkbox"
                       checked={picked}
                       onChange={() => toggleCat(group.category)}
-                      style={{ accentColor: '#d9a441', width: '15px', height: '15px', cursor: 'pointer' }}
+                      style={{ accentColor: primary, width: '15px', height: '15px', cursor: 'pointer' }}
                     />
                   )}
                   <span style={{
                     width: '8px', height: '8px', borderRadius: '2px',
                     background: group.color, flexShrink: 0
                   }} />
-                  <span style={{ fontSize: '13.5px', color: '#efeadd', fontWeight: 600 }}>
+                  <span style={{ fontSize: '13.5px', color: onSurfaceWarm, fontWeight: 600 }}>
                     {group.catLabel}
                   </span>
-                  <span style={{ fontSize: '12px', color: '#9c988d' }}>
+                  <span style={{ fontSize: '12px', color: onSurfaceMuted }}>
                     {group.count} photo{group.count === 1 ? '' : 's'} would lose “{value}”
                   </span>
                 </label>
@@ -190,7 +191,7 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
                       title={img.filename}
                       style={{
                         position: 'relative', width: '100%', aspectRatio: '1',
-                        borderRadius: '5px', overflow: 'hidden', background: '#3d3d42',
+                        borderRadius: '5px', overflow: 'hidden', background: surfaceContainerMuted,
                         border: '1px solid rgba(255,255,255,0.06)'
                       }}
                     >
@@ -205,7 +206,7 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
                 </div>
 
                 {hidden > 0 && (
-                  <div style={{ fontSize: '11.5px', color: '#8e9099', marginTop: '8px' }}>
+                  <div style={{ fontSize: '11.5px', color: outline, marginTop: '8px' }}>
                     Showing the first {group.samples.length}. Another {hidden} photo
                     {hidden === 1 ? '' : 's'} not pictured {hidden === 1 ? 'is' : 'are'} also
                     included — all {group.count} lose the tag.
@@ -218,10 +219,10 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
 
         {/* Footer */}
         <div style={{
-          padding: '14px 22px', borderTop: '1px solid #2a2c31',
+          padding: '14px 22px', borderTop: `1px solid ${surfaceContainerHigh}`,
           display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap'
         }}>
-          <span style={{ fontSize: '12px', color: '#9c988d', flex: 1, minWidth: '180px' }}>
+          <span style={{ fontSize: '12px', color: onSurfaceMuted, flex: 1, minWidth: '180px' }}>
             {totalChosen > 0
               ? `${totalChosen} photo${totalChosen === 1 ? '' : 's'} will lose this tag. No photos are deleted.`
               : 'Nothing selected to remove.'}
@@ -229,8 +230,8 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
           <button
             onClick={() => !busy && onClose()}
             style={{
-              background: 'none', border: '1px solid #44474f',
-              color: '#c4c6d0', borderRadius: '8px', padding: '8px 16px',
+              background: 'none', border: `1px solid ${outlineVariant}`,
+              color: onSurfaceVariant, borderRadius: '8px', padding: '8px 16px',
               cursor: 'pointer', fontSize: '12.5px', fontFamily: 'inherit'
             }}
           >
@@ -240,8 +241,8 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
             onClick={runRemoval}
             disabled={!totalChosen || busy}
             style={{
-              background: totalChosen && !busy ? '#d9a441' : 'rgba(217,164,65,0.22)',
-              color: totalChosen && !busy ? '#3d2f00' : '#8e9099',
+              background: totalChosen && !busy ? primary : 'rgba(217,164,65,0.22)',
+              color: totalChosen && !busy ? onPrimary : outline,
               border: 'none', borderRadius: '8px', padding: '8px 18px',
               fontSize: '12.5px', fontWeight: 600,
               cursor: totalChosen && !busy ? 'pointer' : 'default', fontFamily: 'inherit'

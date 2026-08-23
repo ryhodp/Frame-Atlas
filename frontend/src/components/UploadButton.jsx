@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { danger, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primaryDim, success, surfaceContainerDark, surfaceContainerLowest, warning } from '../theme';
 
 const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
   const isMobile = useIsMobile();
@@ -178,11 +179,11 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
         title={signedIn === false ? 'Sign in with Google to upload' : 'Upload photos'}
         style={{
           height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
-          background: '#18181b',
+          background: surfaceContainerDark,
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '10px',
           cursor: 'pointer',
-          color: '#9c988d',
+          color: onSurfaceMuted,
           fontSize: '16px'
         }}
       >
@@ -198,9 +199,9 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
           <div style={{
             position: 'fixed', top: '8vh', left: '50%', transform: 'translateX(-50%)',
             width: 'min(640px, 92vw)', maxHeight: '84vh', overflowY: 'auto',
-            background: '#0a0a0b', border: '1px solid rgba(255,255,255,0.1)',
+            background: surfaceContainerLowest, border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: '14px', zIndex: 1000, padding: '20px',
-            color: '#efeadd', fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+            color: onSurfaceWarm, fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
             boxShadow: '0 30px 80px rgba(0,0,0,0.7)'
           }}>
             <div style={{
@@ -210,7 +211,7 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
               <div style={{ fontSize: '15px', fontWeight: 600 }}>Upload photos</div>
               <button
                 onClick={closePanel}
-                style={{ background: 'none', border: 'none', color: '#65625a', cursor: 'pointer', fontSize: '20px' }}
+                style={{ background: 'none', border: 'none', color: onSurfaceFaint, cursor: 'pointer', fontSize: '20px' }}
               >×</button>
             </div>
 
@@ -222,7 +223,7 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
               onDrop={handleDrop}
               onClick={() => !uploading && fileInputRef.current?.click()}
               style={{
-                border: `2px dashed ${dragOver ? '#c9a253' : 'rgba(255,255,255,0.18)'}`,
+                border: `2px dashed ${dragOver ? primaryDim : 'rgba(255,255,255,0.18)'}`,
                 borderRadius: '10px',
                 padding: '32px 20px',
                 textAlign: 'center',
@@ -236,10 +237,10 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
                   <span style={{
                     display: 'inline-block', width: '16px', height: '16px',
-                    border: '2px solid rgba(201,162,83,0.25)', borderTopColor: '#c9a253',
+                    border: '2px solid rgba(201,162,83,0.25)', borderTopColor: primaryDim,
                     borderRadius: '50%', animation: 'spin 0.7s linear infinite'
                   }} />
-                  <div style={{ fontSize: '13px', color: '#efeadd' }}>
+                  <div style={{ fontSize: '13px', color: onSurfaceWarm }}>
                     Uploading… {uploadProgress}%
                   </div>
                   <div style={{
@@ -247,19 +248,19 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                     borderRadius: '2px', overflow: 'hidden'
                   }}>
                     <div style={{
-                      width: `${uploadProgress}%`, height: '100%', background: '#c9a253',
+                      width: `${uploadProgress}%`, height: '100%', background: primaryDim,
                       transition: 'width 100ms linear'
                     }} />
                   </div>
                 </div>
               ) : (
                 <>
-                  <div style={{ fontSize: '24px', marginBottom: '8px', color: '#9c988d' }}>⬆</div>
-                  <div style={{ fontSize: '13.5px', color: '#efeadd', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '24px', marginBottom: '8px', color: onSurfaceMuted }}>⬆</div>
+                  <div style={{ fontSize: '13.5px', color: onSurfaceWarm, marginBottom: '4px' }}>
                     Drag photos here
                   </div>
-                  <div style={{ fontSize: '12px', color: '#65625a' }}>
-                    or <span style={{ color: '#dcbd76', textDecoration: 'underline' }}>browse files</span>
+                  <div style={{ fontSize: '12px', color: onSurfaceFaint }}>
+                    or <span style={{ color: warning, textDecoration: 'underline' }}>browse files</span>
                   </div>
                 </>
               )}
@@ -274,23 +275,23 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
-                        fontSize: '12.5px', color: '#efeadd',
+                        fontSize: '12.5px', color: onSurfaceWarm,
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                       }}>{r.filename}</div>
 
                       {r.status === 'uploaded' && (
-                        <div style={{ fontSize: '11px', color: '#7fb87f', marginTop: '3px' }}>
+                        <div style={{ fontSize: '11px', color: success, marginTop: '3px' }}>
                           ✓ Uploaded — tagging will start shortly
                         </div>
                       )}
                       {r.status === 'error' && (
-                        <div style={{ fontSize: '11px', color: '#cf7152', marginTop: '3px' }}>
+                        <div style={{ fontSize: '11px', color: danger, marginTop: '3px' }}>
                           {r.message || 'Upload failed'}
                         </div>
                       )}
                       {r.status === 'duplicate' && (
                         <div style={{ marginTop: '6px' }}>
-                          <div style={{ fontSize: '11px', color: '#dcbd76', marginBottom: '6px' }}>
+                          <div style={{ fontSize: '11px', color: warning, marginBottom: '6px' }}>
                             Looks like a duplicate of an image already in your library:
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -299,13 +300,13 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                               alt={r.existing.filename}
                               style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '5px' }}
                             />
-                            <div style={{ fontSize: '10.5px', color: '#9c988d', flex: 1 }}>{r.existing.filename}</div>
+                            <div style={{ fontSize: '10.5px', color: onSurfaceMuted, flex: 1 }}>{r.existing.filename}</div>
                             <button
                               onClick={() => uploadAnyway(r.filename)}
                               disabled={uploading}
                               style={{
                                 background: 'none', border: '1px solid rgba(201,162,83,0.35)',
-                                color: '#dcbd76', borderRadius: '5px', padding: '5px 10px',
+                                color: warning, borderRadius: '5px', padding: '5px 10px',
                                 fontSize: '10.5px', cursor: 'pointer', fontFamily: 'inherit'
                               }}
                             >
@@ -315,7 +316,7 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                               onClick={() => dismissResult(r.filename)}
                               style={{
                                 background: 'none', border: '1px solid rgba(255,255,255,0.15)',
-                                color: '#9c988d', borderRadius: '5px', padding: '5px 10px',
+                                color: onSurfaceMuted, borderRadius: '5px', padding: '5px 10px',
                                 fontSize: '10.5px', cursor: 'pointer', fontFamily: 'inherit'
                               }}
                             >

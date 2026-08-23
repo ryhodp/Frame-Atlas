@@ -1,5 +1,6 @@
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAuth } from '../AuthContext';
+import { error, onSurfaceVariant, primary, surfaceContainerLow, tertiary } from '../theme';
 
 export default function SelectModeHeader({
   selectedIds,
@@ -26,7 +27,7 @@ export default function SelectModeHeader({
       alignItems: 'center',
       gap: '10px',
       padding: isMobile ? '12px 14px' : '12px 20px',
-      background: '#1a1c20',
+      background: surfaceContainerLow,
       borderBottom: '1px solid rgba(255,255,255,0.065)',
       flexWrap: 'wrap',
       rowGap: '8px'
@@ -41,7 +42,7 @@ export default function SelectModeHeader({
         borderRadius: '99px',
         padding: '5px 12px',
         fontSize: '12.5px',
-        color: '#b8cea1',
+        color: tertiary,
         fontWeight: 500,
         flexShrink: 0
       }}>
@@ -58,7 +59,7 @@ export default function SelectModeHeader({
         style={{
           background: 'none',
           border: '1px solid rgba(255,255,255,0.12)',
-          color: '#c4c6d0',
+          color: onSurfaceVariant,
           borderRadius: '8px',
           padding: '7px 12px',
           cursor: 'pointer',
@@ -77,7 +78,7 @@ export default function SelectModeHeader({
         style={{
           background: 'none',
           border: '1px solid rgba(255,255,255,0.12)',
-          color: '#c4c6d0',
+          color: onSurfaceVariant,
           borderRadius: '8px',
           padding: '7px 12px',
           cursor: 'pointer',
@@ -92,7 +93,7 @@ export default function SelectModeHeader({
       {selectMsg && (
         <span style={{
           fontSize: '11.5px',
-          color: '#ffb4ab',
+          color: error,
           flexShrink: 0
         }}>
           {selectMsg}
@@ -107,7 +108,7 @@ export default function SelectModeHeader({
           style={{
             background: 'rgba(217,164,65,0.14)',
             border: '1px solid rgba(217,164,65,0.5)',
-            color: '#d9a441',
+            color: primary,
             borderRadius: '8px',
             padding: '7px 14px',
             cursor: 'pointer',
@@ -129,7 +130,7 @@ export default function SelectModeHeader({
           style={{
             background: 'rgba(255,180,171,0.14)',
             border: '1px solid rgba(255,180,171,0.5)',
-            color: '#ffb4ab',
+            color: error,
             borderRadius: '8px',
             padding: '7px 14px',
             cursor: 'pointer',
@@ -153,7 +154,7 @@ export default function SelectModeHeader({
           style={{
             background: 'rgba(201,162,83,0.14)',
             border: '1px solid rgba(201,162,83,0.5)',
-            color: '#d9a441',
+            color: primary,
             borderRadius: '8px',
             padding: '7px 14px',
             cursor: 'pointer',
@@ -173,7 +174,7 @@ export default function SelectModeHeader({
         style={{
           background: 'none',
           border: '1px solid rgba(255,180,171,0.35)',
-          color: '#ffb4ab',
+          color: error,
           borderRadius: '8px',
           padding: '7px 12px',
           cursor: 'pointer',

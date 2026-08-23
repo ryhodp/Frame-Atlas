@@ -28,6 +28,18 @@ export const surfaceContainerLow = '#1a1c20';
 export const surfaceContainerLowest = '#0a0a0b';       // modals, full-screen editors (CropModal)
 export const surfaceContainerLowestAlt = '#111317';    // input field backgrounds
 export const sidebarSurface = '#111114';                // sidebar / mobile nav drawer
+// V58 (Phase 3): more near-black/near-gray surfaces found in the components.
+// Same treatment as the three above — named, not merged, so the migration
+// stays visually lossless. Several sit within a few RGB steps of an existing
+// token and are consolidation candidates for a later, deliberate design pass.
+export const surfaceContainerDark = '#18181b';         // dropdowns/popovers (ImageDetail, CropModal)
+export const surfaceContainerWarmDark = '#141318';     // warm near-black thumbnail/preview backdrop
+export const surfaceContainerLowAlt = '#1b1d21';       // AddPhotosModal panel (vs. surfaceContainerLow #1a1c20)
+export const surfaceContainerMuted = '#3d3d42';        // progress-bar track (TagRemovalPreview)
+
+// Border shades subtler than outlineVariant (#44474f)
+export const outlineSubtle = '#33353b';                // modal/panel borders
+export const outlineDim = '#2c2f35';                   // faint dividers (StoryboardView)
 
 // ── Text ─────────────────────────────────────────────────────────────────
 export const onSurface = '#e2e2e6';
@@ -37,6 +49,14 @@ export const onSurfaceVariant = '#c4c6d0';
 export const onSurfaceWarm = '#efeadd';
 export const onSurfaceMuted = '#9c988d';   // subtitles, secondary/supporting text
 export const onSurfaceFaint = '#65625a';   // least-prominent text and icons
+// V58 (Phase 3) additions from the components pass.
+export const onSurfaceWarmDim = '#c9c6bd';     // dimmed warm text (PresentationMode captions)
+// Within one RGB step of onSurfaceWarmDim — visually identical, almost
+// certainly drift rather than intent. Kept distinct so this migration stays
+// lossless; the two should be collapsed in a deliberate design pass, not here.
+export const onSurfaceWarmDimAlt = '#c9c5ba';  // comment body text (FeedbackPanel)
+export const onSurfaceDim = '#6b6d75';         // dim cool-gray text
+export const onSurfaceFaintCool = '#4e5058';   // faintest cool-gray text (PresentationMode filename)
 
 // ── Borders ──────────────────────────────────────────────────────────────
 export const outline = '#8e9099';

@@ -1,3 +1,5 @@
+import { primary } from '../theme';
+
 const PHI = 1.6180339887;
 
 export const OVERLAY_MODES = ['off', 'thirds', 'phi', 'spiral', 'diagonal', 'cross'];
@@ -107,7 +109,7 @@ function Line({ x1, y1, x2, y2 }) {
   return (
     <>
       <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="black" strokeOpacity={0.4} strokeWidth={3} />
-      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#D9A441" strokeOpacity={0.9} strokeWidth={1.4} />
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={primary} strokeOpacity={0.9} strokeWidth={1.4} />
     </>
   );
 }
@@ -116,7 +118,7 @@ function ArcPath({ d }) {
   return (
     <>
       <path d={d} fill="none" stroke="black" strokeOpacity={0.35} strokeWidth={3.5} />
-      <path d={d} fill="none" stroke="#D9A441" strokeOpacity={0.95} strokeWidth={1.7} />
+      <path d={d} fill="none" stroke={primary} strokeOpacity={0.95} strokeWidth={1.7} />
     </>
   );
 }
@@ -165,7 +167,7 @@ function SpiralLines({ W, H, orientation }) {
     <>
       {squares.map((sq, i) => (
         <rect key={i} x={sq.x} y={sq.y} width={sq.w} height={sq.h}
-          fill="none" stroke="#D9A441" strokeOpacity={0.22} strokeWidth={1} />
+          fill="none" stroke={primary} strokeOpacity={0.22} strokeWidth={1} />
       ))}
       <ArcPath d={buildSpiralPath(squares)} />
     </>

@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { onSurfaceFaint, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, primary, sidebarSurface } from '../theme'
 
 // Minimal line icons, matching the app's existing inline-SVG convention
 // (no icon library dependency) — kept intentionally simple/geometric.
@@ -81,7 +82,7 @@ function Sidebar({ mobileOpen = false, onClose }) {
           position: 'fixed',
           top: 0,
           left: 0,
-          background: '#111114',
+          background: sidebarSurface,
           borderRight: '1px solid rgba(255,255,255,0.08)',
           display: 'flex',
           flexDirection: 'column',
@@ -97,7 +98,7 @@ function Sidebar({ mobileOpen = false, onClose }) {
           height: '100vh',
           position: 'sticky',
           top: 0,
-          background: '#111114',
+          background: sidebarSurface,
           borderRight: '1px solid rgba(255,255,255,0.08)',
           display: 'flex',
           flexDirection: 'column',
@@ -109,12 +110,12 @@ function Sidebar({ mobileOpen = false, onClose }) {
         <Link to="/" onClick={handleLinkClick} style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', padding: '0 8px', marginBottom: '28px' }}>
           <div style={{
             width: '26px', height: '26px', borderRadius: '6px',
-            border: '1.5px solid #d9a441', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#d9a441', fontSize: '13px', fontWeight: 700, flexShrink: 0,
+            border: `1.5px solid ${primary}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: primary, fontSize: '13px', fontWeight: 700, flexShrink: 0,
           }}>F</div>
           <span style={{
             fontFamily: "'Hanken Grotesk', sans-serif", fontSize: '14px', fontWeight: 600,
-            letterSpacing: '2.6px', color: '#efeadd',
+            letterSpacing: '2.6px', color: onSurfaceWarm,
           }}>
             FRAME ATLAS
           </span>
@@ -134,14 +135,14 @@ function Sidebar({ mobileOpen = false, onClose }) {
                   display: 'flex', alignItems: 'center', gap: '11px',
                   padding: '9px 10px', borderRadius: '8px',
                   fontSize: '13.5px', fontWeight: 500,
-                  color: isActive ? '#efeadd' : '#8e9099',
+                  color: isActive ? onSurfaceWarm : outline,
                   background: isActive ? 'rgba(217,164,65,0.12)' : 'transparent',
                   textDecoration: 'none', transition: 'background 120ms ease, color 120ms ease',
                 }}
-                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#c4c6d0' } }}
-                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#8e9099' } }}
+                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = onSurfaceVariant } }}
+                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = outline } }}
               >
-                <span style={{ color: isActive ? '#d9a441' : 'inherit', display: 'flex', flexShrink: 0 }}>
+                <span style={{ color: isActive ? primary : 'inherit', display: 'flex', flexShrink: 0 }}>
                   <Icon name={link.icon} />
                 </span>
                 {link.label}
@@ -163,11 +164,11 @@ function Sidebar({ mobileOpen = false, onClose }) {
                 width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
                 background: 'rgba(217,164,65,0.16)', border: '1px solid rgba(217,164,65,0.4)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '10.5px', fontWeight: 600, color: '#d9a441',
+                fontSize: '10.5px', fontWeight: 600, color: primary,
               }}>
                 {user.username?.slice(0, 2).toUpperCase()}
               </div>
-              <span style={{ fontSize: '12.5px', color: '#9c988d', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: '12.5px', color: onSurfaceMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {user.username}
               </span>
             </div>
@@ -175,7 +176,7 @@ function Sidebar({ mobileOpen = false, onClose }) {
               onClick={handleLogout}
               title="Log out"
               style={{
-                background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: '#65625a',
+                background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: onSurfaceFaint,
                 borderRadius: '6px', padding: '5px 9px', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
               }}
             >

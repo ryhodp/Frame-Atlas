@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useToast } from '../ToastContext';
+import { danger, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primary, primaryDim, surfaceContainerLowest, surfaceContainerWarmDark, warning } from '../theme';
 
 export default function DuplicateReview({ onClose, onImageDeleted, onResync, initialGroups }) {
   const [groups, setGroups] = useState(initialGroups || null);   // null = scanning
@@ -120,12 +121,12 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
       <div style={{
         position: 'fixed', top: '5vh', left: '50%', transform: 'translateX(-50%)',
         width: 'min(860px, 92vw)', maxHeight: '90vh',
-        background: '#0a0a0b',
+        background: surfaceContainerLowest,
         border: '1px solid rgba(255,255,255,0.1)',
         borderRadius: '14px',
         zIndex: 1000,
         display: 'flex', flexDirection: 'column',
-        color: '#efeadd',
+        color: onSurfaceWarm,
         fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
         boxShadow: '0 30px 80px rgba(0,0,0,0.7)',
         overflow: 'hidden'
@@ -138,7 +139,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
         }}>
           <div>
             <div style={{ fontSize: '15px', fontWeight: 600 }}>Duplicate Review</div>
-            <div style={{ fontSize: '11px', color: '#65625a', marginTop: '2px' }}>
+            <div style={{ fontSize: '11px', color: onSurfaceFaint, marginTop: '2px' }}>
               {groups === null
                 ? 'Scanning library for matching images…'
                 : groups.length === 0
@@ -154,7 +155,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                 style={{
                   background: selectedCount === 0 ? 'rgba(207,113,82,0.15)' : 'rgba(207,113,82,0.85)',
                   border: '1px solid rgba(207,113,82,1)',
-                  color: '#efeadd', borderRadius: '6px',
+                  color: onSurfaceWarm, borderRadius: '6px',
                   padding: '7px 14px', fontSize: '11.5px', fontWeight: 600,
                   cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
                   fontFamily: 'inherit',
@@ -166,7 +167,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
             )}
             {confirmBulk && (
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '11.5px', color: '#cf7152' }}>
+                <span style={{ fontSize: '11.5px', color: danger }}>
                   Delete {selectedCount} photo{selectedCount === 1 ? '' : 's'}?
                 </span>
                 <button
@@ -174,7 +175,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                   style={{
                     background: 'rgba(207,113,82,0.85)',
                     border: '1px solid rgba(207,113,82,1)',
-                    color: '#efeadd', borderRadius: '6px',
+                    color: onSurfaceWarm, borderRadius: '6px',
                     padding: '7px 14px', fontSize: '11.5px', fontWeight: 600,
                     cursor: 'pointer', fontFamily: 'inherit'
                   }}
@@ -186,7 +187,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                   style={{
                     background: 'none',
                     border: '1px solid rgba(255,255,255,0.15)',
-                    color: '#9c988d', borderRadius: '6px',
+                    color: onSurfaceMuted, borderRadius: '6px',
                     padding: '7px 10px', fontSize: '11.5px',
                     cursor: 'pointer', fontFamily: 'inherit'
                   }}
@@ -198,7 +199,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
             <button
               onClick={onClose}
               style={{
-                background: 'none', border: 'none', color: '#65625a',
+                background: 'none', border: 'none', color: onSurfaceFaint,
                 cursor: 'pointer', fontSize: '20px', lineHeight: 1
               }}
             >×</button>
@@ -207,7 +208,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
 
         {error && (
           <div style={{
-            padding: '10px 22px', fontSize: '11.5px', color: '#cf7152',
+            padding: '10px 22px', fontSize: '11.5px', color: danger,
             background: 'rgba(207,113,82,0.06)',
             borderBottom: '1px solid rgba(207,113,82,0.25)'
           }}>
@@ -220,12 +221,12 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
           {groups === null && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: '10px',
-              padding: '30px 0', justifyContent: 'center', color: '#9c988d', fontSize: '13px'
+              padding: '30px 0', justifyContent: 'center', color: onSurfaceMuted, fontSize: '13px'
             }}>
               <span style={{
                 width: '14px', height: '14px',
                 border: '2px solid rgba(201,162,83,0.2)',
-                borderTopColor: '#c9a253',
+                borderTopColor: primaryDim,
                 borderRadius: '50%', display: 'inline-block',
                 animation: 'spin 0.7s linear infinite'
               }} />
@@ -236,7 +237,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
           {groups !== null && groups.length === 0 && (
             <div style={{
               padding: '40px 0', textAlign: 'center',
-              color: '#9c988d', fontSize: '13.5px'
+              color: onSurfaceMuted, fontSize: '13.5px'
             }}>
               ✓ Your library is clean — no exact or near-duplicate images found.
             </div>
@@ -252,7 +253,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
             }}>
               <div style={{
                 fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
-                color: group.kind === 'exact' ? '#cf7152' : '#dcbd76',
+                color: group.kind === 'exact' ? danger : warning,
                 marginBottom: '10px'
               }}>
                 {group.kind === 'exact'
@@ -265,7 +266,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                     <div style={{
                       position: 'relative',
                       width: '100%', height: '130px',
-                      background: '#141318', borderRadius: '7px',
+                      background: surfaceContainerWarmDark, borderRadius: '7px',
                       overflow: 'hidden', marginBottom: '6px',
                       border: '1px solid rgba(255,255,255,0.06)'
                     }}>
@@ -287,17 +288,17 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                           type="checkbox"
                           checked={selected.has(img.id)}
                           onChange={() => toggleSelected(img.id)}
-                          style={{ accentColor: '#d9a441', width: '16px', height: '16px', cursor: 'pointer' }}
+                          style={{ accentColor: primary, width: '16px', height: '16px', cursor: 'pointer' }}
                         />
                       </label>
                     </div>
                     <div style={{
-                      fontSize: '10.5px', color: '#9c988d',
+                      fontSize: '10.5px', color: onSurfaceMuted,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                     }} title={img.filename}>
                       {img.filename}
                     </div>
-                    <div style={{ fontSize: '9.5px', color: '#65625a' }}>
+                    <div style={{ fontSize: '9.5px', color: onSurfaceFaint }}>
                       added {String(img.date_added || '').slice(0, 10)}
                     </div>
                   </div>

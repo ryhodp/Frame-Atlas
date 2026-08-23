@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildSlides } from '../presentationOrder';
+import { onSurface, onSurfaceDim, onSurfaceFaintCool, onSurfaceMuted, onSurfaceWarmDim, outline, primary } from '../theme';
 
 // ── Fullscreen deck presentation (Day 23 / V41) ──────────────────────────────
 //
@@ -212,7 +213,7 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
   const edgeBtn = {
     background: 'rgba(20,20,22,0.55)',
     border: '1px solid rgba(255,255,255,0.14)',
-    color: '#e2e2e6',
+    color: onSurface,
     borderRadius: '50%',
     width: '44px', height: '44px',
     fontSize: '18px', lineHeight: 1,
@@ -223,7 +224,7 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
   const pill = {
     background: 'rgba(20,20,22,0.62)',
     border: '1px solid rgba(255,255,255,0.14)',
-    color: '#e2e2e6',
+    color: onSurface,
     borderRadius: '999px',
     padding: '7px 14px',
     fontSize: '12.5px',
@@ -262,16 +263,16 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
           <div style={{ textAlign: 'center', maxWidth: '80vw' }}>
             <div style={{
               fontSize: 'clamp(30px, 5.5vw, 68px)', fontWeight: 700,
-              color: '#d9a441', lineHeight: 1.15, letterSpacing: '-0.5px',
+              color: primary, lineHeight: 1.15, letterSpacing: '-0.5px',
               overflowWrap: 'break-word'
             }}>
               {slide.label}
             </div>
             <div style={{
-              width: '120px', height: '2px', background: '#d9a441',
+              width: '120px', height: '2px', background: primary,
               margin: '22px auto 0', opacity: 0.75
             }} />
-            <div style={{ fontSize: '14px', color: '#9c988d', marginTop: '16px' }}>
+            <div style={{ fontSize: '14px', color: onSurfaceMuted, marginTop: '16px' }}>
               {slide.count} {slide.count === 1 ? 'photo' : 'photos'}
             </div>
           </div>
@@ -288,9 +289,9 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
             }}
           />
         ) : (
-          <div style={{ color: '#6b6d75', fontSize: '14px', textAlign: 'center', padding: '24px' }}>
+          <div style={{ color: onSurfaceDim, fontSize: '14px', textAlign: 'center', padding: '24px' }}>
             This frame has no preview image
-            {slide.img.filename ? <div style={{ marginTop: '6px', color: '#4e5058' }}>{slide.img.filename}</div> : null}
+            {slide.img.filename ? <div style={{ marginTop: '6px', color: onSurfaceFaintCool }}>{slide.img.filename}</div> : null}
           </div>
         )}
       </div>
@@ -303,7 +304,7 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
           textAlign: 'center',
           fontSize: 'clamp(13px, 1.5vw, 17px)',
           lineHeight: 1.5,
-          color: '#c9c6bd',
+          color: onSurfaceWarmDim,
           whiteSpace: 'pre-wrap'
         }}>
           {note}
@@ -320,9 +321,9 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
         <div style={{
           position: 'absolute', top: '18px', left: '22px',
           display: 'flex', alignItems: 'center', gap: '10px',
-          fontSize: '12.5px', color: '#8e9099'
+          fontSize: '12.5px', color: outline
         }}>
-          <span style={{ color: '#c9c6bd' }}>{deckName}</span>
+          <span style={{ color: onSurfaceWarmDim }}>{deckName}</span>
           {slide.type === 'photo' && (
             <>
               <span style={{ opacity: 0.5 }}>·</span>
@@ -340,7 +341,7 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
         }}>
           <button
             onClick={(e) => { e.stopPropagation(); toggleNotes(); }}
-            style={{ ...pill, color: showNotes ? '#d9a441' : '#8e9099' }}
+            style={{ ...pill, color: showNotes ? primary : outline }}
             title="Show or hide the note under each frame (N)"
           >
             {showNotes ? '💬 Notes on' : '💬 Notes off'}
@@ -392,7 +393,7 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
             border: '1px solid rgba(255,255,255,0.12)',
             borderRadius: '999px',
             padding: '9px 18px',
-            fontSize: '12.5px', color: '#9c988d',
+            fontSize: '12.5px', color: onSurfaceMuted,
             whiteSpace: 'nowrap'
           }}>
             ← → or space to move · N for notes · Esc to exit

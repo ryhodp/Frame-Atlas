@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { error as errorColor, onSurface, onSurfaceDim, onSurfaceMuted, onSurfaceWarmDimAlt, outline, outlineSubtle, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLowestAlt } from '../theme';
 
 // ── Owner-side Feedback panel (Day 24 / V42) ──────────────────────────────────
 // Reads GET /api/decks/<id>/feedback — the SAME shape and the SAME function
@@ -70,7 +71,7 @@ export default function FeedbackPanel({ deckId, images, onClose }) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31',
+          background: surfaceContainerHigh,
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '12px',
           padding: '20px 22px',
@@ -80,26 +81,26 @@ export default function FeedbackPanel({ deckId, images, onClose }) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '4px' }}>
-          <div style={{ fontSize: '15px', fontWeight: 600, color: '#e2e2e6' }}>Feedback</div>
+          <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface }}>Feedback</div>
           {data && (
-            <div style={{ fontSize: '12px', color: '#8e9099' }}>
+            <div style={{ fontSize: '12px', color: outline }}>
               {data.total_picks} pick{data.total_picks === 1 ? '' : 's'} · {data.total_comments} comment{data.total_comments === 1 ? '' : 's'}
             </div>
           )}
         </div>
-        <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5, marginBottom: '16px' }}>
+        <div style={{ fontSize: '12.5px', color: onSurfaceMuted, lineHeight: 1.5, marginBottom: '16px' }}>
           Most-picked frame first. Everyone with the share link sees the same picks and comments.
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1, marginRight: '-8px', paddingRight: '8px' }}>
           {error && (
-            <div style={{ fontSize: '13px', color: '#ffb4ab' }}>Couldn't load feedback — try again.</div>
+            <div style={{ fontSize: '13px', color: errorColor }}>Couldn't load feedback — try again.</div>
           )}
           {!error && !data && (
-            <div style={{ fontSize: '13px', color: '#8e9099' }}>Loading…</div>
+            <div style={{ fontSize: '13px', color: outline }}>Loading…</div>
           )}
           {data && visibleIds.length === 0 && (
-            <div style={{ fontSize: '13px', color: '#8e9099', lineHeight: 1.6 }}>
+            <div style={{ fontSize: '13px', color: outline, lineHeight: 1.6 }}>
               No picks or comments yet. Once someone opens the share link and leaves feedback,
               it'll show up here.
             </div>
@@ -118,7 +119,7 @@ export default function FeedbackPanel({ deckId, images, onClose }) {
           <button
             onClick={onClose}
             style={{
-              background: 'none', border: '1px solid #44474f', color: '#9c988d',
+              background: 'none', border: `1px solid ${outlineVariant}`, color: onSurfaceMuted,
               borderRadius: '8px', padding: '9px 18px', fontSize: '13px',
               cursor: 'pointer', fontFamily: 'inherit'
             }}
@@ -136,11 +137,11 @@ function FrameFeedback({ image, data, onDeleteComment }) {
   return (
     <div style={{
       display: 'flex', gap: '12px', padding: '12px 0',
-      borderBottom: '1px solid #33353b'
+      borderBottom: `1px solid ${outlineSubtle}`
     }}>
       <div style={{
         width: '76px', height: '76px', flexShrink: 0, borderRadius: '8px',
-        overflow: 'hidden', background: '#111317', border: '1px solid #33353b'
+        overflow: 'hidden', background: surfaceContainerLowestAlt, border: `1px solid ${outlineSubtle}`
       }}>
         {image?.thumbnail && (
           <img src={image.thumbnail} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -148,22 +149,22 @@ function FrameFeedback({ image, data, onDeleteComment }) {
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
         {pick_count > 0 && (
-          <div style={{ fontSize: '12.5px', color: '#d9a441', fontWeight: 600, marginBottom: '4px' }}>
+          <div style={{ fontSize: '12.5px', color: primary, fontWeight: 600, marginBottom: '4px' }}>
             ★ {pick_count} pick{pick_count === 1 ? '' : 's'}
-            <span style={{ color: '#9c988d', fontWeight: 400 }}> — {pickers.join(', ')}</span>
+            <span style={{ color: onSurfaceMuted, fontWeight: 400 }}> — {pickers.join(', ')}</span>
           </div>
         )}
         {comments.map(c => (
           <div key={c.id} style={{ display: 'flex', gap: '6px', marginBottom: '5px', alignItems: 'flex-start' }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#e2e2e6' }}>{c.viewer_name}</span>
-              <span style={{ fontSize: '13px', color: '#c9c5ba', marginLeft: '6px' }}>{c.body}</span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: onSurface }}>{c.viewer_name}</span>
+              <span style={{ fontSize: '13px', color: onSurfaceWarmDimAlt, marginLeft: '6px' }}>{c.body}</span>
             </div>
             <button
               onClick={() => onDeleteComment(c.id)}
               title="Delete this comment"
               style={{
-                flexShrink: 0, background: 'none', border: 'none', color: '#6b6d75',
+                flexShrink: 0, background: 'none', border: 'none', color: onSurfaceDim,
                 cursor: 'pointer', fontSize: '13px', padding: '0 2px', lineHeight: 1
               }}
             >

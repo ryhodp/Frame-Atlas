@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { onSurfaceWarm, primary, sidebarSurface } from '../theme'
 
 // Sticky top bar shown only below the mobile breakpoint — replaces the
 // fixed sidebar with a hamburger button that opens it as a drawer.
@@ -11,7 +12,7 @@ export default function MobileHeader({ onMenuClick }) {
       alignItems: 'center',
       gap: '12px',
       padding: '0 14px',
-      background: '#111114',
+      background: sidebarSurface,
       borderBottom: '1px solid rgba(255,255,255,0.08)',
       position: 'sticky',
       top: 0,
@@ -23,7 +24,7 @@ export default function MobileHeader({ onMenuClick }) {
         style={{
           width: '38px', height: '38px', flexShrink: 0,
           background: 'transparent', border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: '8px', color: '#efeadd', cursor: 'pointer',
+          borderRadius: '8px', color: onSurfaceWarm, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}
       >
@@ -35,12 +36,12 @@ export default function MobileHeader({ onMenuClick }) {
       <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '9px', textDecoration: 'none' }}>
         <div style={{
           width: '22px', height: '22px', borderRadius: '5px',
-          border: '1.5px solid #d9a441', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#d9a441', fontSize: '11px', fontWeight: 700, flexShrink: 0,
+          border: `1.5px solid ${primary}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: primary, fontSize: '11px', fontWeight: 700, flexShrink: 0,
         }}>F</div>
         <span style={{
           fontFamily: "'Hanken Grotesk', sans-serif", fontSize: '12.5px', fontWeight: 600,
-          letterSpacing: '2.2px', color: '#efeadd',
+          letterSpacing: '2.2px', color: onSurfaceWarm,
         }}>
           FRAME ATLAS
         </span>

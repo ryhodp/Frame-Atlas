@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PAGE_BG } from '../theme';
+import { PAGE_BG, error, onPrimary, onSurface, outline, outlineDim, outlineVariant, primary, surfaceContainerLow, surfaceContainerLowestAlt, tertiary } from '../theme';
 
 // ── Full-screen storyboard for one scene (or Unsorted) ────────────────────────
 // Frames appear in sequence order with a number badge and an always-visible
@@ -92,15 +92,15 @@ export default function StoryboardView({ deckId, sceneId, title, images, onClose
       <div style={{
         display: 'flex', alignItems: 'center', gap: '14px',
         padding: '14px 24px',
-        borderBottom: '1px solid #44474f',
-        background: '#1a1c20',
+        borderBottom: `1px solid ${outlineVariant}`,
+        background: surfaceContainerLow,
         flexShrink: 0
       }}>
-        <span style={{ fontSize: '12px', letterSpacing: '0.12em', color: '#d9a441', textTransform: 'uppercase', fontWeight: 600 }}>
+        <span style={{ fontSize: '12px', letterSpacing: '0.12em', color: primary, textTransform: 'uppercase', fontWeight: 600 }}>
           Storyboard
         </span>
-        <span style={{ fontSize: '17px', fontWeight: 600, color: '#e2e2e6' }}>{title}</span>
-        <span style={{ fontSize: '12.5px', color: '#8e9099' }}>
+        <span style={{ fontSize: '17px', fontWeight: 600, color: onSurface }}>{title}</span>
+        <span style={{ fontSize: '12.5px', color: outline }}>
           {frames.length} frame{frames.length === 1 ? '' : 's'} · drag to reorder
         </span>
 
@@ -108,7 +108,7 @@ export default function StoryboardView({ deckId, sceneId, title, images, onClose
 
         <span style={{
           fontSize: '12px', minWidth: '70px', textAlign: 'right',
-          color: saveState === 'error' ? '#ffb4ab' : saveState === 'saved' ? '#b8cea1' : '#8e9099'
+          color: saveState === 'error' ? error : saveState === 'saved' ? tertiary : outline
         }}>
           {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved ✓' : saveState === 'error' ? 'Save failed' : ''}
         </span>
@@ -116,8 +116,8 @@ export default function StoryboardView({ deckId, sceneId, title, images, onClose
         <button
           onClick={() => onClose(changedRef.current)}
           style={{
-            background: 'none', border: '1px solid #44474f',
-            color: '#e2e2e6', borderRadius: '8px', padding: '7px 16px',
+            background: 'none', border: `1px solid ${outlineVariant}`,
+            color: onSurface, borderRadius: '8px', padding: '7px 16px',
             cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit'
           }}
         >
@@ -128,7 +128,7 @@ export default function StoryboardView({ deckId, sceneId, title, images, onClose
       {/* Frame sequence */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '28px 24px' }}>
         {frames.length === 0 ? (
-          <div style={{ color: '#8e9099', fontSize: '14px', textAlign: 'center', marginTop: '80px' }}>
+          <div style={{ color: outline, fontSize: '14px', textAlign: 'center', marginTop: '80px' }}>
             No frames in this section yet — add photos from the deck view first.
           </div>
         ) : (
@@ -183,8 +183,8 @@ function StoryboardCard({
       onDragEnter={onDragEnter}
       onDrop={e => { e.preventDefault(); onDrop(); }}
       style={{
-        background: '#1a1c20',
-        border: `1px solid ${isDropTarget ? '#d9a441' : '#44474f'}`,
+        background: surfaceContainerLow,
+        border: `1px solid ${isDropTarget ? primary : outlineVariant}`,
         borderRadius: '12px',
         overflow: 'hidden',
         opacity: isDragging ? 0.35 : 1,
@@ -193,7 +193,7 @@ function StoryboardCard({
         cursor: 'grab'
       }}
     >
-      <div style={{ position: 'relative', background: '#111317' }}>
+      <div style={{ position: 'relative', background: surfaceContainerLowestAlt }}>
         {frame.thumbnail && (
           <img
             src={frame.thumbnail}
@@ -205,7 +205,7 @@ function StoryboardCard({
         {/* Sequence number badge */}
         <div style={{
           position: 'absolute', top: '8px', left: '8px',
-          background: '#d9a441', color: '#3d2f00',
+          background: primary, color: onPrimary,
           borderRadius: '6px', minWidth: '24px', height: '24px',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: '13px', fontWeight: 700, padding: '0 6px'
@@ -226,8 +226,8 @@ function StoryboardCard({
         rows={2}
         style={{
           width: '100%', boxSizing: 'border-box', resize: 'vertical',
-          background: '#111317', color: '#e2e2e6',
-          border: 'none', borderTop: '1px solid #2c2f35',
+          background: surfaceContainerLowestAlt, color: onSurface,
+          border: 'none', borderTop: `1px solid ${outlineDim}`,
           padding: '10px 12px', fontSize: '13px', lineHeight: 1.5,
           fontFamily: 'inherit', outline: 'none', display: 'block'
         }}

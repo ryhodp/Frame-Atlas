@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addImagesToDeck } from '../deckAdd';
+import { danger, onPrimary, onSurface, outline, outlineSubtle, outlineVariant, primary, surfaceBright, surfaceContainerHigh, surfaceContainerLowAlt, surfaceContainerLowestAlt, tertiary } from '../theme';
 
 // ── AddPhotosModal — Frame Atlas V46 ─────────────────────────────────────────
 // Pick photos out of your library and drop them into a deck, without leaving
@@ -172,7 +173,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#1b1d21', border: '1px solid #33353b', borderRadius: '14px',
+          background: surfaceContainerLowAlt, border: `1px solid ${outlineSubtle}`, borderRadius: '14px',
           width: 'min(1080px, 100%)', height: 'min(760px, 100%)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
           boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
@@ -180,14 +181,14 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
       >
         {/* Header */}
         <div style={{
-          padding: '18px 22px 14px', borderBottom: '1px solid #2a2c31',
+          padding: '18px 22px 14px', borderBottom: `1px solid ${surfaceContainerHigh}`,
           display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap',
         }}>
           <div style={{ flex: 1, minWidth: '200px' }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: '#e2e2e6' }}>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: onSurface }}>
               Add photos to “{deckName}”
             </div>
-            <div style={{ fontSize: '12px', color: '#8e9099', marginTop: '3px' }}>
+            <div style={{ fontSize: '12px', color: outline, marginTop: '3px' }}>
               {total.toLocaleString()} photo{total === 1 ? '' : 's'} to choose from
               {chips.length > 0 && ' matching your search'}
             </div>
@@ -195,7 +196,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
           <button
             onClick={onClose}
             style={{
-              background: 'none', border: '1px solid #44474f', color: '#e2e2e6',
+              background: 'none', border: `1px solid ${outlineVariant}`, color: onSurface,
               borderRadius: '8px', padding: '7px 14px', cursor: 'pointer',
               fontSize: '13px', fontFamily: 'inherit',
             }}
@@ -205,7 +206,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
         </div>
 
         {/* Search */}
-        <div style={{ padding: '12px 22px', borderBottom: '1px solid #2a2c31', position: 'relative' }}>
+        <div style={{ padding: '12px 22px', borderBottom: `1px solid ${surfaceContainerHigh}`, position: 'relative' }}>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {chips.map(chip => (
               <span
@@ -213,7 +214,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '7px',
                   background: 'rgba(217,164,65,0.14)', border: '1px solid rgba(217,164,65,0.5)',
-                  color: '#d9a441', borderRadius: '6px', padding: '4px 9px', fontSize: '12px',
+                  color: primary, borderRadius: '6px', padding: '4px 9px', fontSize: '12px',
                 }}
               >
                 {chip}
@@ -221,7 +222,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                   onClick={() => removeChip(chip)}
                   aria-label={`Remove ${chip} from this search`}
                   style={{
-                    background: 'none', border: 'none', color: '#d9a441',
+                    background: 'none', border: 'none', color: primary,
                     cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: 0,
                     fontFamily: 'inherit',
                   }}
@@ -240,8 +241,8 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
               }}
               placeholder={chips.length ? 'Narrow it down further…' : 'Search your library by tag…'}
               style={{
-                flex: 1, minWidth: '180px', background: '#111317', color: '#e2e2e6',
-                border: '1px solid #44474f', borderRadius: '7px', padding: '8px 11px',
+                flex: 1, minWidth: '180px', background: surfaceContainerLowestAlt, color: onSurface,
+                border: `1px solid ${outlineVariant}`, borderRadius: '7px', padding: '8px 11px',
                 fontSize: '13px', fontFamily: 'inherit', outline: 'none',
               }}
             />
@@ -250,7 +251,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
           {showAuto && auto.length > 0 && (
             <div style={{
               position: 'absolute', top: 'calc(100% - 4px)', left: '22px', right: '22px',
-              background: '#2a2c31', border: '1px solid #44474f', borderRadius: '10px',
+              background: surfaceContainerHigh, border: `1px solid ${outlineVariant}`, borderRadius: '10px',
               boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 20,
               maxHeight: '240px', overflowY: 'auto',
             }}>
@@ -264,11 +265,11 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                     background: 'transparent', border: 'none', cursor: 'pointer',
                     textAlign: 'left', fontFamily: 'inherit',
                   }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#37393e'}
+                  onMouseEnter={e => e.currentTarget.style.background = surfaceBright}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
-                  <span style={{ fontSize: '13px', color: '#e2e2e6' }}>{s.value}</span>
-                  <span style={{ fontSize: '10.5px', color: s.color || '#8e9099' }}>
+                  <span style={{ fontSize: '13px', color: onSurface }}>{s.value}</span>
+                  <span style={{ fontSize: '10.5px', color: s.color || outline }}>
                     {s.catLabel} · {s.count}
                   </span>
                 </button>
@@ -282,7 +283,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
           {loadError && (
             <div style={{
               background: 'rgba(207,113,82,0.08)', border: '1px solid rgba(207,113,82,0.3)',
-              color: '#cf7152', borderRadius: '8px', padding: '10px 12px',
+              color: danger, borderRadius: '8px', padding: '10px 12px',
               fontSize: '12.5px', marginBottom: '14px',
             }}>
               {loadError}
@@ -291,7 +292,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
 
           {!loading && images.length === 0 && !loadError && (
             <div style={{
-              textAlign: 'center', color: '#8e9099', fontSize: '13px', padding: '48px 12px',
+              textAlign: 'center', color: outline, fontSize: '13px', padding: '48px 12px',
             }}>
               {chips.length
                 ? 'No photos match that search. Try removing a tag.'
@@ -315,9 +316,9 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                   title={already ? 'Already in this deck' : img.filename}
                   style={{
                     position: 'relative', padding: 0, border: `2px solid ${
-                      already ? '#33353b' : isSel ? '#d9a441' : 'transparent'
+                      already ? outlineSubtle : isSel ? primary : 'transparent'
                     }`,
-                    borderRadius: '8px', overflow: 'hidden', background: '#111317',
+                    borderRadius: '8px', overflow: 'hidden', background: surfaceContainerLowestAlt,
                     cursor: already ? 'default' : 'pointer', aspectRatio: '1 / 1',
                     opacity: already ? 0.4 : 1,
                   }}
@@ -333,7 +334,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                   {already && (
                     <span style={{
                       position: 'absolute', bottom: '4px', left: '4px', right: '4px',
-                      background: 'rgba(0,0,0,0.72)', color: '#b8cea1',
+                      background: 'rgba(0,0,0,0.72)', color: tertiary,
                       fontSize: '10px', borderRadius: '4px', padding: '2px 5px',
                     }}>
                       In deck
@@ -342,7 +343,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                   {isSel && !already && (
                     <span style={{
                       position: 'absolute', top: '5px', right: '5px',
-                      background: '#d9a441', color: '#3d2f00',
+                      background: primary, color: onPrimary,
                       width: '20px', height: '20px', borderRadius: '50%',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: '12px', fontWeight: 700,
@@ -361,7 +362,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                 onClick={() => load(page + 1, true)}
                 disabled={loading}
                 style={{
-                  background: 'none', border: '1px solid #44474f', color: '#e2e2e6',
+                  background: 'none', border: `1px solid ${outlineVariant}`, color: onSurface,
                   borderRadius: '8px', padding: '9px 20px', cursor: loading ? 'default' : 'pointer',
                   fontSize: '13px', fontFamily: 'inherit',
                 }}
@@ -372,7 +373,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
           )}
 
           {loading && images.length === 0 && (
-            <div style={{ textAlign: 'center', color: '#8e9099', fontSize: '13px', padding: '48px 12px' }}>
+            <div style={{ textAlign: 'center', color: outline, fontSize: '13px', padding: '48px 12px' }}>
               Loading your library…
             </div>
           )}
@@ -380,10 +381,10 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
 
         {/* Footer */}
         <div style={{
-          padding: '14px 22px', borderTop: '1px solid #2a2c31',
+          padding: '14px 22px', borderTop: `1px solid ${surfaceContainerHigh}`,
           display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap',
         }}>
-          <div style={{ flex: 1, minWidth: '180px', fontSize: '12.5px', color: result ? '#cf7152' : '#8e9099' }}>
+          <div style={{ flex: 1, minWidth: '180px', fontSize: '12.5px', color: result ? danger : outline }}>
             {result || (count > 0
               ? `${count} photo${count === 1 ? '' : 's'} selected`
               : 'Click photos to choose them')}
@@ -392,7 +393,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
             <button
               onClick={selectAllLoaded}
               style={{
-                background: 'none', border: '1px solid #44474f', color: '#e2e2e6',
+                background: 'none', border: `1px solid ${outlineVariant}`, color: onSurface,
                 borderRadius: '8px', padding: '8px 14px', cursor: 'pointer',
                 fontSize: '12.5px', fontFamily: 'inherit', whiteSpace: 'nowrap',
               }}
@@ -404,8 +405,8 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
             onClick={submit}
             disabled={count === 0 || adding}
             style={{
-              background: count > 0 && !adding ? '#d9a441' : 'rgba(217,164,65,0.2)',
-              color: count > 0 && !adding ? '#3d2f00' : '#8e9099',
+              background: count > 0 && !adding ? primary : 'rgba(217,164,65,0.2)',
+              color: count > 0 && !adding ? onPrimary : outline,
               border: 'none', borderRadius: '8px', padding: '10px 22px',
               fontSize: '13px', fontWeight: 700, fontFamily: 'inherit',
               cursor: count > 0 && !adding ? 'pointer' : 'default', whiteSpace: 'nowrap',
