@@ -11,13 +11,7 @@ import { useAuth } from '../AuthContext';
 import { useSync } from '../SyncContext';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
-import { PAGE_BG } from '../theme';
-
-const PRESET_SWATCHES = [
-  '#D9A441', '#E08840', '#B33A3A', '#C75B8B',
-  '#7B5BC7', '#3A5BB3', '#2E8B8B', '#6FA3B8',
-  '#4E7A3A', '#8A7A3A', '#E8DFC8', '#1A1A1E'
-];
+import { PAGE_BG, SWATCH_COLORS as PRESET_SWATCHES } from '../theme';
 
 const PER_PAGE = 60;
 const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP' };
