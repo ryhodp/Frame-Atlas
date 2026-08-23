@@ -37,9 +37,13 @@ export const surfaceContainerWarmDark = '#141318';     // warm near-black thumbn
 export const surfaceContainerLowAlt = '#1b1d21';       // AddPhotosModal panel (vs. surfaceContainerLow #1a1c20)
 export const surfaceContainerMuted = '#3d3d42';        // progress-bar track (TagRemovalPreview)
 
+// V59 (Phase 4): from the mid-size pages.
+export const surfaceContainerInput = '#0f1013';        // AccountPage's own input backgrounds
+
 // Border shades subtler than outlineVariant (#44474f)
 export const outlineSubtle = '#33353b';                // modal/panel borders
 export const outlineDim = '#2c2f35';                   // faint dividers (StoryboardView)
+export const outlineMuted = '#3a3d44';                 // SharePage card/input borders
 
 // ── Text ─────────────────────────────────────────────────────────────────
 export const onSurface = '#e2e2e6';
@@ -57,6 +61,11 @@ export const onSurfaceWarmDim = '#c9c6bd';     // dimmed warm text (Presentation
 export const onSurfaceWarmDimAlt = '#c9c5ba';  // comment body text (FeedbackPanel)
 export const onSurfaceDim = '#6b6d75';         // dim cool-gray text
 export const onSurfaceFaintCool = '#4e5058';   // faintest cool-gray text (PresentationMode filename)
+// V59 (Phase 4) additions from the mid-size pages. onSurfaceWarmMuted is a
+// third shade in the same near-identical warm-gray family as onSurfaceWarmDim
+// /onSurfaceWarmDimAlt above — same consolidation note applies to all three.
+export const onSurfaceWarmMuted = '#c8c3b8';   // table cell / stat text (AnalyticsPage)
+export const onSurfaceWarmFaint = '#8e7f77';   // disabled warm text (SettingsPage)
 
 // ── Borders ──────────────────────────────────────────────────────────────
 export const outline = '#8e9099';
@@ -99,6 +108,10 @@ export const accentVioletLighter = '#c9a8f2';
 // Composition-guide overlay accent (blue)
 export const accentBlue = '#7fb3d9';
 export const accentTeal = '#7dd3c8';
+// V59 (Phase 4): tag-frequency heatmap text, hot vs. cool cell (AnalyticsPage)
+export const heatmapTextHot = '#f4e8cd';
+export const heatmapTextCool = '#d6c9a8';
+export const dangerWarm = '#e07a5f';   // inline warning text (SharePage)
 
 // ── Color-search swatch picker ──────────────────────────────────────────
 // A deliberately multi-hue palette — NOT app chrome, kept separate from the

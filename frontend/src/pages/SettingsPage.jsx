@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { useOfflineCache } from '../hooks/useOfflineCache'
+import { error, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onSurfaceWarmFaint, outlineVariant, primaryDim, surfaceContainerLow, tertiary } from '../theme'
 
 function formatSpendPeriod() {
   const now = new Date()
@@ -142,14 +143,14 @@ export default function SettingsPage() {
   }
 
   return (
-    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 24px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: '#efeadd' }}>
+    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 24px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: onSurfaceWarm }}>
       <h1 style={{ fontSize: '28px', fontWeight: 700, margin: '0 0 6px' }}>Settings</h1>
-      <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 32px' }}>
+      <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: '0 0 32px' }}>
         Account details for now — more settings are on the way.
       </p>
 
-      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
-        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+      <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '16px' }}>
           ACCOUNT
         </div>
 
@@ -159,13 +160,13 @@ export default function SettingsPage() {
       </div>
 
       {isAdmin && (
-        <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
-          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+        <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '16px' }}>
             SYNC SOURCE
           </div>
 
           {syncSetup === null ? (
-            <p style={{ fontSize: '13px', color: '#65625a', margin: 0 }}>Loading…</p>
+            <p style={{ fontSize: '13px', color: onSurfaceFaint, margin: 0 }}>Loading…</p>
           ) : syncSetup.folder_connected ? (
             <>
               <Row label="Folder" value={`📁 ${syncSetup.folder_name}`} />
@@ -175,26 +176,26 @@ export default function SettingsPage() {
                   ? new Date(syncSetup.last_sync + 'Z').toLocaleString('en-US', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })
                   : 'Never yet'}
               />
-              <p style={{ fontSize: '11.5px', color: '#65625a', margin: '10px 0 0', lineHeight: 1.5 }}>
+              <p style={{ fontSize: '11.5px', color: onSurfaceFaint, margin: '10px 0 0', lineHeight: 1.5 }}>
                 To sync now, use the ⟲ button next to Duplicate Scan on Home — it runs in the
                 background and lets you know when it's done.
               </p>
             </>
           ) : (
             <>
-              <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.5 }}>
+              <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: '0 0 12px', lineHeight: 1.5 }}>
                 No folder connected yet. Frame Atlas only ever reads from the one folder
                 shared with its service account — connect it once here.
               </p>
               {connectFolderError && (
-                <p style={{ fontSize: '12px', color: '#ffb4ab', margin: '0 0 10px' }}>{connectFolderError}</p>
+                <p style={{ fontSize: '12px', color: error, margin: '0 0 10px' }}>{connectFolderError}</p>
               )}
               <button
                 onClick={handleConnectDefaultFolder}
                 disabled={connectingFolder}
                 style={{
                   background: 'rgba(184,206,161,0.18)', border: '1px solid rgba(184,206,161,0.5)',
-                  color: '#b8cea1', borderRadius: '6px', padding: '7px 14px', fontSize: '12px',
+                  color: tertiary, borderRadius: '6px', padding: '7px 14px', fontSize: '12px',
                   cursor: 'pointer', fontFamily: 'inherit', opacity: connectingFolder ? 0.6 : 1
                 }}
               >
@@ -206,20 +207,20 @@ export default function SettingsPage() {
       )}
 
       {isAdmin && (
-        <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
-          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+        <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '16px' }}>
             GOOGLE CONNECTION
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
             <div>
-              <span style={{ fontSize: '13px', color: '#9c988d' }}>Upload token</span>
-              <p style={{ fontSize: '11.5px', color: '#65625a', margin: '4px 0 0' }}>
+              <span style={{ fontSize: '13px', color: onSurfaceMuted }}>Upload token</span>
+              <p style={{ fontSize: '11.5px', color: onSurfaceFaint, margin: '4px 0 0' }}>
                 For uploading photos directly to Drive
               </p>
             </div>
             {googleStatus === null ? (
-              <span style={{ fontSize: '12px', color: '#65625a' }}>Checking…</span>
+              <span style={{ fontSize: '12px', color: onSurfaceFaint }}>Checking…</span>
             ) : googleStatus ? (
               <button
                 onClick={handleGoogleDisconnect}
@@ -227,7 +228,7 @@ export default function SettingsPage() {
                 style={{
                   background: 'rgba(255,180,171,0.12)',
                   border: '1px solid rgba(255,180,171,0.3)',
-                  color: '#ffb4ab',
+                  color: error,
                   borderRadius: '6px',
                   padding: '7px 14px',
                   fontSize: '12px',
@@ -244,7 +245,7 @@ export default function SettingsPage() {
                 style={{
                   background: 'rgba(184,206,161,0.18)',
                   border: '1px solid rgba(184,206,161,0.5)',
-                  color: '#b8cea1',
+                  color: tertiary,
                   borderRadius: '6px',
                   padding: '7px 14px',
                   fontSize: '12px',
@@ -260,31 +261,31 @@ export default function SettingsPage() {
       )}
 
       {isAdmin && (
-        <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
-          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+        <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '16px' }}>
             DATABASE BACKUP
           </div>
 
           {backupError ? (
-            <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.5 }}>
+            <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: '0 0 12px', lineHeight: 1.5 }}>
               {backupError}
             </p>
           ) : backups === null ? (
-            <p style={{ fontSize: '13px', color: '#65625a', margin: '0 0 12px' }}>Loading…</p>
+            <p style={{ fontSize: '13px', color: onSurfaceFaint, margin: '0 0 12px' }}>Loading…</p>
           ) : backups.length === 0 ? (
-            <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.5 }}>
+            <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: '0 0 12px', lineHeight: 1.5 }}>
               No backup yet — the first one runs automatically within a day, then
               once a month after that. Your tags, decks, and bookmarks live only
               in this database (the photos themselves stay safe on Drive either way).
             </p>
           ) : (
             <div style={{ marginBottom: '12px' }}>
-              <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 8px' }}>
-                Last backup: <span style={{ color: '#efeadd', fontWeight: 600 }}>
+              <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: '0 0 8px' }}>
+                Last backup: <span style={{ color: onSurfaceWarm, fontWeight: 600 }}>
                   {new Date(backups[0].created_at + 'Z').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                 </span>
               </p>
-              <p style={{ fontSize: '12px', color: '#65625a', margin: 0, lineHeight: 1.5 }}>
+              <p style={{ fontSize: '12px', color: onSurfaceFaint, margin: 0, lineHeight: 1.5 }}>
                 Keeping the newest {keepCount} of {backups.length}, saved to a "_Backups" folder in Drive. Runs automatically once a month.
               </p>
             </div>
@@ -296,7 +297,7 @@ export default function SettingsPage() {
             style={{
               background: 'rgba(184,206,161,0.18)',
               border: '1px solid rgba(184,206,161,0.5)',
-              color: '#b8cea1',
+              color: tertiary,
               borderRadius: '6px',
               padding: '7px 14px',
               fontSize: '12px',
@@ -310,44 +311,44 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
-        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+      <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '16px' }}>
           GEMINI SPEND
         </div>
 
         {spendError ? (
-          <p style={{ fontSize: '12.5px', color: '#9c988d', margin: 0, lineHeight: 1.5 }}>
+          <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: 0, lineHeight: 1.5 }}>
             {spendError}{!isAdmin && (
-              <> <Link to="/account" style={{ color: '#c9a253' }}>Go to Account settings →</Link></>
+              <> <Link to="/account" style={{ color: primaryDim }}>Go to Account settings →</Link></>
             )}
           </p>
         ) : spend ? (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
-              <span style={{ fontSize: '13px', color: '#9c988d' }}>This month</span>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '20px', fontWeight: 600, color: '#c9a253' }}>
-                ${spend.cost_usd.toFixed(2)} <span style={{ fontSize: '12px', color: '#65625a', fontWeight: 400 }}>USD</span>
+              <span style={{ fontSize: '13px', color: onSurfaceMuted }}>This month</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '20px', fontWeight: 600, color: primaryDim }}>
+                ${spend.cost_usd.toFixed(2)} <span style={{ fontSize: '12px', color: onSurfaceFaint, fontWeight: 400 }}>USD</span>
               </span>
             </div>
-            <p style={{ fontSize: '11.5px', color: '#65625a', margin: 0 }}>
+            <p style={{ fontSize: '11.5px', color: onSurfaceFaint, margin: 0 }}>
               {formatSpendPeriod()}
             </p>
           </>
         ) : (
-          <p style={{ fontSize: '13px', color: '#65625a', margin: 0 }}>Loading…</p>
+          <p style={{ fontSize: '13px', color: onSurfaceFaint, margin: 0 }}>Loading…</p>
         )}
       </div>
 
-      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px' }}>
-        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '16px' }}>
+      <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px' }}>
+        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '16px' }}>
           OFFLINE CACHE
         </div>
 
         <div style={{ marginBottom: '12px' }}>
-          <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 8px' }}>
-            Cached decks: <span style={{ color: '#efeadd', fontWeight: 600 }}>{cachedDecks.length}</span>
+          <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: '0 0 8px' }}>
+            Cached decks: <span style={{ color: onSurfaceWarm, fontWeight: 600 }}>{cachedDecks.length}</span>
           </p>
-          <p style={{ fontSize: '12px', color: '#65625a', margin: 0, lineHeight: 1.5 }}>
+          <p style={{ fontSize: '12px', color: onSurfaceFaint, margin: 0, lineHeight: 1.5 }}>
             {cachedDecks.length === 0
               ? 'No decks cached yet. Open a deck to cache it for offline viewing.'
               : `${cachedDecks.length} deck${cachedDecks.length !== 1 ? 's' : ''} stored locally. When offline, you can still view cached decks.`}
@@ -360,7 +361,7 @@ export default function SettingsPage() {
           style={{
             background: cachedDecks.length > 0 ? 'rgba(255,180,171,0.12)' : 'rgba(255,180,171,0.06)',
             border: '1px solid rgba(255,180,171,0.3)',
-            color: cachedDecks.length > 0 ? '#ffb4ab' : '#8e7f77',
+            color: cachedDecks.length > 0 ? error : onSurfaceWarmFaint,
             borderRadius: '6px',
             padding: '7px 14px',
             fontSize: '12px',
@@ -382,8 +383,8 @@ function Row({ label, value }) {
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.06)'
     }}>
-      <span style={{ fontSize: '13px', color: '#9c988d' }}>{label}</span>
-      <span style={{ fontSize: '13.5px', color: '#efeadd' }}>{value}</span>
+      <span style={{ fontSize: '13px', color: onSurfaceMuted }}>{label}</span>
+      <span style={{ fontSize: '13.5px', color: onSurfaceWarm }}>{value}</span>
     </div>
   )
 }

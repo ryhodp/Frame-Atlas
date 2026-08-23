@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../AuthContext';
+import { heatmapTextCool, heatmapTextHot, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onSurfaceWarmMuted, primary, primaryDim, surfaceContainerDark, tertiary, warning } from '../theme';
 
 // ── Section wrapper — dark panel with an uppercase label ─────────────────────
 function Panel({ label, children, style }) {
   return (
     <div style={{
-      background: '#18181b',
+      background: surfaceContainerDark,
       border: '1px solid rgba(255,255,255,0.08)',
       borderRadius: '12px',
       padding: '18px 20px',
@@ -13,7 +14,7 @@ function Panel({ label, children, style }) {
     }}>
       <div style={{
         fontSize: '10px', fontWeight: 600, letterSpacing: '0.14em',
-        color: '#65625a', marginBottom: '14px'
+        color: onSurfaceFaint, marginBottom: '14px'
       }}>
         {label}
       </div>
@@ -27,7 +28,7 @@ function StatCard({ label, value, accent }) {
   return (
     <div style={{
       flex: 1, minWidth: '130px',
-      background: '#18181b',
+      background: surfaceContainerDark,
       border: '1px solid rgba(255,255,255,0.08)',
       borderRadius: '12px',
       padding: '16px 18px'
@@ -35,12 +36,12 @@ function StatCard({ label, value, accent }) {
       <div style={{
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: '26px', fontWeight: 500,
-        color: accent || '#efeadd', lineHeight: 1.1
+        color: accent || onSurfaceWarm, lineHeight: 1.1
       }}>
         {value}
       </div>
       <div style={{
-        fontSize: '11px', color: '#9c988d', marginTop: '6px',
+        fontSize: '11px', color: onSurfaceMuted, marginTop: '6px',
         letterSpacing: '0.04em'
       }}>
         {label}
@@ -59,7 +60,7 @@ function BarList({ items, color, maxBars = 10 }) {
         <div key={item.value} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{
             width: '110px', flexShrink: 0, textAlign: 'right',
-            fontSize: '11.5px', color: '#c8c3b8',
+            fontSize: '11.5px', color: onSurfaceWarmMuted,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
           }}>
             {item.value}
@@ -73,7 +74,7 @@ function BarList({ items, color, maxBars = 10 }) {
             }} />
             <span style={{
               fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '10px', color: '#9c988d', flexShrink: 0
+              fontSize: '10px', color: onSurfaceMuted, flexShrink: 0
             }}>
               {item.count}
             </span>
@@ -81,7 +82,7 @@ function BarList({ items, color, maxBars = 10 }) {
         </div>
       ))}
       {shown.length === 0 && (
-        <div style={{ fontSize: '12px', color: '#65625a' }}>No tags in this category yet.</div>
+        <div style={{ fontSize: '12px', color: onSurfaceFaint }}>No tags in this category yet.</div>
       )}
     </div>
   );
@@ -90,7 +91,7 @@ function BarList({ items, color, maxBars = 10 }) {
 // ── Library growth — hand-built SVG area chart of cumulative image count ─────
 function GrowthChart({ growth }) {
   if (!growth || growth.length === 0) {
-    return <div style={{ fontSize: '12px', color: '#65625a' }}>No images yet — growth appears after your first sync.</div>;
+    return <div style={{ fontSize: '12px', color: onSurfaceFaint }}>No images yet — growth appears after your first sync.</div>;
   }
 
   const W = 800, H = 240;
@@ -124,8 +125,8 @@ function GrowthChart({ growth }) {
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
       <defs>
         <linearGradient id="growthFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#c9a253" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#c9a253" stopOpacity="0.02" />
+          <stop offset="0%" stopColor={primaryDim} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={primaryDim} stopOpacity="0.02" />
         </linearGradient>
       </defs>
 
@@ -138,7 +139,7 @@ function GrowthChart({ growth }) {
           />
           <text
             x={PAD_L - 8} y={yFor(t) + 3} textAnchor="end"
-            fontSize="10" fill="#65625a" fontFamily="'JetBrains Mono', monospace"
+            fontSize="10" fill={onSurfaceFaint} fontFamily="'JetBrains Mono', monospace"
           >
             {t}
           </text>
@@ -152,17 +153,17 @@ function GrowthChart({ growth }) {
       {/* Area + line */}
       {growth.length > 1 && <path d={areaPath} fill="url(#growthFill)" />}
       {growth.length > 1 && (
-        <path d={linePath} fill="none" stroke="#d9a441" strokeWidth="2" strokeLinejoin="round" />
+        <path d={linePath} fill="none" stroke={primary} strokeWidth="2" strokeLinejoin="round" />
       )}
 
       {/* Dots + month labels */}
       {points.map((p, i) => (
         <g key={p.month}>
-          <circle cx={p.x} cy={p.y} r={growth.length === 1 ? 5 : 3} fill="#d9a441" />
+          <circle cx={p.x} cy={p.y} r={growth.length === 1 ? 5 : 3} fill={primary} />
           {(i % labelEvery === 0 || i === points.length - 1) && (
             <text
               x={p.x} y={PAD_T + plotH + 18} textAnchor="middle"
-              fontSize="10" fill="#9c988d" fontFamily="'JetBrains Mono', monospace"
+              fontSize="10" fill={onSurfaceMuted} fontFamily="'JetBrains Mono', monospace"
             >
               {monthLabel(p.month)}
             </text>
@@ -182,7 +183,7 @@ function TagHeatmap({ categories, categoryLabels, maxChips = 40 }) {
   all.sort((a, b) => b.count - a.count);
   const shown = all.slice(0, maxChips);
   if (shown.length === 0) {
-    return <div style={{ fontSize: '12px', color: '#65625a' }}>No tags yet — run auto-tagging first.</div>;
+    return <div style={{ fontSize: '12px', color: onSurfaceFaint }}>No tags yet — run auto-tagging first.</div>;
   }
   const max = shown[0].count;
 
@@ -202,7 +203,7 @@ function TagHeatmap({ categories, categoryLabels, maxChips = 40 }) {
               borderRadius: '6px',
               padding: '5px 9px',
               fontSize: `${11 + heat * 3}px`,
-              color: heat > 0.55 ? '#f4e8cd' : '#d6c9a8'
+              color: heat > 0.55 ? heatmapTextHot : heatmapTextCool
             }}
           >
             {t.value}
@@ -249,14 +250,14 @@ function AllUsersPanel() {
 
   if (error) {
     return (
-      <div style={{ padding: '60px 24px', textAlign: 'center', color: '#9c988d', fontSize: '14px' }}>
+      <div style={{ padding: '60px 24px', textAlign: 'center', color: onSurfaceMuted, fontSize: '14px' }}>
         Couldn’t load user analytics — check your connection and refresh.
       </div>
     );
   }
   if (!data) {
     return (
-      <div style={{ padding: '60px 24px', textAlign: 'center', color: '#65625a', fontSize: '13px' }}>
+      <div style={{ padding: '60px 24px', textAlign: 'center', color: onSurfaceFaint, fontSize: '13px' }}>
         Crunching the numbers…
       </div>
     );
@@ -265,9 +266,9 @@ function AllUsersPanel() {
   const { aggregate, users } = data;
   const th = {
     textAlign: 'left', fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
-    color: '#65625a', padding: '0 14px 10px', whiteSpace: 'nowrap'
+    color: onSurfaceFaint, padding: '0 14px 10px', whiteSpace: 'nowrap'
   };
-  const td = { fontSize: '12.5px', color: '#c8c3b8', padding: '10px 14px', whiteSpace: 'nowrap' };
+  const td = { fontSize: '12.5px', color: onSurfaceWarmMuted, padding: '10px 14px', whiteSpace: 'nowrap' };
 
   return (
     <>
@@ -275,7 +276,7 @@ function AllUsersPanel() {
         <StatCard label="Total users" value={aggregate.total_users} />
         <StatCard label="Total images" value={aggregate.total_images} />
         <StatCard label="Total storage" value={formatBytes(aggregate.total_storage_bytes)} />
-        <StatCard label="Active last 7 days" value={aggregate.active_last_7_days} accent="#b8cea1" />
+        <StatCard label="Active last 7 days" value={aggregate.active_last_7_days} accent={tertiary} />
       </div>
 
       <Panel label="PER-USER BREAKDOWN">
@@ -298,12 +299,12 @@ function AllUsersPanel() {
             <tbody>
               {users.map(u => (
                 <tr key={u.id} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                  <td style={{ ...td, color: '#efeadd' }}>{u.name}</td>
+                  <td style={{ ...td, color: onSurfaceWarm }}>{u.name}</td>
                   <td style={td}>
                     <span style={{
                       fontSize: '10.5px', padding: '2px 7px', borderRadius: '5px',
                       background: u.role === 'admin' ? 'rgba(217,164,65,0.15)' : 'rgba(255,255,255,0.06)',
-                      color: u.role === 'admin' ? '#d9a441' : '#9c988d'
+                      color: u.role === 'admin' ? primary : onSurfaceMuted
                     }}>
                       {u.role}
                     </span>
@@ -346,7 +347,7 @@ export default function AnalyticsPage() {
 
   if (error) {
     return (
-      <div style={{ padding: '60px 24px', textAlign: 'center', color: '#9c988d', fontSize: '14px' }}>
+      <div style={{ padding: '60px 24px', textAlign: 'center', color: onSurfaceMuted, fontSize: '14px' }}>
         Couldn’t load analytics — check your connection and refresh.
       </div>
     );
@@ -354,7 +355,7 @@ export default function AnalyticsPage() {
 
   if (!data) {
     return (
-      <div style={{ padding: '60px 24px', textAlign: 'center', color: '#65625a', fontSize: '13px' }}>
+      <div style={{ padding: '60px 24px', textAlign: 'center', color: onSurfaceFaint, fontSize: '13px' }}>
         Crunching the numbers…
       </div>
     );
@@ -365,10 +366,10 @@ export default function AnalyticsPage() {
       maxWidth: '1200px', margin: '0 auto', padding: '28px 24px 60px',
       fontFamily: "'Hanken Grotesk', system-ui, sans-serif"
     }}>
-      <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#efeadd', margin: '0 0 4px' }}>
+      <h2 style={{ fontSize: '24px', fontWeight: 600, color: onSurfaceWarm, margin: '0 0 4px' }}>
         Analytics
       </h2>
-      <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 20px' }}>
+      <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: '0 0 20px' }}>
         {tab === 'mine'
           ? 'What’s in your library — and what your eye gravitates toward.'
           : 'Usage across every account — content, storage, and activity.'}
@@ -383,7 +384,7 @@ export default function AnalyticsPage() {
               style={{
                 background: tab === t.key ? 'rgba(217,164,65,0.15)' : 'transparent',
                 border: `1px solid ${tab === t.key ? 'rgba(217,164,65,0.4)' : 'rgba(255,255,255,0.1)'}`,
-                color: tab === t.key ? '#d9a441' : '#9c988d',
+                color: tab === t.key ? primary : onSurfaceMuted,
                 borderRadius: '8px', padding: '7px 14px', fontSize: '12.5px',
                 cursor: 'pointer', fontFamily: 'inherit'
               }}
@@ -415,7 +416,7 @@ function MyLibraryPanels({ data }) {
       {/* Headline stats */}
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
         <StatCard label="Images" value={totals.images} />
-        <StatCard label="Favorites" value={totals.favorites} accent="#dcbd76" />
+        <StatCard label="Favorites" value={totals.favorites} accent={warning} />
         <StatCard label="Added this week" value={totals.added_last_7_days} />
         <StatCard label="Tags applied" value={totals.tags} />
         <StatCard label="Decks" value={totals.decks} />
@@ -441,7 +442,7 @@ function MyLibraryPanels({ data }) {
           <Panel key={p.cat} label={p.label}>
             <BarList
               items={categories?.[p.cat] || []}
-              color={colors?.[p.cat] || '#c9a253'}
+              color={colors?.[p.cat] || primaryDim}
             />
           </Panel>
         ))}

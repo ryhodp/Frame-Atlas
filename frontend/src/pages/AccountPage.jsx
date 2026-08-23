@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
+import { error as errorColor, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outline, outlineVariant, primary, primaryDim, success, successBright, surfaceContainerInput, surfaceContainerLow, warning } from '../theme';
 
 // ── Circular progress ring — same visual as the admin Sync button's spirit. ─
 function ProgressRing({ pct, size = 96, stroke = 7, color }) {
@@ -221,32 +222,32 @@ export default function AccountPage() {
   const robotEmail = setup?.service_account_email;
 
   return (
-    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 24px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: '#efeadd' }}>
+    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 24px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: onSurfaceWarm }}>
       <h1 style={{ fontSize: '28px', fontWeight: 700, margin: '0 0 6px' }}>Your Library</h1>
-      <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 32px' }}>
+      <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: '0 0 32px' }}>
         Bring your own Google Drive folder into Frame Atlas — your photos stay
         private to you, separate from everyone else's.
       </p>
 
       {/* Step 1: share the folder with the robot email */}
-      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+      <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a' }}>
+          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint }}>
             STEP 1 · SHARE YOUR FOLDER
           </div>
-          <Link to="/account/connect-guide" style={{ fontSize: '12px', color: '#c9a253', textDecoration: 'none' }}>
+          <Link to="/account/connect-guide" style={{ fontSize: '12px', color: primaryDim, textDecoration: 'none' }}>
             Need help? →
           </Link>
         </div>
-        <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.5 }}>
-          In Google Drive, right-click your images folder → <b style={{ color: '#efeadd' }}>Share</b> →
-          paste this email as a <b style={{ color: '#efeadd' }}>Viewer</b>:
+        <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: '0 0 12px', lineHeight: 1.5 }}>
+          In Google Drive, right-click your images folder → <b style={{ color: onSurfaceWarm }}>Share</b> →
+          paste this email as a <b style={{ color: onSurfaceWarm }}>Viewer</b>:
         </p>
         {robotEmail ? (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
             <code style={{
-              flex: 1, background: '#0f1013', border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: '#dcbd76',
+              flex: 1, background: surfaceContainerInput, border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: warning,
               fontFamily: "'JetBrains Mono', monospace", overflowWrap: 'anywhere'
             }}>
               {robotEmail}
@@ -256,21 +257,21 @@ export default function AccountPage() {
             </button>
           </div>
         ) : (
-          <p style={{ fontSize: '13px', color: '#65625a', margin: 0 }}>Loading…</p>
+          <p style={{ fontSize: '13px', color: onSurfaceFaint, margin: 0 }}>Loading…</p>
         )}
       </div>
 
       {/* Step 2: paste the folder link */}
-      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
-        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '10px' }}>
+      <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginBottom: '16px' }}>
+        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '10px' }}>
           STEP 2 · PASTE THE FOLDER LINK
         </div>
         {setup?.folder_connected && (
           <div style={{
             marginBottom: '12px', padding: '10px 12px', background: 'rgba(201,162,83,0.08)',
-            border: '1px solid rgba(201,162,83,0.25)', borderRadius: '8px', fontSize: '13px', color: '#9c988d'
+            border: '1px solid rgba(201,162,83,0.25)', borderRadius: '8px', fontSize: '13px', color: onSurfaceMuted
           }}>
-            Connected: <span style={{ color: '#c9a253', fontWeight: 600 }}>📁 {setup.folder_name}</span>
+            Connected: <span style={{ color: primaryDim, fontWeight: 600 }}>📁 {setup.folder_name}</span>
           </div>
         )}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -280,8 +281,8 @@ export default function AccountPage() {
             onKeyDown={e => { if (e.key === 'Enter') connectFolder(); }}
             placeholder={setup?.folder_connected ? 'Connect a different folder…' : 'https://drive.google.com/drive/folders/…'}
             style={{
-              flex: 1, background: '#0f1013', border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '8px', padding: '9px 12px', fontSize: '13px', color: '#efeadd',
+              flex: 1, background: surfaceContainerInput, border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '8px', padding: '9px 12px', fontSize: '13px', color: onSurfaceWarm,
               fontFamily: 'inherit', outline: 'none'
             }}
           />
@@ -289,11 +290,11 @@ export default function AccountPage() {
             {connecting ? 'Checking…' : 'Connect'}
           </button>
         </div>
-        <p style={{ fontSize: '11px', color: '#65625a', margin: connectMsg ? '0 0 10px' : 0 }}>
+        <p style={{ fontSize: '11px', color: onSurfaceFaint, margin: connectMsg ? '0 0 10px' : 0 }}>
           Open the folder in Drive and copy the web address from the browser bar.
         </p>
         {connectMsg && (
-          <p style={{ fontSize: '12.5px', color: connectMsg.ok ? '#7fb87f' : '#ffb4ab', margin: 0, lineHeight: 1.5 }}>
+          <p style={{ fontSize: '12.5px', color: connectMsg.ok ? success : errorColor, margin: 0, lineHeight: 1.5 }}>
             {connectMsg.text}
           </p>
         )}
@@ -301,18 +302,18 @@ export default function AccountPage() {
 
       {/* Step 3: sync */}
       <div style={{
-        background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px',
+        background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px',
         opacity: setup?.folder_connected ? 1 : 0.5, pointerEvents: setup?.folder_connected ? 'auto' : 'none'
       }}>
-        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '14px' }}>
+        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '14px' }}>
           STEP 3 · SYNC
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <div style={{ position: 'relative', width: '96px', height: '96px', flexShrink: 0 }}>
-            <ProgressRing pct={syncing || syncDone ? syncPct : 0} color={syncDone ? '#6ee7b7' : '#c9a253'} />
+            <ProgressRing pct={syncing || syncDone ? syncPct : 0} color={syncDone ? successBright : primaryDim} />
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {(syncing || syncDone) && (
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '17px', fontWeight: 600, color: syncDone ? '#6ee7b7' : '#c9a253' }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '17px', fontWeight: 600, color: syncDone ? successBright : primaryDim }}>
                   {syncPct}%
                 </span>
               )}
@@ -322,9 +323,9 @@ export default function AccountPage() {
             <button onClick={startSync} disabled={!setup?.folder_connected || syncing} style={{ ...primaryBtnStyle(!setup?.folder_connected || syncing), marginBottom: '8px' }}>
               {syncing ? 'Syncing…' : syncDone ? 'Sync Again' : 'Sync Now'}
             </button>
-            {syncMsg && <p style={{ fontSize: '12px', color: '#9c988d', margin: 0 }}>{syncMsg}</p>}
+            {syncMsg && <p style={{ fontSize: '12px', color: onSurfaceMuted, margin: 0 }}>{syncMsg}</p>}
             {setup?.image_cap && setup?.image_count > 0 && (
-              <p style={{ fontSize: '11px', color: '#65625a', margin: '6px 0 0' }}>
+              <p style={{ fontSize: '11px', color: onSurfaceFaint, margin: '6px 0 0' }}>
                 {setup.image_count} / {setup.image_cap} images in your library
               </p>
             )}
@@ -334,11 +335,11 @@ export default function AccountPage() {
 
       {/* Step 4: AI tagging key (non-admin only) */}
       {!isAdmin && (
-        <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginTop: '16px' }}>
-          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '10px' }}>
+        <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginTop: '16px' }}>
+          <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '10px' }}>
             STEP 4 · YOUR GEMINI API KEY
           </div>
-          <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 14px', lineHeight: 1.5 }}>
+          <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: '0 0 14px', lineHeight: 1.5 }}>
             Add your own Gemini API key to AI-tag your synced photos and use natural-language search.
             Calls run on your own key, not the shared one — nothing gets tagged until you add one.
           </p>
@@ -346,7 +347,7 @@ export default function AccountPage() {
           {keyStatus?.has_key && (
             <div style={{
               marginBottom: '12px', padding: '10px 12px', background: 'rgba(127,184,127,0.08)',
-              border: '1px solid rgba(127,184,127,0.25)', borderRadius: '8px', fontSize: '13px', color: '#7fb87f'
+              border: '1px solid rgba(127,184,127,0.25)', borderRadius: '8px', fontSize: '13px', color: success
             }}>
               ✓ Key saved (•••••••{keyStatus.key_last4})
             </div>
@@ -359,8 +360,8 @@ export default function AccountPage() {
               onChange={e => setGeminiKey(e.target.value)}
               placeholder={keyStatus?.has_key ? 'Replace saved key…' : 'Paste your Gemini API key'}
               style={{
-                flex: 1, background: '#0f1013', border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: '8px', padding: '9px 12px', fontSize: '13px', color: '#efeadd',
+                flex: 1, background: surfaceContainerInput, border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: '8px', padding: '9px 12px', fontSize: '13px', color: onSurfaceWarm,
                 fontFamily: 'inherit', outline: 'none'
               }}
             />
@@ -368,36 +369,36 @@ export default function AccountPage() {
               {savingKey ? 'Saving…' : 'Save'}
             </button>
           </div>
-          <p style={{ fontSize: '11px', color: '#65625a', margin: '0 0 14px' }}>
+          <p style={{ fontSize: '11px', color: onSurfaceFaint, margin: '0 0 14px' }}>
             (optional) — skip this and your photos stay untagged but still searchable by filename.
           </p>
 
-          {keyMsg && <p style={{ fontSize: '12px', color: '#ffb4ab', margin: '0 0 14px' }}>{keyMsg}</p>}
+          {keyMsg && <p style={{ fontSize: '12px', color: errorColor, margin: '0 0 14px' }}>{keyMsg}</p>}
 
           {keyStatus?.has_key && (
             <>
               <button onClick={startTaggingMine} disabled={tagging} style={{ ...secondaryBtnStyle(tagging), marginBottom: '8px' }}>
                 {tagging ? 'Tagging…' : 'Tag my photos'}
               </button>
-              {tagMsg && <p style={{ fontSize: '12px', color: '#9c988d', margin: 0 }}>{tagMsg}</p>}
+              {tagMsg && <p style={{ fontSize: '12px', color: onSurfaceMuted, margin: 0 }}>{tagMsg}</p>}
             </>
           )}
         </div>
       )}
 
       {/* Optional: Google sign-in, only needed for the Upload button */}
-      <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px', marginTop: '16px' }}>
-        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: '#65625a', marginBottom: '10px' }}>
+      <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px', marginTop: '16px' }}>
+        <div style={{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em', color: onSurfaceFaint, marginBottom: '10px' }}>
           OPTIONAL · UPLOADS
         </div>
-        <p style={{ fontSize: '12.5px', color: '#9c988d', margin: '0 0 14px', lineHeight: 1.5 }}>
+        <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: '0 0 14px', lineHeight: 1.5 }}>
           To use the ⬆ Upload button (adding single images straight from this device into your
           Drive folder), connect your Google account. Not needed for syncing.
         </p>
         {signedIn === null ? (
-          <p style={{ fontSize: '13px', color: '#65625a', margin: 0 }}>Checking…</p>
+          <p style={{ fontSize: '13px', color: onSurfaceFaint, margin: 0 }}>Checking…</p>
         ) : signedIn ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', color: '#7fb87f' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', color: success }}>
             <span>✓</span> Google account connected
           </div>
         ) : (
@@ -410,13 +411,13 @@ export default function AccountPage() {
       {error && (
         <div style={{
           marginTop: '16px', padding: '10px 12px', background: 'rgba(255,180,171,0.1)',
-          border: '1px solid rgba(255,180,171,0.35)', color: '#ffb4ab', borderRadius: '8px', fontSize: '12.5px'
+          border: '1px solid rgba(255,180,171,0.35)', color: errorColor, borderRadius: '8px', fontSize: '12.5px'
         }}>
           {error}
         </div>
       )}
 
-      <p style={{ fontSize: '11.5px', color: '#65625a', marginTop: '24px', lineHeight: 1.5 }}>
+      <p style={{ fontSize: '11.5px', color: onSurfaceFaint, marginTop: '24px', lineHeight: 1.5 }}>
         Your photos are private to you; nobody else can search or see them. Sharing as Viewer means
         Frame Atlas can only ever read your folder — it can't change or delete anything in your Drive.
       </p>
@@ -426,8 +427,8 @@ export default function AccountPage() {
 
 function primaryBtnStyle(disabled) {
   return {
-    background: disabled ? 'rgba(217,164,65,0.2)' : '#d9a441',
-    color: disabled ? '#8e9099' : '#3d2f00',
+    background: disabled ? 'rgba(217,164,65,0.2)' : primary,
+    color: disabled ? outline : onPrimary,
     border: 'none', borderRadius: '8px', padding: '10px 18px',
     fontSize: '13.5px', fontWeight: 600, cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit'
   };
@@ -435,7 +436,7 @@ function primaryBtnStyle(disabled) {
 
 function secondaryBtnStyle(disabled) {
   return {
-    background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: disabled ? '#65625a' : '#d9a441',
+    background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: disabled ? onSurfaceFaint : primary,
     borderRadius: '8px', padding: '9px 16px', fontSize: '13px',
     cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit'
   };

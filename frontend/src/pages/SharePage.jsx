@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { getViewerToken, getViewerName, setViewerName as saveViewerName } from '../viewerIdentity';
+import { dangerWarm, onPrimary, onSurface, onSurfaceMuted, onSurfaceWarmDimAlt, outline, outlineDim, outlineMuted, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt } from '../theme';
 
 // ── Public read-only lookbook view ────────────────────────────────────────────
 // Rendered at /share/<token> with no login and no app chrome. Anyone with the
@@ -132,7 +133,7 @@ export default function SharePage() {
   if (loading) {
     return (
       <Centered>
-        <p style={{ color: '#8e9099', fontSize: '14px' }}>Loading lookbook…</p>
+        <p style={{ color: outline, fontSize: '14px' }}>Loading lookbook…</p>
       </Centered>
     );
   }
@@ -141,10 +142,10 @@ export default function SharePage() {
     return (
       <Centered>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '20px', color: '#e2e2e6', fontWeight: 600, marginBottom: '8px' }}>
+          <div style={{ fontSize: '20px', color: onSurface, fontWeight: 600, marginBottom: '8px' }}>
             This link isn't active
           </div>
-          <p style={{ color: '#8e9099', fontSize: '14px', margin: 0 }}>
+          <p style={{ color: outline, fontSize: '14px', margin: 0 }}>
             The share link is invalid or has been revoked by the deck's owner.
           </p>
         </div>
@@ -164,17 +165,17 @@ export default function SharePage() {
       <div style={{ marginBottom: '40px' }}>
         <div style={{
           fontSize: '11px', letterSpacing: '0.16em', textTransform: 'uppercase',
-          color: '#d9a441', fontWeight: 600, marginBottom: '10px'
+          color: primary, fontWeight: 600, marginBottom: '10px'
         }}>
           Frame Atlas · Shared Lookbook
         </div>
-        <h1 style={{ fontSize: '36px', lineHeight: 1.15, fontWeight: 700, color: '#e2e2e6', margin: 0 }}>
+        <h1 style={{ fontSize: '36px', lineHeight: 1.15, fontWeight: 700, color: onSurface, margin: 0 }}>
           {deck.name}
         </h1>
         {deck.feedback_enabled && (
-          <div style={{ fontSize: '12.5px', color: '#8e9099', marginTop: '12px' }}>
+          <div style={{ fontSize: '12.5px', color: outline, marginTop: '12px' }}>
             Pick your favorite frames and leave notes — {viewerName
-              ? <>you're leaving feedback as <strong style={{ color: '#c9c5ba' }}>{viewerName}</strong></>
+              ? <>you're leaving feedback as <strong style={{ color: onSurfaceWarmDimAlt }}>{viewerName}</strong></>
               : "everyone with this link can see what's picked and said"}.
           </div>
         )}
@@ -191,7 +192,7 @@ export default function SharePage() {
       )}
 
       {deck.images.length === 0 && (
-        <p style={{ color: '#8e9099', fontSize: '14px' }}>This lookbook is empty.</p>
+        <p style={{ color: outline, fontSize: '14px' }}>This lookbook is empty.</p>
       )}
 
       {namePromptOpen && (
@@ -217,9 +218,9 @@ function ShareSection({ title, frames, feedbackProps }) {
     <div style={{ marginBottom: '48px' }}>
       {title && (
         <h2 style={{
-          fontSize: '19px', fontWeight: 600, color: '#e2e2e6',
+          fontSize: '19px', fontWeight: 600, color: onSurface,
           margin: '0 0 16px', paddingBottom: '10px',
-          borderBottom: '1px solid #2c2f35'
+          borderBottom: `1px solid ${outlineDim}`
         }}>
           {title}
         </h2>
@@ -231,12 +232,12 @@ function ShareSection({ title, frames, feedbackProps }) {
       }}>
         {frames.map((frame, i) => (
           <div key={frame.deck_image_id} style={{
-            background: '#1a1c20',
-            border: '1px solid #2c2f35',
+            background: surfaceContainerLow,
+            border: `1px solid ${outlineDim}`,
             borderRadius: '12px',
             overflow: 'hidden'
           }}>
-            <div style={{ position: 'relative', background: '#111317' }}>
+            <div style={{ position: 'relative', background: surfaceContainerLowestAlt }}>
               {frame.thumbnail && (
                 <img
                   src={frame.thumbnail}
@@ -246,7 +247,7 @@ function ShareSection({ title, frames, feedbackProps }) {
               )}
               <div style={{
                 position: 'absolute', top: '8px', left: '8px',
-                background: 'rgba(0,0,0,0.65)', color: '#e2e2e6',
+                background: 'rgba(0,0,0,0.65)', color: onSurface,
                 borderRadius: '6px', minWidth: '22px', height: '22px',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: '12px', fontWeight: 600, padding: '0 6px'
@@ -257,7 +258,7 @@ function ShareSection({ title, frames, feedbackProps }) {
             {frame.storyboard_note && (
               <div style={{
                 padding: '10px 12px', fontSize: '13px', lineHeight: 1.5,
-                color: '#c9c5ba', borderTop: '1px solid #2c2f35',
+                color: onSurfaceWarmDimAlt, borderTop: `1px solid ${outlineDim}`,
                 whiteSpace: 'pre-wrap'
               }}>
                 {frame.storyboard_note}
@@ -303,15 +304,15 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
   };
 
   return (
-    <div style={{ padding: '10px 12px', borderTop: '1px solid #2c2f35' }}>
+    <div style={{ padding: '10px 12px', borderTop: `1px solid ${outlineDim}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <button
           onClick={handlePickClick}
           style={{
             display: 'flex', alignItems: 'center', gap: '5px',
             background: picked_by_me ? 'rgba(217,164,65,0.16)' : 'none',
-            border: `1px solid ${picked_by_me ? 'rgba(217,164,65,0.6)' : '#3a3d44'}`,
-            color: picked_by_me ? '#d9a441' : '#c9c5ba',
+            border: `1px solid ${picked_by_me ? 'rgba(217,164,65,0.6)' : outlineMuted}`,
+            color: picked_by_me ? primary : onSurfaceWarmDimAlt,
             borderRadius: '999px', padding: '5px 12px',
             fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit'
           }}
@@ -319,7 +320,7 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
           {picked_by_me ? '★ Picked' : '☆ Pick this one'}
         </button>
         {pick_count > 0 && (
-          <span style={{ fontSize: '12px', color: '#8e9099' }}>
+          <span style={{ fontSize: '12px', color: outline }}>
             {pick_count} pick{pick_count === 1 ? '' : 's'}
           </span>
         )}
@@ -327,7 +328,7 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
           onClick={() => setExpanded(e => !e)}
           style={{
             marginLeft: 'auto', background: 'none', border: 'none',
-            color: '#8e9099', fontSize: '12.5px', cursor: 'pointer', fontFamily: 'inherit',
+            color: outline, fontSize: '12.5px', cursor: 'pointer', fontFamily: 'inherit',
             padding: '5px 4px'
           }}
         >
@@ -339,10 +340,10 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
         <div style={{ marginTop: '10px' }}>
           {comments.map(c => (
             <div key={c.id} style={{ marginBottom: '8px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#d9a441', marginBottom: '1px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: primary, marginBottom: '1px' }}>
                 {c.viewer_name}
               </div>
-              <div style={{ fontSize: '13px', color: '#c9c5ba', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+              <div style={{ fontSize: '13px', color: onSurfaceWarmDimAlt, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
                 {c.body}
               </div>
             </div>
@@ -355,8 +356,8 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
               placeholder="Leave a note on this frame…"
               rows={2}
               style={{
-                flex: 1, resize: 'none', background: '#111317', color: '#e2e2e6',
-                border: '1px solid #3a3d44', borderRadius: '8px', padding: '8px 10px',
+                flex: 1, resize: 'none', background: surfaceContainerLowestAlt, color: onSurface,
+                border: `1px solid ${outlineMuted}`, borderRadius: '8px', padding: '8px 10px',
                 fontSize: '13px', fontFamily: 'inherit', lineHeight: 1.4
               }}
             />
@@ -364,7 +365,7 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
               onClick={handleSend}
               disabled={posting || !text.trim()}
               style={{
-                background: '#d9a441', color: '#3d2f00', border: 'none',
+                background: primary, color: onPrimary, border: 'none',
                 borderRadius: '8px', padding: '0 16px',
                 fontSize: '12.5px', fontWeight: 600, fontFamily: 'inherit',
                 cursor: posting || !text.trim() ? 'default' : 'pointer',
@@ -375,7 +376,7 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
             </button>
           </div>
           {commentError && (
-            <div style={{ fontSize: '11.5px', color: '#e07a5f', marginTop: '6px' }}>
+            <div style={{ fontSize: '11.5px', color: dangerWarm, marginTop: '6px' }}>
               That didn't go through — try again.
             </div>
           )}
@@ -408,15 +409,15 @@ function NamePromptModal({ onSubmit, onClose }) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31', border: '1px solid rgba(255,255,255,0.12)',
+          background: surfaceContainerHigh, border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '12px', padding: '22px', width: '380px', maxWidth: '100%',
           boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
         }}
       >
-        <div style={{ fontSize: '15px', fontWeight: 600, color: '#e2e2e6', marginBottom: '6px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface, marginBottom: '6px' }}>
           What's your name?
         </div>
-        <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5, marginBottom: '14px' }}>
+        <div style={{ fontSize: '12.5px', color: onSurfaceMuted, lineHeight: 1.5, marginBottom: '14px' }}>
           So the deck's owner (and everyone else with this link) knows who left it. You'll only
           be asked once on this device.
         </div>
@@ -428,8 +429,8 @@ function NamePromptModal({ onSubmit, onClose }) {
           maxLength={60}
           placeholder="Your name"
           style={{
-            width: '100%', boxSizing: 'border-box', background: '#111317', color: '#e2e2e6',
-            border: '1px solid #3a3d44', borderRadius: '8px', padding: '10px 12px',
+            width: '100%', boxSizing: 'border-box', background: surfaceContainerLowestAlt, color: onSurface,
+            border: `1px solid ${outlineMuted}`, borderRadius: '8px', padding: '10px 12px',
             fontSize: '14px', fontFamily: 'inherit', marginBottom: '16px'
           }}
         />
@@ -437,7 +438,7 @@ function NamePromptModal({ onSubmit, onClose }) {
           <button
             onClick={onClose}
             style={{
-              background: 'none', border: '1px solid #44474f', color: '#9c988d',
+              background: 'none', border: `1px solid ${outlineVariant}`, color: onSurfaceMuted,
               borderRadius: '8px', padding: '9px 16px', fontSize: '13px',
               cursor: 'pointer', fontFamily: 'inherit'
             }}
@@ -448,7 +449,7 @@ function NamePromptModal({ onSubmit, onClose }) {
             onClick={submit}
             disabled={!name.trim()}
             style={{
-              background: '#d9a441', color: '#3d2f00', border: 'none',
+              background: primary, color: onPrimary, border: 'none',
               borderRadius: '8px', padding: '9px 18px', fontSize: '13px', fontWeight: 600,
               cursor: name.trim() ? 'pointer' : 'default', opacity: name.trim() ? 1 : 0.5,
               fontFamily: 'inherit'

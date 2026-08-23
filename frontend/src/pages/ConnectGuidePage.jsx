@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outlineVariant, primary, primaryDim, surfaceContainerLow, warning } from '../theme';
 
 // V17: the guide now walks through the "share your folder with the robot
 // email" flow (how personal libraries actually connect). The old Google
@@ -65,18 +66,18 @@ const UPLOAD_STEPS = [
 
 function StepCard({ step }) {
   return (
-    <div style={{ background: '#1a1c20', border: '1px solid #44474f', borderRadius: '12px', padding: '20px' }}>
+    <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
         <div style={{
           width: '24px', height: '24px', borderRadius: '50%', background: 'rgba(201,162,83,0.15)',
-          border: '1px solid rgba(201,162,83,0.4)', color: '#c9a253', fontSize: '12px', fontWeight: 700,
+          border: '1px solid rgba(201,162,83,0.4)', color: primaryDim, fontSize: '12px', fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
         }}>
           {step.n}
         </div>
         <div style={{ fontSize: '15px', fontWeight: 600 }}>{step.title}</div>
       </div>
-      <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 12px', lineHeight: 1.6 }}>
+      <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: '0 0 12px', lineHeight: 1.6 }}>
         {step.body}
       </p>
       <img
@@ -110,15 +111,15 @@ export default function ConnectGuidePage() {
   };
 
   return (
-    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 24px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: '#efeadd' }}>
-      <Link to="/account" style={{ fontSize: '12.5px', color: '#c9a253', textDecoration: 'none' }}>
+    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 24px', fontFamily: "'Hanken Grotesk', system-ui, sans-serif", color: onSurfaceWarm }}>
+      <Link to="/account" style={{ fontSize: '12.5px', color: primaryDim, textDecoration: 'none' }}>
         ← Back to Account
       </Link>
 
       <h1 style={{ fontSize: '26px', fontWeight: 700, margin: '14px 0 6px' }}>
         Connecting your Drive folder
       </h1>
-      <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 20px', lineHeight: 1.6 }}>
+      <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: '0 0 20px', lineHeight: 1.6 }}>
         A one-time, two-minute setup: you share your folder with Frame Atlas's robot
         account (like sharing with a friend, except the friend is an app), then paste
         the folder's link. After that, syncing new photos is a single click.
@@ -131,15 +132,15 @@ export default function ConnectGuidePage() {
           border: '1px solid rgba(201,162,83,0.25)', borderRadius: '10px'
         }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em', color: '#65625a', marginBottom: '6px' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em', color: onSurfaceFaint, marginBottom: '6px' }}>
               THE ROBOT EMAIL (FOR STEP 2)
             </div>
-            <code style={{ fontSize: '12px', color: '#dcbd76', fontFamily: "'JetBrains Mono', monospace", overflowWrap: 'anywhere' }}>
+            <code style={{ fontSize: '12px', color: warning, fontFamily: "'JetBrains Mono', monospace", overflowWrap: 'anywhere' }}>
               {robotEmail}
             </code>
           </div>
           <button onClick={copyEmail} style={{
-            background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: '#d9a441',
+            background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: primary,
             borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer',
             fontFamily: 'inherit', alignSelf: 'center'
           }}>
@@ -155,7 +156,7 @@ export default function ConnectGuidePage() {
       <h2 style={{ fontSize: '19px', fontWeight: 700, margin: '36px 0 6px' }}>
         Optional: connect Google for uploads
       </h2>
-      <p style={{ fontSize: '13px', color: '#9c988d', margin: '0 0 20px', lineHeight: 1.6 }}>
+      <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: '0 0 20px', lineHeight: 1.6 }}>
         Totally separate from syncing — only needed if you want the ⬆ Upload button,
         which adds single images from your phone or computer straight into your folder.
       </p>
@@ -167,7 +168,7 @@ export default function ConnectGuidePage() {
         marginTop: '20px', padding: '14px 16px', background: 'rgba(255,255,255,0.03)',
         border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px'
       }}>
-        <p style={{ fontSize: '12.5px', color: '#9c988d', margin: 0, lineHeight: 1.6 }}>
+        <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: 0, lineHeight: 1.6 }}>
           Still stuck? Message Ryan directly — screenshots of whatever screen you're on make it a lot
           faster to figure out what's going wrong.
         </p>
