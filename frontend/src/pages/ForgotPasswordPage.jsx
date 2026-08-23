@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AuthShell, FormField, inputStyle, errorStyle, submitStyle } from './LoginPage';
+import { surfaceContainerLowest, outlineVariant, primary, outline } from '../theme';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -36,12 +37,12 @@ export default function ForgotPasswordPage() {
     return (
       <AuthShell title="Reset link ready" subtitle="This link works once and expires in 1 hour">
         <div style={{
-          wordBreak: 'break-all', background: '#0a0a0b', border: '1px solid #44474f',
+          wordBreak: 'break-all', background: surfaceContainerLowest, border: `1px solid ${outlineVariant}`,
           borderRadius: '8px', padding: '12px', fontSize: '13px', marginBottom: '16px'
         }}>
-          <a href={resetUrl} style={{ color: '#d9a441' }}>{resetUrl}</a>
+          <a href={resetUrl} style={{ color: primary }}>{resetUrl}</a>
         </div>
-        <Link to="/login" style={{ display: 'block', textAlign: 'center', fontSize: '13px', color: '#8e9099' }}>
+        <Link to="/login" style={{ display: 'block', textAlign: 'center', fontSize: '13px', color: outline }}>
           Back to sign in
         </Link>
       </AuthShell>
@@ -68,8 +69,8 @@ export default function ForgotPasswordPage() {
         </button>
       </form>
 
-      <div style={{ marginTop: '20px', fontSize: '13px', color: '#8e9099', textAlign: 'center' }}>
-        <Link to="/login" style={{ color: '#d9a441' }}>Back to sign in</Link>
+      <div style={{ marginTop: '20px', fontSize: '13px', color: outline, textAlign: 'center' }}>
+        <Link to="/login" style={{ color: primary }}>Back to sign in</Link>
       </div>
     </AuthShell>
   );

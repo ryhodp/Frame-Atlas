@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
-import { PAGE_BG } from '../theme';
+import {
+  PAGE_BG, surfaceContainerLow, surfaceContainerLowest, outlineVariant,
+  onSurface, onSurfaceMuted, outline, error as errorColor, primary, onPrimary
+} from '../theme';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -63,11 +66,11 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <div style={{ marginTop: '14px', fontSize: '13px', color: '#8e9099', textAlign: 'center' }}>
-        <Link to="/forgot-password" style={{ color: '#d9a441' }}>Forgot password?</Link>
+      <div style={{ marginTop: '14px', fontSize: '13px', color: outline, textAlign: 'center' }}>
+        <Link to="/forgot-password" style={{ color: primary }}>Forgot password?</Link>
       </div>
-      <div style={{ marginTop: '10px', fontSize: '13px', color: '#8e9099', textAlign: 'center' }}>
-        Have an invite code? <Link to="/register" style={{ color: '#d9a441' }}>Create an account</Link>
+      <div style={{ marginTop: '10px', fontSize: '13px', color: outline, textAlign: 'center' }}>
+        Have an invite code? <Link to="/register" style={{ color: primary }}>Create an account</Link>
       </div>
     </AuthShell>
   );
@@ -81,14 +84,14 @@ export function AuthShell({ title, subtitle, children }) {
     }}>
       <div style={{
         width: 'min(380px, 100%)',
-        background: '#1a1c20',
-        border: '1px solid #44474f',
+        background: surfaceContainerLow,
+        border: `1px solid ${outlineVariant}`,
         borderRadius: '14px',
         padding: '32px 28px',
       }}>
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-          <div style={{ fontSize: '22px', fontWeight: 600, color: '#e2e2e6', marginBottom: '6px' }}>{title}</div>
-          <div style={{ fontSize: '13px', color: '#8e9099' }}>{subtitle}</div>
+          <div style={{ fontSize: '22px', fontWeight: 600, color: onSurface, marginBottom: '6px' }}>{title}</div>
+          <div style={{ fontSize: '13px', color: outline }}>{subtitle}</div>
         </div>
         {children}
       </div>
@@ -99,7 +102,7 @@ export function AuthShell({ title, subtitle, children }) {
 export function FormField({ label, children }) {
   return (
     <div style={{ marginBottom: '16px' }}>
-      <label style={{ display: 'block', fontSize: '12px', color: '#9c988d', marginBottom: '6px' }}>
+      <label style={{ display: 'block', fontSize: '12px', color: onSurfaceMuted, marginBottom: '6px' }}>
         {label}
       </label>
       {children}
@@ -109,9 +112,9 @@ export function FormField({ label, children }) {
 
 export const inputStyle = {
   width: '100%',
-  background: '#0a0a0b',
-  color: '#e2e2e6',
-  border: '1px solid #44474f',
+  background: surfaceContainerLowest,
+  color: onSurface,
+  border: `1px solid ${outlineVariant}`,
   borderRadius: '8px',
   padding: '10px 12px',
   fontSize: '14px',
@@ -123,7 +126,7 @@ export const inputStyle = {
 export const errorStyle = {
   background: 'rgba(255,180,171,0.1)',
   border: '1px solid rgba(255,180,171,0.35)',
-  color: '#ffb4ab',
+  color: errorColor,
   borderRadius: '8px',
   padding: '10px 12px',
   fontSize: '12.5px',
@@ -133,8 +136,8 @@ export const errorStyle = {
 export function submitStyle(disabled) {
   return {
     width: '100%',
-    background: disabled ? 'rgba(217,164,65,0.2)' : '#d9a441',
-    color: disabled ? '#8e9099' : '#3d2f00',
+    background: disabled ? 'rgba(217,164,65,0.2)' : primary,
+    color: disabled ? outline : onPrimary,
     border: 'none',
     borderRadius: '8px',
     padding: '11px',

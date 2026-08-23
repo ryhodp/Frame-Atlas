@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuthShell, FormField, inputStyle, errorStyle, submitStyle } from './LoginPage';
+import { primary } from '../theme';
 
 export default function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
@@ -45,7 +46,7 @@ export default function ResetPasswordPage() {
     return (
       <AuthShell title="Reset password" subtitle="This link is missing its token">
         <div style={errorStyle}>This reset link looks broken. Request a new one.</div>
-        <Link to="/forgot-password" style={{ color: '#d9a441', fontSize: '13px' }}>Request a new link</Link>
+        <Link to="/forgot-password" style={{ color: primary, fontSize: '13px' }}>Request a new link</Link>
       </AuthShell>
     );
   }
@@ -53,7 +54,7 @@ export default function ResetPasswordPage() {
   if (done) {
     return (
       <AuthShell title="Password updated" subtitle="Taking you to sign in…">
-        <Link to="/login" style={{ color: '#d9a441', fontSize: '13px' }}>Sign in now</Link>
+        <Link to="/login" style={{ color: primary, fontSize: '13px' }}>Sign in now</Link>
       </AuthShell>
     );
   }

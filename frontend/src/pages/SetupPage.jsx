@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../AuthContext';
 import { AuthShell, FormField, inputStyle, errorStyle, submitStyle } from './LoginPage';
+import { onSurfaceFaint } from '../theme';
 
 export default function SetupPage({ onDone }) {
   const [email, setEmail] = useState('');
@@ -58,7 +59,7 @@ export default function SetupPage({ onDone }) {
             onChange={e => setPassword(e.target.value)}
             style={inputStyle}
           />
-          <div style={{ fontSize: '11px', color: '#65625a', marginTop: '5px' }}>At least 8 characters</div>
+          <div style={{ fontSize: '11px', color: onSurfaceFaint, marginTop: '5px' }}>At least 8 characters</div>
         </FormField>
         <FormField label="Confirm password">
           <input
@@ -80,7 +81,7 @@ export default function SetupPage({ onDone }) {
         </button>
       </form>
 
-      <div style={{ marginTop: '18px', fontSize: '11.5px', color: '#65625a', textAlign: 'center' }}>
+      <div style={{ marginTop: '18px', fontSize: '11.5px', color: onSurfaceFaint, textAlign: 'center' }}>
         Your existing library, decks, and favorites will be attached to this account.
         This screen only ever works once.
       </div>

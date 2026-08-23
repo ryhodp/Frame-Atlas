@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react';
+import {
+  onSurface, primary, onPrimary, outline, error as errorColor,
+  surfaceContainerLow, outlineVariant, onSurfaceFaint, onSurfaceMuted
+} from '../theme';
 
 export default function AdminInvitesPage() {
   const [codes, setCodes] = useState([]);
@@ -54,12 +58,12 @@ export default function AdminInvitesPage() {
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '32px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: 700, color: '#e2e2e6', margin: 0 }}>Invite Friends</h1>
+        <h1 style={{ fontSize: '28px', fontWeight: 700, color: onSurface, margin: 0 }}>Invite Friends</h1>
         <button
           onClick={createCode}
           disabled={creating}
           style={{
-            background: '#d9a441', color: '#3d2f00', border: 'none', borderRadius: '8px',
+            background: primary, color: onPrimary, border: 'none', borderRadius: '8px',
             padding: '10px 18px', fontSize: '14px', fontWeight: 600,
             cursor: creating ? 'default' : 'pointer', fontFamily: 'inherit',
             opacity: creating ? 0.6 : 1,
@@ -68,22 +72,22 @@ export default function AdminInvitesPage() {
           {creating ? 'Generating…' : '+ New invite code'}
         </button>
       </div>
-      <div style={{ fontSize: '13px', color: '#8e9099', marginBottom: '24px' }}>
+      <div style={{ fontSize: '13px', color: outline, marginBottom: '24px' }}>
         Each code works once. Send the link to one friend — once they create an account with it, the code is used up.
       </div>
 
       {error && (
         <div style={{
           background: 'rgba(255,180,171,0.1)', border: '1px solid rgba(255,180,171,0.35)',
-          color: '#ffb4ab', borderRadius: '8px', padding: '10px 12px', fontSize: '12.5px', marginBottom: '16px'
+          color: errorColor, borderRadius: '8px', padding: '10px 12px', fontSize: '12.5px', marginBottom: '16px'
         }}>{error}</div>
       )}
 
       {loading ? (
-        <div style={{ color: '#8e9099', fontSize: '14px' }}>Loading…</div>
+        <div style={{ color: outline, fontSize: '14px' }}>Loading…</div>
       ) : codes.length === 0 ? (
         <div style={{
-          color: '#8e9099', fontSize: '14px', background: '#1a1c20', border: '1px solid #44474f',
+          color: outline, fontSize: '14px', background: surfaceContainerLow, border: `1px solid ${outlineVariant}`,
           borderRadius: '12px', padding: '32px', textAlign: 'center'
         }}>
           No invite codes yet. Generate one above to invite a friend.
@@ -92,11 +96,11 @@ export default function AdminInvitesPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {codes.map(c => (
             <div key={c.id} style={{
-              background: '#1a1c20', border: '1px solid #44474f', borderRadius: '10px',
+              background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '10px',
               padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '14px'
             }}>
               <code style={{
-                fontSize: '13px', color: c.used_at ? '#65625a' : '#e2e2e6',
+                fontSize: '13px', color: c.used_at ? onSurfaceFaint : onSurface,
                 textDecoration: c.used_at ? 'line-through' : 'none', flex: 1,
                 fontFamily: 'monospace',
               }}>
@@ -104,7 +108,7 @@ export default function AdminInvitesPage() {
               </code>
 
               {c.used_at ? (
-                <span style={{ fontSize: '12px', color: '#8e9099' }}>
+                <span style={{ fontSize: '12px', color: outline }}>
                   used by {c.used_by_username || 'someone'}
                 </span>
               ) : (
@@ -112,7 +116,7 @@ export default function AdminInvitesPage() {
                   <button
                     onClick={() => copy(c.code, c.id)}
                     style={{
-                      background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: '#d9a441',
+                      background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: primary,
                       borderRadius: '6px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit'
                     }}
                   >
@@ -122,7 +126,7 @@ export default function AdminInvitesPage() {
                     onClick={() => revoke(c.id)}
                     title="Revoke this code"
                     style={{
-                      background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: '#9c988d',
+                      background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: onSurfaceMuted,
                       borderRadius: '6px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit'
                     }}
                   >

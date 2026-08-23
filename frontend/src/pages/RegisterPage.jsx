@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { AuthShell, FormField, inputStyle, errorStyle, submitStyle } from './LoginPage';
+import { onSurfaceFaint, outline, primary } from '../theme';
 
 export default function RegisterPage() {
   const [searchParams] = useSearchParams();
@@ -64,7 +65,7 @@ export default function RegisterPage() {
             onChange={e => setEmail(e.target.value)}
             style={inputStyle}
           />
-          <div style={{ fontSize: '11px', color: '#65625a', marginTop: '5px' }}>Used only to reset your password if you forget it</div>
+          <div style={{ fontSize: '11px', color: onSurfaceFaint, marginTop: '5px' }}>Used only to reset your password if you forget it</div>
         </FormField>
         <FormField label="Password">
           <input
@@ -73,7 +74,7 @@ export default function RegisterPage() {
             onChange={e => setPassword(e.target.value)}
             style={inputStyle}
           />
-          <div style={{ fontSize: '11px', color: '#65625a', marginTop: '5px' }}>At least 8 characters</div>
+          <div style={{ fontSize: '11px', color: onSurfaceFaint, marginTop: '5px' }}>At least 8 characters</div>
         </FormField>
 
         {error && <div style={errorStyle}>{error}</div>}
@@ -87,8 +88,8 @@ export default function RegisterPage() {
         </button>
       </form>
 
-      <div style={{ marginTop: '20px', fontSize: '13px', color: '#8e9099', textAlign: 'center' }}>
-        Already have an account? <Link to="/login" style={{ color: '#d9a441' }}>Sign in</Link>
+      <div style={{ marginTop: '20px', fontSize: '13px', color: outline, textAlign: 'center' }}>
+        Already have an account? <Link to="/login" style={{ color: primary }}>Sign in</Link>
       </div>
     </AuthShell>
   );
