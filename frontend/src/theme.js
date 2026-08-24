@@ -39,11 +39,16 @@ export const surfaceContainerMuted = '#3d3d42';        // progress-bar track (Ta
 
 // V59 (Phase 4): from the mid-size pages.
 export const surfaceContainerInput = '#0f1013';        // AccountPage's own input backgrounds
+// V62 (Phase 5): from the five large files.
+export const surfaceContainerCrop = '#111113';         // CropModal side panel
+export const surfaceContainerHover = '#222226';        // autocomplete row hover/highlight (Home)
+export const surfaceContainerDivider = '#4a4a52';      // CropModal pane gutters (shows through 1px gaps)
 
 // Border shades subtler than outlineVariant (#44474f)
 export const outlineSubtle = '#33353b';                // modal/panel borders
 export const outlineDim = '#2c2f35';                   // faint dividers (StoryboardView)
 export const outlineMuted = '#3a3d44';                 // SharePage card/input borders
+export const outlineFaint = '#35373d';                 // DeckDetail card borders (V62)
 
 // ── Text ─────────────────────────────────────────────────────────────────
 export const onSurface = '#e2e2e6';
@@ -112,6 +117,12 @@ export const accentTeal = '#7dd3c8';
 export const heatmapTextHot = '#f4e8cd';
 export const heatmapTextCool = '#d6c9a8';
 export const dangerWarm = '#e07a5f';   // inline warning text (SharePage)
+// V62: within one hex digit of dangerWarm above — same drift-not-intent case
+// as the onSurfaceWarmDim family. Kept distinct to stay lossless.
+export const dangerWarmAlt = '#e07a55';        // CropModal destructive ghost button
+export const accentBlueLight = '#8fc3d8';      // aspect-ratio suggestions (Home)
+export const accentOrange = '#e0935a';         // note/film suggestions (Home)
+export const onSurfaceCool = '#aab2c0';        // offline-banner text (DeckDetail)
 
 // ── Color-search swatch picker ──────────────────────────────────────────
 // A deliberately multi-hue palette — NOT app chrome, kept separate from the

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SIDEBAR_WIDTH } from './Sidebar';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { accentViolet, accentVioletLight, error, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineVariant, primary, surfaceBright, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, warning } from '../theme';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../ToastContext';
 import { addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
@@ -18,7 +19,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31',
+          background: surfaceContainerHigh,
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '12px',
           padding: '18px 20px',
@@ -27,7 +28,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
           animation: 'fapop 0.12s ease'
         }}
       >
-        <div style={{ fontSize: '13.5px', color: '#efeadd', lineHeight: 1.5, marginBottom: '16px' }}>
+        <div style={{ fontSize: '13.5px', color: onSurfaceWarm, lineHeight: 1.5, marginBottom: '16px' }}>
           {text}
         </div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -36,7 +37,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             disabled={busy}
             style={{
               background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-              color: '#9c988d', borderRadius: '6px', padding: '7px 14px',
+              color: onSurfaceMuted, borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
             }}
           >
@@ -48,7 +49,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             style={{
               background: danger ? 'rgba(255,180,171,0.18)' : 'rgba(184,206,161,0.18)',
               border: `1px solid ${danger ? 'rgba(255,180,171,0.6)' : 'rgba(184,206,161,0.6)'}`,
-              color: danger ? '#ffb4ab' : '#b8cea1',
+              color: danger ? error : tertiary,
               borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
               opacity: busy ? 0.6 : 1
@@ -227,7 +228,7 @@ export default function TagModeBar({
   };
 
   const catLabelFor = (key) => categories.find(c => c.key === key)?.label || key || 'Misc';
-  const catColorFor = (key) => categories.find(c => c.key === key)?.color || '#8b7cf6';
+  const catColorFor = (key) => categories.find(c => c.key === key)?.color || accentViolet;
 
   // ── Add to Deck ─────────────────────────────────────────────────────────────
   const loadDecks = () => {
@@ -504,8 +505,8 @@ export default function TagModeBar({
           bottom: 0,
           width: isOpen ? '280px' : '0px',
           zIndex: 900,
-          background: '#1a1c20',
-          borderLeft: isOpen ? '1px solid #44474f' : 'none',
+          background: surfaceContainerLow,
+          borderLeft: isOpen ? `1px solid ${outlineVariant}` : 'none',
           boxShadow: isOpen ? '-12px 0 32px rgba(0,0,0,0.45)' : 'none',
           overflowY: 'auto',
           transition: 'width 0.2s ease, border-left 0.2s ease',
@@ -519,13 +520,13 @@ export default function TagModeBar({
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '12px 16px',
-            borderBottom: '1px solid #2a2c31',
+            borderBottom: `1px solid ${surfaceContainerHigh}`,
             flexShrink: 0
           }}>
             <span style={{
               fontSize: '12px',
               fontWeight: 600,
-              color: '#efeadd'
+              color: onSurfaceWarm
             }}>
               Edit tags
             </span>
@@ -534,7 +535,7 @@ export default function TagModeBar({
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#65625a',
+                color: onSurfaceFaint,
                 cursor: 'pointer',
                 fontSize: '16px',
                 padding: '2px',
@@ -542,8 +543,8 @@ export default function TagModeBar({
                 alignItems: 'center',
                 justifyContent: 'center'
               }}
-              onMouseEnter={e => e.currentTarget.style.color = '#9c988d'}
-              onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+              onMouseEnter={e => e.currentTarget.style.color = onSurfaceMuted}
+              onMouseLeave={e => e.currentTarget.style.color = onSurfaceFaint}
             >
               ×
             </button>
@@ -574,8 +575,8 @@ export default function TagModeBar({
                   {showAuto && autocomplete.length > 0 && (
                     <div style={{
                       position: 'absolute', bottom: '38px', left: 0, right: 0,
-                      background: '#2a2c31',
-                      border: '1px solid #44474f',
+                      background: surfaceContainerHigh,
+                      border: `1px solid ${outlineVariant}`,
                       borderRadius: '10px',
                       boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
                       maxHeight: '220px', overflowY: 'auto',
@@ -592,15 +593,15 @@ export default function TagModeBar({
                             background: 'transparent', border: 'none',
                             cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit'
                           }}
-                          onMouseEnter={e => e.currentTarget.style.background = '#37393e'}
+                          onMouseEnter={e => e.currentTarget.style.background = surfaceBright}
                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                         >
                           <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{ width: '7px', height: '7px', borderRadius: '2px', background: opt.color, flexShrink: 0 }} />
-                            <span style={{ fontSize: '13px', color: '#e2e2e6' }}>{opt.value}</span>
-                            <span style={{ fontSize: '10.5px', color: '#8e9099' }}>{opt.catLabel}</span>
+                            <span style={{ fontSize: '13px', color: onSurface }}>{opt.value}</span>
+                            <span style={{ fontSize: '10.5px', color: outline }}>{opt.catLabel}</span>
                           </span>
-                          <span style={{ fontSize: '10px', color: '#8e9099' }}>{opt.count}</span>
+                          <span style={{ fontSize: '10px', color: outline }}>{opt.count}</span>
                         </button>
                       ))}
                     </div>
@@ -622,8 +623,8 @@ export default function TagModeBar({
                 disabled={!canApply}
                 style={{
                   marginTop: '8px',
-                  background: canApply ? '#d9a441' : 'rgba(217,164,65,0.2)',
-                  color: canApply ? '#3d2f00' : '#8e9099',
+                  background: canApply ? primary : 'rgba(217,164,65,0.2)',
+                  color: canApply ? onPrimary : outline,
                   border: 'none', borderRadius: '8px',
                   padding: '8px 14px', fontSize: '12.5px', fontWeight: 500,
                   cursor: canApply ? 'pointer' : 'default',
@@ -671,8 +672,8 @@ export default function TagModeBar({
                   disabled={!canSetFilm}
                   style={{
                     flex: 1,
-                    background: canSetFilm ? '#d9a441' : 'rgba(217,164,65,0.2)',
-                    color: canSetFilm ? '#3d2f00' : '#8e9099',
+                    background: canSetFilm ? primary : 'rgba(217,164,65,0.2)',
+                    color: canSetFilm ? onPrimary : outline,
                     border: 'none', borderRadius: '8px',
                     padding: '8px 10px', fontSize: '12.5px', fontWeight: 500,
                     cursor: canSetFilm ? 'pointer' : 'default', fontFamily: 'inherit'
@@ -685,7 +686,7 @@ export default function TagModeBar({
                   title="Clear filmography from every selected image"
                   style={{
                     background: 'none', border: '1px solid rgba(255,180,171,0.35)',
-                    color: '#ffb4ab', borderRadius: '8px',
+                    color: error, borderRadius: '8px',
                     padding: '8px 10px', fontSize: '12.5px',
                     cursor: 'pointer', fontFamily: 'inherit'
                   }}
@@ -705,13 +706,13 @@ export default function TagModeBar({
                   Remove button must not be able to touch a photo that never
                   had the tag. Say it every time, not just when empty. */}
               {summary.total > 1 && (
-                <div style={{ fontSize: '11px', color: '#8e9099', marginBottom: '9px', lineHeight: 1.5 }}>
+                <div style={{ fontSize: '11px', color: outline, marginBottom: '9px', lineHeight: 1.5 }}>
                   Only tags that are on <strong>all {summary.total}</strong> selected photos show up here,
                   so removing one can never touch a photo that didn't have it.
                 </div>
               )}
               {summary.tags.length === 0 ? (
-                <div style={{ fontSize: '11.5px', color: '#8e9099', lineHeight: 1.55 }}>
+                <div style={{ fontSize: '11.5px', color: outline, lineHeight: 1.55 }}>
                   {summary.total === 1
                     ? 'This photo has no tags yet.'
                     : `There isn't a single tag that all ${summary.total} of these photos have in common. ` +
@@ -731,7 +732,7 @@ export default function TagModeBar({
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {groupedSharedTags.map(({ catKey, tags }) => (
                       <div key={catKey}>
-                        <div style={{ fontSize: '10px', color: '#8e9099', marginBottom: '5px' }}>
+                        <div style={{ fontSize: '10px', color: outline, marginBottom: '5px' }}>
                           {catLabelFor(catKey)}
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -747,7 +748,7 @@ export default function TagModeBar({
                                   border: `1px solid ${isMatch ? 'rgba(217,164,65,0.7)' : 'rgba(201,162,83,0.25)'}`,
                                   borderRadius: '5px',
                                   padding: '4px 9px',
-                                  fontSize: '11.5px', color: tag.color || '#dcbd76'
+                                  fontSize: '11.5px', color: tag.color || warning
                                 }}
                               >
                                 {tag.value}
@@ -755,7 +756,7 @@ export default function TagModeBar({
                                   onClick={() => openRemoveConfirm(tag)}
                                   title="Remove from selection"
                                   style={{
-                                    background: 'none', border: 'none', color: '#ffb4ab',
+                                    background: 'none', border: 'none', color: error,
                                     cursor: 'pointer', padding: 0, fontSize: '13px', lineHeight: 1
                                   }}
                                 >×</button>
@@ -783,15 +784,15 @@ export default function TagModeBar({
                       style={{
                         display: 'inline-flex', alignItems: 'center', gap: '6px',
                         background: 'transparent',
-                        border: `1px dashed ${s.color || '#8b7cf6'}88`,
+                        border: `1px dashed ${s.color || accentViolet}88`,
                         borderRadius: '5px',
                         padding: '4px 9px',
-                        fontSize: '11.5px', color: s.color || '#a99bf7',
+                        fontSize: '11.5px', color: s.color || accentVioletLight,
                         cursor: 'pointer', fontFamily: 'inherit'
                       }}
                     >
                       {s.value}
-                      <span style={{ fontSize: '10px', color: '#8e9099' }}>{s.catLabel}</span>
+                      <span style={{ fontSize: '10px', color: outline }}>{s.catLabel}</span>
                     </button>
                   ))}
                 </div>
@@ -806,8 +807,8 @@ export default function TagModeBar({
                 onClick={toggleDeckPicker}
                 style={{
                   background: showDeckPicker ? 'rgba(217,164,65,0.14)' : 'none',
-                  border: `1px solid ${showDeckPicker ? 'rgba(217,164,65,0.5)' : '#44474f'}`,
-                  color: showDeckPicker ? '#d9a441' : '#e2e2e6',
+                  border: `1px solid ${showDeckPicker ? 'rgba(217,164,65,0.5)' : outlineVariant}`,
+                  color: showDeckPicker ? primary : onSurface,
                   borderRadius: '8px', padding: '8px 14px',
                   fontSize: '12.5px', fontWeight: 500,
                   cursor: 'pointer', fontFamily: 'inherit', width: '100%'
@@ -817,7 +818,7 @@ export default function TagModeBar({
               </button>
 
               {addDeckMsg && (
-                <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#b8cea1' }}>
+                <div style={{ marginTop: '8px', fontSize: '11.5px', color: tertiary }}>
                   {addDeckMsg}
                 </div>
               )}
@@ -825,15 +826,15 @@ export default function TagModeBar({
               {showDeckPicker && (
                 <div style={{
                   position: 'absolute', bottom: '38px', left: 0, right: 0,
-                  background: '#2a2c31',
-                  border: '1px solid #44474f',
+                  background: surfaceContainerHigh,
+                  border: `1px solid ${outlineVariant}`,
                   borderRadius: '10px',
                   boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
                   maxHeight: '260px', overflowY: 'auto',
                   zIndex: 60
                 }}>
                   {decksLoaded && decks.length === 0 && (
-                    <div style={{ padding: '10px 12px', fontSize: '11.5px', color: '#8e9099' }}>
+                    <div style={{ padding: '10px 12px', fontSize: '11.5px', color: outline }}>
                       No decks yet — create one below.
                     </div>
                   )}
@@ -849,16 +850,16 @@ export default function TagModeBar({
                         background: 'transparent', border: 'none',
                         cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit'
                       }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#37393e'}
+                      onMouseEnter={e => e.currentTarget.style.background = surfaceBright}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
-                      <span style={{ fontSize: '13px', color: '#e2e2e6' }}>{deck.name}</span>
-                      <span style={{ fontSize: '10px', color: '#8e9099' }}>{deck.image_count}</span>
+                      <span style={{ fontSize: '13px', color: onSurface }}>{deck.name}</span>
+                      <span style={{ fontSize: '10px', color: outline }}>{deck.image_count}</span>
                     </button>
                   ))}
                   <div style={{
                     display: 'flex', gap: '6px', padding: '8px 10px',
-                    borderTop: decks.length > 0 ? '1px solid #44474f' : 'none'
+                    borderTop: decks.length > 0 ? `1px solid ${outlineVariant}` : 'none'
                   }}>
                     <input
                       value={newDeckName}
@@ -866,8 +867,8 @@ export default function TagModeBar({
                       onKeyDown={e => { if (e.key === 'Enter') createDeckAndAdd(); }}
                       placeholder="+ New deck…"
                       style={{
-                        flex: 1, background: '#111317', color: '#e2e2e6',
-                        border: '1px solid #44474f', borderRadius: '6px',
+                        flex: 1, background: surfaceContainerLowestAlt, color: onSurface,
+                        border: `1px solid ${outlineVariant}`, borderRadius: '6px',
                         padding: '6px 8px', fontSize: '12px',
                         fontFamily: 'inherit', outline: 'none'
                       }}
@@ -876,8 +877,8 @@ export default function TagModeBar({
                       onClick={createDeckAndAdd}
                       disabled={!newDeckName.trim() || addingToDeck}
                       style={{
-                        background: newDeckName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
-                        color: newDeckName.trim() ? '#3d2f00' : '#8e9099',
+                        background: newDeckName.trim() ? primary : 'rgba(217,164,65,0.2)',
+                        color: newDeckName.trim() ? onPrimary : outline,
                         border: 'none', borderRadius: '6px',
                         padding: '0 10px', fontSize: '12px', fontWeight: 500,
                         cursor: newDeckName.trim() ? 'pointer' : 'default',
@@ -934,7 +935,7 @@ function filmFieldSummary(touched) {
   return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
 }
 
-function ghostBtn(color = '#c4c6d0', borderColor = '#44474f') {
+function ghostBtn(color = onSurfaceVariant, borderColor = outlineVariant) {
   return {
     background: 'none',
     border: `1px solid ${borderColor}`,
@@ -946,14 +947,14 @@ function ghostBtn(color = '#c4c6d0', borderColor = '#44474f') {
 function sectionLabel() {
   return {
     fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em',
-    color: '#8e9099', marginBottom: '8px'
+    color: outline, marginBottom: '8px'
   };
 }
 
 function inputStyle() {
   return {
-    background: '#111317', color: '#e2e2e6',
-    border: '1px solid #44474f',
+    background: surfaceContainerLowestAlt, color: onSurface,
+    border: `1px solid ${outlineVariant}`,
     borderRadius: '8px', padding: '8px 10px',
     fontSize: '12.5px', fontFamily: 'inherit', outline: 'none',
     width: '100%'
