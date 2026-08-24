@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import CompositionOverlay, { OVERLAY_MODES, OVERLAY_LABELS, OVERLAY_ROTATABLE } from './CompositionOverlay';
 import { fetchDecks, addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
-import { PAGE_BG } from '../theme';
+import { PAGE_BG, accentBlue, accentVioletLight, danger, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outline, outlineVariant, primary, surfaceBright, surfaceContainerDark, surfaceContainerHigh, surfaceContainerLowestAlt, surfaceContainerWarmDark, tertiary, warning } from '../theme';
 
 const CAT_LABELS = {
   'mood': 'Mood', 'lighting_quality': 'Lighting',
@@ -316,7 +316,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           borderLeft: '1px solid rgba(255,255,255,0.065)',
           zIndex: 1000,
           display: 'flex', flexDirection: 'column',
-          color: '#efeadd',
+          color: onSurfaceWarm,
           fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
           animation: 'slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
         }}
@@ -330,7 +330,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           <button
             onClick={onClose}
             style={{
-              background: 'none', border: 'none', color: '#65625a',
+              background: 'none', border: 'none', color: onSurfaceFaint,
               cursor: 'pointer', fontSize: '20px', lineHeight: 1, flexShrink: 0,
               padding: isMobile ? '11px' : '0', margin: isMobile ? '-11px' : 0
             }}
@@ -348,7 +348,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           <button
             onClick={toggleFavorite}
             style={{
-              ...footBtn('#dcbd76'),
+              ...footBtn(warning),
               background: isFavorite ? 'rgba(201,162,83,0.18)' : 'none',
               borderColor: isFavorite ? 'rgba(201,162,83,0.6)' : 'rgba(201,162,83,0.3)'
             }}
@@ -363,7 +363,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               onClick={() => setOverlayMenuOpen(v => !v)}
               title="Show composition guides over the photo"
               style={{
-                ...footBtn('#7fb3d9'),
+                ...footBtn(accentBlue),
                 background: overlayMode !== 'off' ? 'rgba(127,179,217,0.18)' : 'none',
                 borderColor: overlayMode !== 'off' ? 'rgba(127,179,217,0.6)' : 'rgba(127,179,217,0.3)'
               }}
@@ -377,7 +377,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   style={{ position: 'fixed', inset: 0, zIndex: 1001 }} />
                 <div style={{
                   position: 'absolute', top: 'calc(100% + 6px)', left: 0,
-                  background: '#18181b', border: '1px solid rgba(255,255,255,0.12)',
+                  background: surfaceContainerDark, border: '1px solid rgba(255,255,255,0.12)',
                   borderRadius: '8px', padding: '4px', zIndex: 1002,
                   minWidth: '160px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
                 }}>
@@ -388,7 +388,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       style={{
                         display: 'block', width: '100%', textAlign: 'left',
                         background: overlayMode === m ? 'rgba(127,179,217,0.15)' : 'none',
-                        border: 'none', color: overlayMode === m ? '#7fb3d9' : '#efeadd',
+                        border: 'none', color: overlayMode === m ? accentBlue : onSurfaceWarm,
                         borderRadius: '5px', padding: '7px 10px',
                         cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
                       }}
@@ -404,7 +404,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             <button
               onClick={() => setOverlayOrientation(o => (o + 1) % 4)}
               title="Rotate the guide to a different corner"
-              style={footBtn('#7fb3d9')}
+              style={footBtn(accentBlue)}
             >
               ⟳
             </button>
@@ -417,7 +417,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             <button
               onClick={toggleDeckPopover}
               title="Add this photo to a lookbook"
-              style={footBtn('#b8cea1')}
+              style={footBtn(tertiary)}
               aria-expanded={deckOpen}
             >
               ⧉ Add to Deck
@@ -431,17 +431,17 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 // the TOP of the detail panel, and opening upward put the deck
                 // list off-screen with only the "new deck" field reachable.
                 position: 'absolute', top: 'calc(100% + 8px)', left: 0,
-                width: '250px', background: '#2a2c31', border: '1px solid #44474f',
+                width: '250px', background: surfaceContainerHigh, border: `1px solid ${outlineVariant}`,
                 borderRadius: '10px', boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
                 zIndex: 40, maxHeight: '300px', overflowY: 'auto',
               }}>
                 {decks === null && (
-                  <div style={{ padding: '10px 12px', fontSize: '11.5px', color: '#8e9099' }}>
+                  <div style={{ padding: '10px 12px', fontSize: '11.5px', color: outline }}>
                     Loading your decks…
                   </div>
                 )}
                 {decks !== null && decks.length === 0 && (
-                  <div style={{ padding: '10px 12px', fontSize: '11.5px', color: '#8e9099' }}>
+                  <div style={{ padding: '10px 12px', fontSize: '11.5px', color: outline }}>
                     No decks yet — name one below.
                   </div>
                 )}
@@ -457,17 +457,17 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       cursor: deckBusy ? 'default' : 'pointer',
                       textAlign: 'left', fontFamily: 'inherit',
                     }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#37393e'}
+                    onMouseEnter={e => e.currentTarget.style.background = surfaceBright}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
-                    <span style={{ fontSize: '13px', color: '#e2e2e6' }}>{deck.name}</span>
-                    <span style={{ fontSize: '10px', color: '#8e9099' }}>{deck.image_count}</span>
+                    <span style={{ fontSize: '13px', color: onSurface }}>{deck.name}</span>
+                    <span style={{ fontSize: '10px', color: outline }}>{deck.image_count}</span>
                   </button>
                 ))}
 
                 <div style={{
                   display: 'flex', gap: '6px', padding: '8px 10px',
-                  borderTop: (decks || []).length > 0 ? '1px solid #44474f' : 'none',
+                  borderTop: (decks || []).length > 0 ? `1px solid ${outlineVariant}` : 'none',
                 }}>
                   <input
                     value={newDeckName}
@@ -475,8 +475,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     onKeyDown={e => { if (e.key === 'Enter') addToNewDeck(); }}
                     placeholder="+ New deck…"
                     style={{
-                      flex: 1, minWidth: 0, background: '#111317', color: '#e2e2e6',
-                      border: '1px solid #44474f', borderRadius: '6px',
+                      flex: 1, minWidth: 0, background: surfaceContainerLowestAlt, color: onSurface,
+                      border: `1px solid ${outlineVariant}`, borderRadius: '6px',
                       padding: '6px 8px', fontSize: '12px',
                       fontFamily: 'inherit', outline: 'none',
                     }}
@@ -485,8 +485,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     onClick={addToNewDeck}
                     disabled={!newDeckName.trim() || deckBusy}
                     style={{
-                      background: newDeckName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
-                      color: newDeckName.trim() ? '#3d2f00' : '#8e9099',
+                      background: newDeckName.trim() ? primary : 'rgba(217,164,65,0.2)',
+                      color: newDeckName.trim() ? onPrimary : outline,
                       border: 'none', borderRadius: '6px', padding: '0 10px',
                       fontSize: '12px', fontWeight: 500, fontFamily: 'inherit',
                       cursor: newDeckName.trim() && !deckBusy ? 'pointer' : 'default',
@@ -499,9 +499,9 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 {deckMsg && (
                   <div style={{
                     padding: '8px 12px', fontSize: '11.5px',
-                    borderTop: '1px solid #44474f',
-                    color: deckMsg.tone === 'error' ? '#cf7152'
-                      : deckMsg.tone === 'info' ? '#d9a441' : '#b8cea1',
+                    borderTop: `1px solid ${outlineVariant}`,
+                    color: deckMsg.tone === 'error' ? danger
+                      : deckMsg.tone === 'info' ? primary : tertiary,
                   }}>
                     {deckMsg.message}
                   </div>
@@ -514,7 +514,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             <button
               onClick={() => onFindSimilar(image)}
               title="Find visually similar images"
-              style={footBtn('#a99bf7')}
+              style={footBtn(accentVioletLight)}
             >
               ≈ Find Similar
             </button>
@@ -523,7 +523,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             <button
               onClick={() => onCrop(image)}
               title="Auto-detect and remove letterbox bars / screenshot chrome"
-              style={footBtn('#d9a441')}
+              style={footBtn(primary)}
             >
               ✂ Crop
             </button>
@@ -534,7 +534,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           <a
             href={`/api/images/${image.id}/download`}
             download={image.filename}
-            style={{ ...footBtn('#9c988d'), textDecoration: 'none', display: 'inline-block' }}
+            style={{ ...footBtn(onSurfaceMuted), textDecoration: 'none', display: 'inline-block' }}
             title="Download full-resolution original"
           >
             ↓ Download
@@ -543,18 +543,18 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           {!confirmDelete ? (
             <button
               onClick={() => setConfirmDelete(true)}
-              style={footBtn('#cf7152')}
+              style={footBtn(danger)}
             >
               Delete
             </button>
           ) : (
             <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: '#cf7152' }}>Sure?</span>
+              <span style={{ fontSize: '11px', color: danger }}>Sure?</span>
               <button
                 onClick={doDelete}
                 disabled={deleting}
                 style={{
-                  ...footBtn('#efeadd'),
+                  ...footBtn(onSurfaceWarm),
                   background: 'rgba(207,113,82,0.85)',
                   border: '1px solid rgba(207,113,82,1)',
                   opacity: deleting ? 0.6 : 1
@@ -565,7 +565,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               <button
                 onClick={() => setConfirmDelete(false)}
                 disabled={deleting}
-                style={footBtn('#9c988d')}
+                style={footBtn(onSurfaceMuted)}
               >
                 Cancel
               </button>
@@ -576,7 +576,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         {/* Delete error */}
         {deleteError && (
           <div style={{
-            padding: '10px 20px', fontSize: '11.5px', color: '#cf7152',
+            padding: '10px 20px', fontSize: '11.5px', color: danger,
             borderBottom: '1px solid rgba(207,113,82,0.25)',
             background: 'rgba(207,113,82,0.06)'
           }}>
@@ -588,7 +588,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {/* Full-res image (falls back to thumbnail while loading) */}
           <div style={{
-            background: '#141318',
+            background: surfaceContainerWarmDark,
             minHeight: '200px', maxHeight: '420px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             overflow: 'hidden'
@@ -618,14 +618,14 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           </div>
           {!fullImage && !fullError && (
             <div style={{
-              padding: '6px 20px', fontSize: '10px', color: '#65625a',
+              padding: '6px 20px', fontSize: '10px', color: onSurfaceFaint,
               fontFamily: "'JetBrains Mono', monospace"
             }}>
               loading full resolution…
             </div>
           )}
           {fullError && (
-            <div style={{ padding: '6px 20px', fontSize: '10px', color: '#cf7152' }}>
+            <div style={{ padding: '6px 20px', fontSize: '10px', color: danger }}>
               Couldn't load full-res — showing thumbnail
             </div>
           )}
@@ -650,23 +650,23 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             title={`Search all frames from “${film.title}”`}
                             style={{
                               background: 'none', border: 'none', padding: 0,
-                              color: '#efeadd', fontSize: '16px', fontWeight: 700,
+                              color: onSurfaceWarm, fontSize: '16px', fontWeight: 700,
                               letterSpacing: '0.02em', cursor: 'pointer',
                               fontFamily: 'inherit', textAlign: 'left'
                             }}
-                            onMouseEnter={e => e.currentTarget.style.color = '#dcbd76'}
-                            onMouseLeave={e => e.currentTarget.style.color = '#efeadd'}
+                            onMouseEnter={e => e.currentTarget.style.color = warning}
+                            onMouseLeave={e => e.currentTarget.style.color = onSurfaceWarm}
                           >
                             {film.title}
                           </button>
                           {film.year && (
-                            <span style={{ fontSize: '13px', color: '#9c988d', marginLeft: '7px' }}>
+                            <span style={{ fontSize: '13px', color: onSurfaceMuted, marginLeft: '7px' }}>
                               ({film.year})
                             </span>
                           )}
                         </div>
                       )}
-                      <div style={{ fontSize: '12px', color: '#9c988d', display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
+                      <div style={{ fontSize: '12px', color: onSurfaceMuted, display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
                         {film.director && (
                           <span>
                             dir.{' '}
@@ -675,7 +675,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                               title={`Search all frames directed by ${film.director}`}
                               style={{
                                 background: 'none', border: 'none', padding: 0,
-                                color: '#dcbd76', fontSize: '12px', cursor: 'pointer',
+                                color: warning, fontSize: '12px', cursor: 'pointer',
                                 fontFamily: 'inherit', textDecoration: 'underline',
                                 textDecorationColor: 'rgba(201,162,83,0.35)', textUnderlineOffset: '2px'
                               }}
@@ -692,7 +692,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                               title={`Search all frames shot by ${film.dp}`}
                               style={{
                                 background: 'none', border: 'none', padding: 0,
-                                color: '#dcbd76', fontSize: '12px', cursor: 'pointer',
+                                color: warning, fontSize: '12px', cursor: 'pointer',
                                 fontFamily: 'inherit', textDecoration: 'underline',
                                 textDecorationColor: 'rgba(201,162,83,0.35)', textUnderlineOffset: '2px'
                               }}
@@ -708,7 +708,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       title="Edit film info (AI guesses can be wrong)"
                       style={{
                         background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-                        color: '#9c988d', borderRadius: '5px', padding: '3px 9px',
+                        color: onSurfaceMuted, borderRadius: '5px', padding: '3px 9px',
                         cursor: 'pointer', fontSize: '10.5px', fontFamily: 'inherit', flexShrink: 0
                       }}
                     >
@@ -726,7 +726,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         onChange={e => setFilmDraft(d => ({ ...d, title: e.target.value }))}
                         placeholder="Film title"
                         style={{
-                          background: '#18181b', color: '#efeadd',
+                          background: surfaceContainerDark, color: onSurfaceWarm,
                           border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
                           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                         }}
@@ -736,7 +736,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         onChange={e => setFilmDraft(d => ({ ...d, year: e.target.value }))}
                         placeholder="Year"
                         style={{
-                          background: '#18181b', color: '#efeadd',
+                          background: surfaceContainerDark, color: onSurfaceWarm,
                           border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
                           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                         }}
@@ -748,7 +748,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         onChange={e => setFilmDraft(d => ({ ...d, director: e.target.value }))}
                         placeholder="Director"
                         style={{
-                          background: '#18181b', color: '#efeadd',
+                          background: surfaceContainerDark, color: onSurfaceWarm,
                           border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
                           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                         }}
@@ -758,7 +758,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         onChange={e => setFilmDraft(d => ({ ...d, dp: e.target.value }))}
                         placeholder="Cinematographer (DP)"
                         style={{
-                          background: '#18181b', color: '#efeadd',
+                          background: surfaceContainerDark, color: onSurfaceWarm,
                           border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
                           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                         }}
@@ -770,7 +770,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         style={{
                           background: 'rgba(201,162,83,0.12)',
                           border: '1px solid rgba(201,162,83,0.35)',
-                          color: '#dcbd76', borderRadius: '6px', padding: '5px 13px',
+                          color: warning, borderRadius: '6px', padding: '5px 13px',
                           fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                         }}
                       >
@@ -780,7 +780,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         onClick={() => setEditingFilm(false)}
                         style={{
                           background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-                          color: '#9c988d', borderRadius: '6px', padding: '5px 13px',
+                          color: onSurfaceMuted, borderRadius: '6px', padding: '5px 13px',
                           fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                         }}
                       >
@@ -793,7 +793,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                           title="Remove film info entirely (wrong guess)"
                           style={{
                             background: 'none', border: '1px solid rgba(207,113,82,0.3)',
-                            color: '#cf7152', borderRadius: '6px', padding: '5px 13px',
+                            color: danger, borderRadius: '6px', padding: '5px 13px',
                             fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                           }}
                         >
@@ -812,11 +812,11 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 onClick={startEditFilm}
                 style={{
                   background: 'none', border: 'none', padding: 0,
-                  color: '#65625a', fontSize: '11px', cursor: 'pointer',
+                  color: onSurfaceFaint, fontSize: '11px', cursor: 'pointer',
                   fontFamily: 'inherit', marginBottom: '16px', display: 'block'
                 }}
-                onMouseEnter={e => e.currentTarget.style.color = '#dcbd76'}
-                onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+                onMouseEnter={e => e.currentTarget.style.color = warning}
+                onMouseLeave={e => e.currentTarget.style.color = onSurfaceFaint}
               >
                 + Add film info
               </button>
@@ -826,7 +826,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             {image.caption && (
               <p style={{
                 fontSize: '13px', lineHeight: '1.5',
-                color: '#dcbd76', margin: '0 0 20px'
+                color: warning, margin: '0 0 20px'
               }}>
                 {image.caption}
               </p>
@@ -840,15 +840,15 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               borderRadius: '8px'
             }}>
               <div>
-                <div style={{ fontSize: '9px', fontWeight: 600, color: '#65625a', letterSpacing: '0.08em' }}>ASPECT RATIO</div>
-                <div style={{ fontSize: '13px', color: '#efeadd', marginTop: '4px' }}>
+                <div style={{ fontSize: '9px', fontWeight: 600, color: onSurfaceFaint, letterSpacing: '0.08em' }}>ASPECT RATIO</div>
+                <div style={{ fontSize: '13px', color: onSurfaceWarm, marginTop: '4px' }}>
                   {image.ar_label || image.aspect_ratio}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: '9px', fontWeight: 600, color: '#65625a', letterSpacing: '0.08em' }}>FILENAME</div>
+                <div style={{ fontSize: '9px', fontWeight: 600, color: onSurfaceFaint, letterSpacing: '0.08em' }}>FILENAME</div>
                 <div style={{
-                  fontSize: '13px', color: '#efeadd', marginTop: '4px',
+                  fontSize: '13px', color: onSurfaceWarm, marginTop: '4px',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                 }}>{image.filename}</div>
               </div>
@@ -861,7 +861,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 notes.camera_rig || notes.lens || notes.lens_filter || notes.stop || notes.onset_notes
               ));
               const noteFieldStyle = {
-                background: '#18181b', color: '#efeadd',
+                background: surfaceContainerDark, color: onSurfaceWarm,
                 border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
                 padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
               };
@@ -872,7 +872,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     style={{
                       background: 'none', border: 'none', padding: 0,
                       display: 'flex', alignItems: 'center', gap: '6px',
-                      color: hasNotesContent ? '#dcbd76' : '#65625a',
+                      color: hasNotesContent ? warning : onSurfaceFaint,
                       fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em',
                       cursor: 'pointer', fontFamily: 'inherit'
                     }}
@@ -884,7 +884,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     }}>▾</span>
                     ON-SET NOTES
                     {hasNotesContent && !notesExpanded && (
-                      <span style={{ fontSize: '10px', color: '#65625a', fontWeight: 400 }}>· filled in</span>
+                      <span style={{ fontSize: '10px', color: onSurfaceFaint, fontWeight: 400 }}>· filled in</span>
                     )}
                   </button>
 
@@ -935,7 +935,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         style={{
                           background: 'rgba(201,162,83,0.12)',
                           border: '1px solid rgba(201,162,83,0.35)',
-                          color: '#dcbd76', borderRadius: '6px', padding: '5px 13px',
+                          color: warning, borderRadius: '6px', padding: '5px 13px',
                           fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                         }}
                       >
@@ -951,7 +951,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             {image.palette && image.palette.length > 0 && (
               <div style={{ marginBottom: '20px' }}>
                 <div style={{
-                  fontSize: '9px', fontWeight: 600, color: '#65625a',
+                  fontSize: '9px', fontWeight: 600, color: onSurfaceFaint,
                   letterSpacing: '0.08em', marginBottom: '7px'
                 }}>
                   COLOR PALETTE
@@ -974,7 +974,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               alignItems: 'center', marginBottom: '10px'
             }}>
               <div style={{
-                fontSize: '9px', fontWeight: 600, color: '#65625a', letterSpacing: '0.08em'
+                fontSize: '9px', fontWeight: 600, color: onSurfaceFaint, letterSpacing: '0.08em'
               }}>
                 TAGS
               </div>
@@ -983,7 +983,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 style={{
                   background: 'none',
                   border: `1px solid ${editingTags ? 'rgba(201,162,83,0.5)' : 'rgba(255,255,255,0.12)'}`,
-                  color: editingTags ? '#dcbd76' : '#9c988d',
+                  color: editingTags ? warning : onSurfaceMuted,
                   borderRadius: '5px', padding: '3px 9px',
                   cursor: 'pointer', fontSize: '10.5px', fontFamily: 'inherit'
                 }}
@@ -1003,7 +1003,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   value={newTagCat}
                   onChange={e => setNewTagCat(e.target.value)}
                   style={{
-                    background: '#18181b', color: '#efeadd',
+                    background: surfaceContainerDark, color: onSurfaceWarm,
                     border: '1px solid rgba(255,255,255,0.12)',
                     borderRadius: '6px', padding: '6px 8px',
                     fontSize: '11.5px', fontFamily: 'inherit', outline: 'none'
@@ -1020,7 +1020,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   onKeyDown={e => { if (e.key === 'Enter') addTag(); }}
                   placeholder="new tag…"
                   style={{
-                    flex: 1, background: '#18181b', color: '#efeadd',
+                    flex: 1, background: surfaceContainerDark, color: onSurfaceWarm,
                     border: '1px solid rgba(255,255,255,0.12)',
                     borderRadius: '6px', padding: '6px 10px',
                     fontSize: '11.5px', fontFamily: 'inherit', outline: 'none'
@@ -1031,7 +1031,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   style={{
                     background: 'rgba(201,162,83,0.12)',
                     border: '1px solid rgba(201,162,83,0.35)',
-                    color: '#dcbd76', borderRadius: '6px',
+                    color: warning, borderRadius: '6px',
                     padding: '0 12px', fontSize: '11.5px',
                     cursor: 'pointer', fontFamily: 'inherit'
                   }}
@@ -1043,7 +1043,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
 
             {/* Tags by category */}
             {!hasTags && (
-              <p style={{ fontSize: '12px', color: '#65625a' }}>
+              <p style={{ fontSize: '12px', color: onSurfaceFaint }}>
                 No tags yet — this image hasn't been through the AI tagging pass.
               </p>
             )}
@@ -1055,7 +1055,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               return (
                 <div key={cat} style={{ marginBottom: '16px' }}>
                   <div style={{
-                    fontSize: '9px', fontWeight: 600, color: '#65625a',
+                    fontSize: '9px', fontWeight: 600, color: onSurfaceFaint,
                     letterSpacing: '0.08em', marginBottom: '7px'
                   }}>
                     {(CAT_LABELS[cat] || cat).toUpperCase()}
@@ -1068,7 +1068,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         border: '1px solid rgba(201,162,83,0.25)',
                         borderRadius: '5px',
                         padding: '4px 9px',
-                        fontSize: '11.5px', color: '#dcbd76'
+                        fontSize: '11.5px', color: warning
                       }}>
                         {val}
                         {editingTags && (
@@ -1076,7 +1076,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             onClick={() => removeTag(cat, val)}
                             title="Remove tag"
                             style={{
-                              background: 'none', border: 'none', color: '#cf7152',
+                              background: 'none', border: 'none', color: danger,
                               cursor: 'pointer', padding: 0, fontSize: '13px', lineHeight: 1
                             }}
                           >×</button>
