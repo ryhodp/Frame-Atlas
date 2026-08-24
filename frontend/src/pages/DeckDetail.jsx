@@ -7,6 +7,7 @@ import AddPhotosModal from '../components/AddPhotosModal';
 import { describeAddResult } from '../deckAdd';
 import { useOfflineCache, hasRemoteUpdates } from '../hooks/useOfflineCache';
 import { useToast } from '../ToastContext';
+import { error, onPrimary, onSurface, onSurfaceCool, onSurfaceDim, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineFaint, outlineSubtle, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, warning } from '../theme';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -21,7 +22,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31',
+          background: surfaceContainerHigh,
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '12px',
           padding: '18px 20px',
@@ -29,7 +30,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
           boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
         }}
       >
-        <div style={{ fontSize: '13.5px', color: '#e2e2e6', lineHeight: 1.5, marginBottom: '16px' }}>
+        <div style={{ fontSize: '13.5px', color: onSurface, lineHeight: 1.5, marginBottom: '16px' }}>
           {text}
         </div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -38,7 +39,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             disabled={busy}
             style={{
               background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-              color: '#9c988d', borderRadius: '6px', padding: '7px 14px',
+              color: onSurfaceMuted, borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
             }}
           >
@@ -50,7 +51,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             style={{
               background: danger ? 'rgba(255,180,171,0.18)' : 'rgba(184,206,161,0.18)',
               border: `1px solid ${danger ? 'rgba(255,180,171,0.6)' : 'rgba(184,206,161,0.6)'}`,
-              color: danger ? '#ffb4ab' : '#b8cea1',
+              color: danger ? error : tertiary,
               borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
               opacity: busy ? 0.6 : 1
@@ -169,7 +170,7 @@ export default function DeckDetail() {
 
   if (loading && !deck) {
     return (
-      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px', color: '#8e9099', fontSize: '14px' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px', color: outline, fontSize: '14px' }}>
         Loading deck…
       </div>
     );
@@ -177,7 +178,7 @@ export default function DeckDetail() {
 
   if (!deck) {
     return (
-      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px', color: '#8e9099', fontSize: '14px' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px', color: outline, fontSize: '14px' }}>
         Deck not found.
       </div>
     );
@@ -341,7 +342,7 @@ export default function DeckDetail() {
       <button
         onClick={() => navigate('/decks')}
         style={{
-          background: 'none', border: 'none', color: '#8e9099',
+          background: 'none', border: 'none', color: outline,
           cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
           padding: 0, marginBottom: '16px'
         }}
@@ -356,14 +357,14 @@ export default function DeckDetail() {
           background: 'rgba(140,150,170,0.12)', border: '1px solid rgba(140,150,170,0.35)',
           borderRadius: '8px', padding: '12px 14px', marginBottom: '16px'
         }}>
-          <span style={{ fontSize: '12px', color: '#aab2c0', flex: 1 }}>
+          <span style={{ fontSize: '12px', color: onSurfaceCool, flex: 1 }}>
             ⚡ Offline — showing the last saved copy of this deck. Edits aren't available until you reconnect.
           </span>
           <button
             onClick={loadDeck}
             style={{
               background: 'none', border: '1px solid rgba(140,150,170,0.5)',
-              color: '#aab2c0', borderRadius: '6px', padding: '6px 12px',
+              color: onSurfaceCool, borderRadius: '6px', padding: '6px 12px',
               fontSize: '12px', fontWeight: 600, cursor: 'pointer',
               fontFamily: 'inherit', flexShrink: 0
             }}
@@ -380,13 +381,13 @@ export default function DeckDetail() {
           background: 'rgba(217,164,65,0.12)', border: '1px solid rgba(217,164,65,0.35)',
           borderRadius: '8px', padding: '12px 14px', marginBottom: '16px'
         }}>
-          <span style={{ fontSize: '12px', color: '#dcbd76', flex: 1 }}>
+          <span style={{ fontSize: '12px', color: warning, flex: 1 }}>
             ✓ This deck has been updated — refresh to see the latest changes
           </span>
           <button
             onClick={() => { setRemoteUpdates(false); loadDeck(); }}
             style={{
-              background: '#d9a441', color: '#3d2f00', border: 'none',
+              background: primary, color: onPrimary, border: 'none',
               borderRadius: '6px', padding: '6px 12px', fontSize: '12px',
               fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0
             }}
@@ -407,8 +408,8 @@ export default function DeckDetail() {
             onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
             style={{
               fontSize: '32px', lineHeight: '40px', fontWeight: 700,
-              color: '#e2e2e6', background: '#1a1c20',
-              border: '1px solid #d9a441', borderRadius: '8px',
+              color: onSurface, background: surfaceContainerLow,
+              border: `1px solid ${primary}`, borderRadius: '8px',
               padding: '4px 10px', fontFamily: 'inherit',
               outline: 'none', width: '100%', maxWidth: '600px'
             }}
@@ -419,7 +420,7 @@ export default function DeckDetail() {
             title={deck.is_owner ? 'Click to rename' : undefined}
             style={{
               fontSize: '32px', lineHeight: '40px', fontWeight: 700,
-              color: '#e2e2e6', margin: 0, cursor: deck.is_owner ? 'pointer' : 'default',
+              color: onSurface, margin: 0, cursor: deck.is_owner ? 'pointer' : 'default',
               display: 'inline-block'
             }}
           >
@@ -441,9 +442,9 @@ export default function DeckDetail() {
                 ? "You're offline — this is a saved copy. Reconnect to add photos."
                 : 'Pick photos from your library to add to this lookbook'}
               style={{
-                background: showingCached ? 'none' : '#d9a441',
-                border: `1px solid ${showingCached ? '#33353b' : '#d9a441'}`,
-                color: showingCached ? '#6b6d75' : '#3d2f00',
+                background: showingCached ? 'none' : primary,
+                border: `1px solid ${showingCached ? outlineSubtle : primary}`,
+                color: showingCached ? onSurfaceDim : onPrimary,
                 borderRadius: '8px', padding: '8px 16px',
                 cursor: showingCached ? 'default' : 'pointer',
                 fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
@@ -456,8 +457,8 @@ export default function DeckDetail() {
               onClick={() => setShareOpen(true)}
               style={{
                 background: deck.share_token ? 'rgba(217,164,65,0.14)' : 'none',
-                border: `1px solid ${deck.share_token ? 'rgba(217,164,65,0.55)' : '#44474f'}`,
-                color: deck.share_token ? '#d9a441' : '#e2e2e6',
+                border: `1px solid ${deck.share_token ? 'rgba(217,164,65,0.55)' : outlineVariant}`,
+                color: deck.share_token ? primary : onSurface,
                 borderRadius: '8px', padding: '8px 16px',
                 cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
                 whiteSpace: 'nowrap'
@@ -469,8 +470,8 @@ export default function DeckDetail() {
             <button
               onClick={() => setMembersOpen(true)}
               style={{
-                background: 'none', border: '1px solid #44474f',
-                color: '#e2e2e6', borderRadius: '8px', padding: '8px 16px',
+                background: 'none', border: `1px solid ${outlineVariant}`,
+                color: onSurface, borderRadius: '8px', padding: '8px 16px',
                 cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
                 whiteSpace: 'nowrap'
               }}
@@ -485,8 +486,8 @@ export default function DeckDetail() {
                 : 'Save this lookbook as a PDF you can email'}
               style={{
                 background: 'none',
-                border: `1px solid ${showingCached ? '#33353b' : '#44474f'}`,
-                color: showingCached ? '#6b6d75' : '#e2e2e6',
+                border: `1px solid ${showingCached ? outlineSubtle : outlineVariant}`,
+                color: showingCached ? onSurfaceDim : onSurface,
                 borderRadius: '8px', padding: '8px 16px',
                 cursor: showingCached ? 'default' : 'pointer',
                 fontSize: '13px', fontFamily: 'inherit',
@@ -500,8 +501,8 @@ export default function DeckDetail() {
               <button
                 onClick={() => setFeedbackOpen(true)}
                 style={{
-                  background: 'none', border: '1px solid #44474f',
-                  color: '#e2e2e6', borderRadius: '8px', padding: '8px 16px',
+                  background: 'none', border: `1px solid ${outlineVariant}`,
+                  color: onSurface, borderRadius: '8px', padding: '8px 16px',
                   cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
                   whiteSpace: 'nowrap'
                 }}
@@ -514,7 +515,7 @@ export default function DeckDetail() {
         ) : (
           <div style={{
             background: 'rgba(184,206,161,0.14)', border: '1px solid rgba(184,206,161,0.4)',
-            color: '#b8cea1', borderRadius: '8px', padding: '7px 14px',
+            color: tertiary, borderRadius: '8px', padding: '7px 14px',
             fontSize: '12.5px', whiteSpace: 'nowrap'
           }}>
             👁 Shared by {deck.owner_name} · view only
@@ -532,9 +533,9 @@ export default function DeckDetail() {
             ? 'Add some photos to this lookbook first'
             : 'Play this lookbook fullscreen — arrows to move, Esc to exit'}
           style={{
-            background: deck.images.length === 0 ? 'none' : '#d9a441',
-            border: `1px solid ${deck.images.length === 0 ? '#33353b' : '#d9a441'}`,
-            color: deck.images.length === 0 ? '#6b6d75' : '#3d2f00',
+            background: deck.images.length === 0 ? 'none' : primary,
+            border: `1px solid ${deck.images.length === 0 ? outlineSubtle : primary}`,
+            color: deck.images.length === 0 ? onSurfaceDim : onPrimary,
             borderRadius: '8px', padding: '8px 16px',
             cursor: deck.images.length === 0 ? 'default' : 'pointer',
             fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
@@ -548,8 +549,8 @@ export default function DeckDetail() {
         <button
           onClick={() => setActivityOpen(true)}
           style={{
-            background: 'none', border: '1px solid #44474f',
-            color: '#8e9099', borderRadius: '8px', padding: '8px 16px',
+            background: 'none', border: `1px solid ${outlineVariant}`,
+            color: outline, borderRadius: '8px', padding: '8px 16px',
             cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
             whiteSpace: 'nowrap'
           }}
@@ -559,7 +560,7 @@ export default function DeckDetail() {
       </div>
 
       {!deck.is_owner && (
-        <div style={{ fontSize: '12.5px', color: '#8e9099', marginBottom: '18px' }}>
+        <div style={{ fontSize: '12.5px', color: outline, marginBottom: '18px' }}>
           You can look through this lookbook, but only {deck.owner_name} can edit it.
         </div>
       )}
@@ -569,19 +570,19 @@ export default function DeckDetail() {
           told you what to do and gave you nothing to do it with. */}
       {deck.is_owner && deck.images.length === 0 && !showingCached && (
         <div style={{
-          border: '1px dashed #44474f', borderRadius: '12px',
+          border: `1px dashed ${outlineVariant}`, borderRadius: '12px',
           padding: '32px 24px', textAlign: 'center', marginBottom: '28px',
         }}>
-          <div style={{ fontSize: '15px', color: '#e2e2e6', fontWeight: 600 }}>
+          <div style={{ fontSize: '15px', color: onSurface, fontWeight: 600 }}>
             This lookbook is empty
           </div>
-          <div style={{ fontSize: '13px', color: '#8e9099', margin: '8px 0 18px' }}>
+          <div style={{ fontSize: '13px', color: outline, margin: '8px 0 18px' }}>
             Pull frames in from your library, then group them into scenes.
           </div>
           <button
             onClick={() => setAddPhotosOpen(true)}
             style={{
-              background: '#d9a441', color: '#3d2f00', border: 'none',
+              background: primary, color: onPrimary, border: 'none',
               borderRadius: '8px', padding: '11px 24px',
               fontSize: '14px', fontWeight: 700, fontFamily: 'inherit',
               cursor: 'pointer',
@@ -601,8 +602,8 @@ export default function DeckDetail() {
             onKeyDown={e => { if (e.key === 'Enter') createScene(); }}
             placeholder="New scene name…"
             style={{
-              background: '#1a1c20', color: '#e2e2e6',
-              border: '1px solid #44474f',
+              background: surfaceContainerLow, color: onSurface,
+              border: `1px solid ${outlineVariant}`,
               borderRadius: '8px', padding: '9px 12px',
               fontSize: '14px', fontFamily: 'inherit', outline: 'none',
               width: '220px'
@@ -612,8 +613,8 @@ export default function DeckDetail() {
             onClick={createScene}
             disabled={!newSceneName.trim() || creatingScene}
             style={{
-              background: newSceneName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
-              color: newSceneName.trim() ? '#3d2f00' : '#8e9099',
+              background: newSceneName.trim() ? primary : 'rgba(217,164,65,0.2)',
+              color: newSceneName.trim() ? onPrimary : outline,
               border: 'none', borderRadius: '8px',
               padding: '9px 16px', fontSize: '14px', fontWeight: 500,
               cursor: newSceneName.trim() ? 'pointer' : 'default',
@@ -865,7 +866,7 @@ function MembersModal({ deckId, onClose }) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31',
+          background: surfaceContainerHigh,
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '12px',
           padding: '20px 22px',
@@ -874,10 +875,10 @@ function MembersModal({ deckId, onClose }) {
           boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
         }}
       >
-        <div style={{ fontSize: '15px', fontWeight: 600, color: '#e2e2e6', marginBottom: '6px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface, marginBottom: '6px' }}>
           Crew on this deck
         </div>
-        <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5, marginBottom: '16px' }}>
+        <div style={{ fontSize: '12.5px', color: onSurfaceMuted, lineHeight: 1.5, marginBottom: '16px' }}>
           Crew members can view scenes, frame order, and notes — signed in, view-only.
           They can't edit anything.
         </div>
@@ -890,8 +891,8 @@ function MembersModal({ deckId, onClose }) {
             onKeyDown={e => { if (e.key === 'Enter') sendInvite(); }}
             placeholder="friend@email.com"
             style={{
-              flex: 1, background: '#111317', color: '#e2e2e6',
-              border: '1px solid #44474f', borderRadius: '8px',
+              flex: 1, background: surfaceContainerLowestAlt, color: onSurface,
+              border: `1px solid ${outlineVariant}`, borderRadius: '8px',
               padding: '9px 10px', fontSize: '13px', fontFamily: 'inherit',
               outline: 'none'
             }}
@@ -900,8 +901,8 @@ function MembersModal({ deckId, onClose }) {
             onClick={sendInvite}
             disabled={!email.trim() || inviting}
             style={{
-              background: email.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
-              color: email.trim() ? '#3d2f00' : '#8e9099',
+              background: email.trim() ? primary : 'rgba(217,164,65,0.2)',
+              color: email.trim() ? onPrimary : outline,
               border: 'none', borderRadius: '8px',
               padding: '9px 16px', fontSize: '13px', fontWeight: 600,
               cursor: email.trim() ? 'pointer' : 'default',
@@ -912,13 +913,13 @@ function MembersModal({ deckId, onClose }) {
           </button>
         </div>
         {inviteError && (
-          <div style={{ fontSize: '12px', color: '#ffb4ab', marginBottom: '10px' }}>{inviteError}</div>
+          <div style={{ fontSize: '12px', color: error, marginBottom: '10px' }}>{inviteError}</div>
         )}
         {inviteSuccess && (
-          <div style={{ fontSize: '12px', color: '#b8cea1', marginBottom: '10px' }}>{inviteSuccess}</div>
+          <div style={{ fontSize: '12px', color: tertiary, marginBottom: '10px' }}>{inviteSuccess}</div>
         )}
 
-        <div style={{ fontSize: '12px', color: '#8e9099', margin: '14px 0 8px' }}>
+        <div style={{ fontSize: '12px', color: outline, margin: '14px 0 8px' }}>
           Or share an invite link — they'll join automatically once signed in:
         </div>
 
@@ -927,8 +928,8 @@ function MembersModal({ deckId, onClose }) {
             onClick={createLink}
             disabled={linkWorking}
             style={{
-              background: 'none', border: '1px solid #44474f',
-              color: '#e2e2e6', borderRadius: '8px', padding: '8px 14px',
+              background: 'none', border: `1px solid ${outlineVariant}`,
+              color: onSurface, borderRadius: '8px', padding: '8px 14px',
               fontSize: '12.5px', cursor: 'pointer', fontFamily: 'inherit',
               opacity: linkWorking ? 0.6 : 1
             }}
@@ -943,8 +944,8 @@ function MembersModal({ deckId, onClose }) {
                 value={`${window.location.origin}/invite/${inviteToken}`}
                 onFocus={e => e.target.select()}
                 style={{
-                  flex: 1, background: '#111317', color: '#e2e2e6',
-                  border: '1px solid #44474f', borderRadius: '8px',
+                  flex: 1, background: surfaceContainerLowestAlt, color: onSurface,
+                  border: `1px solid ${outlineVariant}`, borderRadius: '8px',
                   padding: '9px 10px', fontSize: '11.5px', fontFamily: 'inherit',
                   outline: 'none'
                 }}
@@ -952,8 +953,8 @@ function MembersModal({ deckId, onClose }) {
               <button
                 onClick={copyLink}
                 style={{
-                  background: copied ? 'rgba(184,206,161,0.18)' : '#d9a441',
-                  color: copied ? '#b8cea1' : '#3d2f00',
+                  background: copied ? 'rgba(184,206,161,0.18)' : primary,
+                  color: copied ? tertiary : onPrimary,
                   border: copied ? '1px solid rgba(184,206,161,0.6)' : 'none',
                   borderRadius: '8px', padding: '9px 14px',
                   fontSize: '12.5px', fontWeight: 600, cursor: 'pointer',
@@ -965,14 +966,14 @@ function MembersModal({ deckId, onClose }) {
             </div>
             {confirmRevokeLink ? (
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: '#ffb4ab' }}>Link stops working for everyone.</span>
+                <span style={{ fontSize: '12px', color: error }}>Link stops working for everyone.</span>
                 <div style={{ flex: 1 }} />
                 <button
                   onClick={() => setConfirmRevokeLink(false)}
                   disabled={linkWorking}
                   style={{
                     background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-                    color: '#9c988d', borderRadius: '6px', padding: '6px 12px',
+                    color: onSurfaceMuted, borderRadius: '6px', padding: '6px 12px',
                     cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
                   }}
                 >
@@ -983,7 +984,7 @@ function MembersModal({ deckId, onClose }) {
                   disabled={linkWorking}
                   style={{
                     background: 'rgba(255,180,171,0.18)', border: '1px solid rgba(255,180,171,0.6)',
-                    color: '#ffb4ab', borderRadius: '6px', padding: '6px 12px',
+                    color: error, borderRadius: '6px', padding: '6px 12px',
                     cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
                   }}
                 >
@@ -995,7 +996,7 @@ function MembersModal({ deckId, onClose }) {
                 onClick={() => setConfirmRevokeLink(true)}
                 style={{
                   background: 'none', border: '1px solid rgba(255,180,171,0.35)',
-                  color: '#ffb4ab', borderRadius: '6px', padding: '5px 10px',
+                  color: error, borderRadius: '6px', padding: '5px 10px',
                   cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
                 }}
               >
@@ -1007,7 +1008,7 @@ function MembersModal({ deckId, onClose }) {
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '18px 0 12px' }} />
 
-        <div style={{ fontSize: '12px', color: '#8e9099', marginBottom: '10px' }}>
+        <div style={{ fontSize: '12px', color: outline, marginBottom: '10px' }}>
           {members === null ? 'Loading…' : members.length === 0 ? 'No crew yet.' : `${members.length} crew member${members.length === 1 ? '' : 's'}`}
         </div>
 
@@ -1018,19 +1019,19 @@ function MembersModal({ deckId, onClose }) {
                 key={m.user_id}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '10px',
-                  background: '#1a1c20', border: '1px solid #35373d',
+                  background: surfaceContainerLow, border: `1px solid ${outlineFaint}`,
                   borderRadius: '8px', padding: '8px 10px'
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '13px', color: '#e2e2e6' }}>{m.name}</div>
-                  {m.email && <div style={{ fontSize: '11px', color: '#8e9099' }}>{m.email}</div>}
+                  <div style={{ fontSize: '13px', color: onSurface }}>{m.name}</div>
+                  {m.email && <div style={{ fontSize: '11px', color: outline }}>{m.email}</div>}
                 </div>
                 <button
                   onClick={() => setRemoveTarget(m)}
                   style={{
                     background: 'none', border: '1px solid rgba(255,180,171,0.35)',
-                    color: '#ffb4ab', borderRadius: '6px', padding: '5px 10px',
+                    color: error, borderRadius: '6px', padding: '5px 10px',
                     cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
                     whiteSpace: 'nowrap'
                   }}
@@ -1093,7 +1094,7 @@ function ActivityPanel({ deckId, onClose }) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31',
+          background: surfaceContainerHigh,
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '12px',
           padding: '20px 22px',
@@ -1102,20 +1103,20 @@ function ActivityPanel({ deckId, onClose }) {
           boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
         }}
       >
-        <div style={{ fontSize: '15px', fontWeight: 600, color: '#e2e2e6', marginBottom: '14px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface, marginBottom: '14px' }}>
           Recent activity
         </div>
 
         {activity === null ? (
-          <div style={{ fontSize: '12.5px', color: '#8e9099' }}>Loading…</div>
+          <div style={{ fontSize: '12.5px', color: outline }}>Loading…</div>
         ) : activity.length === 0 ? (
-          <div style={{ fontSize: '12.5px', color: '#8e9099' }}>Nothing yet.</div>
+          <div style={{ fontSize: '12.5px', color: outline }}>Nothing yet.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {activity.map((a, i) => (
-              <div key={i} style={{ fontSize: '12.5px', color: '#c4c6d0', lineHeight: 1.5 }}>
+              <div key={i} style={{ fontSize: '12.5px', color: onSurfaceVariant, lineHeight: 1.5 }}>
                 <div>{(ACTIVITY_TEXT[a.action] || (() => `${a.actor} did something`))(a)}</div>
-                <div style={{ fontSize: '10.5px', color: '#6b6d75' }}>{a.created_at}</div>
+                <div style={{ fontSize: '10.5px', color: onSurfaceDim }}>{a.created_at}</div>
               </div>
             ))}
           </div>
@@ -1198,7 +1199,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31',
+          background: surfaceContainerHigh,
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '12px',
           padding: '20px 22px',
@@ -1206,10 +1207,10 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
           boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
         }}
       >
-        <div style={{ fontSize: '15px', fontWeight: 600, color: '#e2e2e6', marginBottom: '6px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface, marginBottom: '6px' }}>
           Share this deck
         </div>
-        <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5, marginBottom: '16px' }}>
+        <div style={{ fontSize: '12.5px', color: onSurfaceMuted, lineHeight: 1.5, marginBottom: '16px' }}>
           Anyone with the link can view this lookbook — scenes, frame order, and notes —
           without signing in. They can't edit anything or download originals.
         </div>
@@ -1219,7 +1220,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
             onClick={createLink}
             disabled={working}
             style={{
-              background: '#d9a441', color: '#3d2f00', border: 'none',
+              background: primary, color: onPrimary, border: 'none',
               borderRadius: '8px', padding: '10px 18px',
               fontSize: '13.5px', fontWeight: 600, cursor: 'pointer',
               fontFamily: 'inherit', opacity: working ? 0.6 : 1
@@ -1237,8 +1238,8 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
                 value={shareUrl}
                 onFocus={e => e.target.select()}
                 style={{
-                  flex: 1, background: '#111317', color: '#e2e2e6',
-                  border: '1px solid #44474f', borderRadius: '8px',
+                  flex: 1, background: surfaceContainerLowestAlt, color: onSurface,
+                  border: `1px solid ${outlineVariant}`, borderRadius: '8px',
                   padding: '9px 10px', fontSize: '12px', fontFamily: 'inherit',
                   outline: 'none'
                 }}
@@ -1246,8 +1247,8 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
               <button
                 onClick={copyLink}
                 style={{
-                  background: copied ? 'rgba(184,206,161,0.18)' : '#d9a441',
-                  color: copied ? '#b8cea1' : '#3d2f00',
+                  background: copied ? 'rgba(184,206,161,0.18)' : primary,
+                  color: copied ? tertiary : onPrimary,
                   border: copied ? '1px solid rgba(184,206,161,0.6)' : 'none',
                   borderRadius: '8px', padding: '9px 14px',
                   fontSize: '12.5px', fontWeight: 600, cursor: 'pointer',
@@ -1269,14 +1270,14 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
               tabIndex={savingFeedback ? -1 : 0}
               style={{
                 display: 'flex', alignItems: 'flex-start', gap: '10px',
-                background: '#1a1c20', border: '1px solid #33353b',
+                background: surfaceContainerLow, border: `1px solid ${outlineSubtle}`,
                 borderRadius: '8px', padding: '11px 12px', marginBottom: '14px',
                 cursor: savingFeedback ? 'default' : 'pointer', opacity: savingFeedback ? 0.7 : 1
               }}
             >
               <div style={{
                 flexShrink: 0, marginTop: '1px', width: '32px', height: '18px', borderRadius: '999px',
-                background: feedbackEnabled ? '#d9a441' : '#44474f', position: 'relative', transition: 'background 150ms'
+                background: feedbackEnabled ? primary : outlineVariant, position: 'relative', transition: 'background 150ms'
               }}>
                 <div style={{
                   position: 'absolute', top: '2px', left: feedbackEnabled ? '16px' : '2px',
@@ -1285,10 +1286,10 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
                 }} />
               </div>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: '#e2e2e6', marginBottom: '2px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: onSurface, marginBottom: '2px' }}>
                   Allow picks &amp; comments
                 </div>
-                <div style={{ fontSize: '12px', color: '#9c988d', lineHeight: 1.5 }}>
+                <div style={{ fontSize: '12px', color: onSurfaceMuted, lineHeight: 1.5 }}>
                   Viewers can mark favorite frames and leave notes without signing in. You can
                   delete anything they post, and turn this off any time.
                 </div>
@@ -1297,7 +1298,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
 
             {confirmRevoke ? (
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '12.5px', color: '#ffb4ab' }}>
+                <span style={{ fontSize: '12.5px', color: error }}>
                   The link will stop working for everyone.
                 </span>
                 <div style={{ flex: 1 }} />
@@ -1306,7 +1307,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
                   disabled={working}
                   style={{
                     background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-                    color: '#9c988d', borderRadius: '6px', padding: '6px 12px',
+                    color: onSurfaceMuted, borderRadius: '6px', padding: '6px 12px',
                     cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
                   }}
                 >
@@ -1318,7 +1319,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
                   style={{
                     background: 'rgba(255,180,171,0.18)',
                     border: '1px solid rgba(255,180,171,0.6)',
-                    color: '#ffb4ab', borderRadius: '6px', padding: '6px 12px',
+                    color: error, borderRadius: '6px', padding: '6px 12px',
                     cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
                   }}
                 >
@@ -1330,7 +1331,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
                 onClick={() => setConfirmRevoke(true)}
                 style={{
                   background: 'none', border: '1px solid rgba(255,180,171,0.35)',
-                  color: '#ffb4ab', borderRadius: '6px', padding: '6px 12px',
+                  color: error, borderRadius: '6px', padding: '6px 12px',
                   cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
                 }}
               >
@@ -1373,8 +1374,8 @@ function SceneSection({
       style={{
         marginBottom: '24px',
         borderRadius: '12px',
-        border: `1px solid ${isDragOver ? '#d9a441' : '#44474f'}`,
-        background: isDragOver ? 'rgba(217,164,65,0.08)' : '#1a1c20',
+        border: `1px solid ${isDragOver ? primary : outlineVariant}`,
+        background: isDragOver ? 'rgba(217,164,65,0.08)' : surfaceContainerLow,
         padding: '14px 16px',
         transition: 'background 150ms ease, border-color 150ms ease'
       }}
@@ -1383,7 +1384,7 @@ function SceneSection({
         <button
           onClick={() => toggleCollapsed(sceneKey)}
           style={{
-            background: 'none', border: 'none', color: '#8e9099',
+            background: 'none', border: 'none', color: outline,
             cursor: 'pointer', fontSize: '13px', padding: '2px 4px',
             transform: isCollapsed ? 'rotate(-90deg)' : 'none',
             transition: 'transform 150ms ease'
@@ -1400,7 +1401,7 @@ function SceneSection({
             onDragEnd={onSceneDragEnd}
             title="Drag to reorder this scene"
             style={{
-              cursor: 'grab', color: '#8e9099', fontSize: '15px',
+              cursor: 'grab', color: outline, fontSize: '15px',
               lineHeight: 1, userSelect: 'none'
             }}
           >
@@ -1416,8 +1417,8 @@ function SceneSection({
             onBlur={saveRename}
             onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
             style={{
-              fontSize: '16px', fontWeight: 500, color: '#e2e2e6',
-              background: '#111317', border: '1px solid #d9a441',
+              fontSize: '16px', fontWeight: 500, color: onSurface,
+              background: surfaceContainerLowestAlt, border: `1px solid ${primary}`,
               borderRadius: '6px', padding: '3px 8px', fontFamily: 'inherit',
               outline: 'none'
             }}
@@ -1426,7 +1427,7 @@ function SceneSection({
           <span
             onClick={editable ? () => { setDraft(title); setRenaming(true); } : undefined}
             style={{
-              fontSize: '16px', fontWeight: 500, color: '#e2e2e6',
+              fontSize: '16px', fontWeight: 500, color: onSurface,
               cursor: editable ? 'pointer' : 'default'
             }}
             title={editable ? 'Click to rename' : undefined}
@@ -1435,7 +1436,7 @@ function SceneSection({
           </span>
         )}
 
-        <span style={{ fontSize: '12px', color: '#8e9099' }}>
+        <span style={{ fontSize: '12px', color: outline }}>
           {images.length} photo{images.length === 1 ? '' : 's'}
         </span>
 
@@ -1444,7 +1445,7 @@ function SceneSection({
             onClick={onStoryboard}
             title="Reorder this scene's photos and add notes"
             style={{
-              background: '#d9a441', color: '#3d2f00', border: 'none',
+              background: primary, color: onPrimary, border: 'none',
               borderRadius: '6px', padding: '6px 12px',
               cursor: 'pointer', fontSize: '11.5px', fontWeight: 600, fontFamily: 'inherit',
               whiteSpace: 'nowrap'
@@ -1462,7 +1463,7 @@ function SceneSection({
             title="Delete scene"
             style={{
               background: 'none', border: '1px solid rgba(255,180,171,0.35)',
-              color: '#ffb4ab', borderRadius: '6px', padding: '5px 10px',
+              color: error, borderRadius: '6px', padding: '5px 10px',
               cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
             }}
           >
@@ -1474,9 +1475,9 @@ function SceneSection({
       {!isCollapsed && (
         images.length === 0 ? (
           <div style={{
-            fontSize: '12.5px', color: '#8e9099',
+            fontSize: '12.5px', color: outline,
             padding: '14px', textAlign: 'center',
-            border: '1px dashed #44474f', borderRadius: '8px'
+            border: `1px dashed ${outlineVariant}`, borderRadius: '8px'
           }}>
             {canEdit ? 'Drag photos here' : 'No photos here yet'}
           </div>
@@ -1511,7 +1512,7 @@ function DeckTile({ img, onRemove, canEdit }) {
         aspectRatio: '1',
         borderRadius: '8px',
         overflow: 'hidden',
-        background: '#111317',
+        background: surfaceContainerLowestAlt,
         cursor: canEdit ? 'grab' : 'default'
       }}
     >
@@ -1529,7 +1530,7 @@ function DeckTile({ img, onRemove, canEdit }) {
           style={{
             position: 'absolute', top: '4px', right: '4px',
             background: 'rgba(0,0,0,0.55)', border: 'none',
-            color: '#ffb4ab', borderRadius: '5px',
+            color: error, borderRadius: '5px',
             width: '20px', height: '20px', lineHeight: 1,
             cursor: 'pointer', fontSize: '13px'
           }}
@@ -1640,18 +1641,18 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31',
-          border: '1px solid #44474f',
+          background: surfaceContainerHigh,
+          border: `1px solid ${outlineVariant}`,
           borderRadius: '12px',
           padding: '20px 22px',
           width: '460px', maxWidth: 'calc(100vw - 48px)',
           boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
         }}
       >
-        <div style={{ fontSize: '15px', fontWeight: 600, color: '#efeadd', marginBottom: '6px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 600, color: onSurfaceWarm, marginBottom: '6px' }}>
           Export lookbook
         </div>
-        <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5, marginBottom: '16px' }}>
+        <div style={{ fontSize: '12.5px', color: onSurfaceMuted, lineHeight: 1.5, marginBottom: '16px' }}>
           Turns this deck into a PDF you can email — scenes in order, with your notes.
         </div>
 
@@ -1664,7 +1665,7 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
                 onClick={() => setLayout(opt.value)}
                 style={{
                   display: 'flex', gap: '10px', alignItems: 'flex-start',
-                  border: `1px solid ${selected ? '#d9a441' : '#44474f'}`,
+                  border: `1px solid ${selected ? primary : outlineVariant}`,
                   background: selected ? 'rgba(217,164,65,0.10)' : 'none',
                   borderRadius: '8px', padding: '11px 13px',
                   cursor: 'pointer'
@@ -1676,18 +1677,18 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
                   checked={selected}
                   onChange={() => setLayout(opt.value)}
                   style={{
-                    accentColor: '#d9a441', width: '15px', height: '15px',
+                    accentColor: primary, width: '15px', height: '15px',
                     cursor: 'pointer', marginTop: '2px', flexShrink: 0
                   }}
                 />
                 <div>
                   <div style={{
                     fontSize: '13.5px', fontWeight: 600,
-                    color: selected ? '#d9a441' : '#e2e2e6', marginBottom: '3px'
+                    color: selected ? primary : onSurface, marginBottom: '3px'
                   }}>
                     {opt.label}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#9c988d', lineHeight: 1.5 }}>
+                  <div style={{ fontSize: '12px', color: onSurfaceMuted, lineHeight: 1.5 }}>
                     {opt.blurb}
                   </div>
                 </div>
@@ -1706,15 +1707,15 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
               checked={includeUnsorted}
               onChange={e => setIncludeUnsorted(e.target.checked)}
               style={{
-                accentColor: '#d9a441', width: '15px', height: '15px',
+                accentColor: primary, width: '15px', height: '15px',
                 cursor: 'pointer', marginTop: '2px', flexShrink: 0
               }}
             />
             <div>
-              <div style={{ fontSize: '13px', color: '#e2e2e6', marginBottom: '3px' }}>
+              <div style={{ fontSize: '13px', color: onSurface, marginBottom: '3px' }}>
                 Include Unsorted photos
               </div>
-              <div style={{ fontSize: '12px', color: '#9c988d', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '12px', color: onSurfaceMuted, lineHeight: 1.5 }}>
                 Photos you haven't put into a scene yet. They'll come last.
               </div>
             </div>
@@ -1723,13 +1724,13 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
 
         <div style={{
           display: 'flex', gap: '8px', justifyContent: 'flex-end',
-          borderTop: '1px solid #2a2c31', paddingTop: '4px'
+          borderTop: `1px solid ${surfaceContainerHigh}`, paddingTop: '4px'
         }}>
           <button
             onClick={onClose}
             style={{
-              background: 'none', border: '1px solid #44474f',
-              color: '#9c988d', borderRadius: '8px', padding: '10px 18px',
+              background: 'none', border: `1px solid ${outlineVariant}`,
+              color: onSurfaceMuted, borderRadius: '8px', padding: '10px 18px',
               cursor: 'pointer', fontSize: '13.5px', fontFamily: 'inherit',
               whiteSpace: 'nowrap'
             }}
@@ -1739,7 +1740,7 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
           <button
             onClick={startExport}
             style={{
-              background: '#d9a441', color: '#3d2f00', border: 'none',
+              background: primary, color: onPrimary, border: 'none',
               borderRadius: '8px', padding: '10px 18px',
               fontSize: '13.5px', fontWeight: 600, cursor: 'pointer',
               fontFamily: 'inherit', whiteSpace: 'nowrap'
