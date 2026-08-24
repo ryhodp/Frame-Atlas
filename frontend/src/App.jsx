@@ -62,12 +62,19 @@ function Shell() {
       .catch(() => setNeedsSetup(false))
   }, [isSharePage])
 
-  // Share links never need the app shell or a login at all.
+  // Share links never need the app shell or a login at all. They DO still
+  // need the page background: rendering outside the shell below meant nothing
+  // painted one, so the browser default (white) showed through behind text
+  // colored for a dark UI — barely legible, on the one page clients see.
+  // Set here rather than inside SharePage so it covers that page's loading
+  // and error states too, not just a successfully-loaded deck.
   if (isSharePage) {
     return (
-      <Routes>
-        <Route path="/share/:token" element={<SharePage />} />
-      </Routes>
+      <div style={{ minHeight: '100vh', background: PAGE_BG }}>
+        <Routes>
+          <Route path="/share/:token" element={<SharePage />} />
+        </Routes>
+      </div>
     )
   }
 
