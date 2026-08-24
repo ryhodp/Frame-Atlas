@@ -42,7 +42,7 @@ export const surfaceContainerInput = '#0f1013';        // AccountPage's own inpu
 // V62 (Phase 5): from the five large files.
 export const surfaceContainerCrop = '#111113';         // CropModal side panel
 export const surfaceContainerHover = '#222226';        // autocomplete row hover/highlight (Home)
-export const surfaceContainerDivider = '#4a4a52';      // CropModal pane gutters (shows through 1px gaps)
+export const surfaceContainerDivider = '#4a4a52';      // CropModal workspace panes + the 1px gutter between them
 
 // Border shades subtler than outlineVariant (#44474f)
 export const outlineSubtle = '#33353b';                // modal/panel borders

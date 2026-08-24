@@ -6,6 +6,7 @@ import {
 } from '../perspective';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useToast } from '../ToastContext';
+import { danger, dangerWarmAlt, error, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primary, primaryDim, surfaceContainerCrop, surfaceContainerDark, surfaceContainerDivider, surfaceContainerLow, surfaceContainerLowest, tertiary, warning } from '../theme';
 
 // ── CropModal — Frame Atlas V18 ───────────────────────────────────────────────
 // The CropStudio v34 review workflow, embedded as a full-screen modal:
@@ -879,7 +880,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1200,
-      background: '#0a0a0b', color: '#efeadd',
+      background: surfaceContainerLowest, color: onSurfaceWarm,
       display: 'flex', flexDirection: 'column',
       fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
       animation: 'fadeIn 0.15s ease',
@@ -894,14 +895,14 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       }}>
         <span style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.01em' }}>✂ Crop</span>
         {phase === 'review' && (
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#9c988d' }}>
-            <span style={{ color: '#efeadd' }}>{Math.min(current + 1, items.length)}</span> of{' '}
-            <span style={{ color: '#efeadd' }}>{items.length}</span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: onSurfaceMuted }}>
+            <span style={{ color: onSurfaceWarm }}>{Math.min(current + 1, items.length)}</span> of{' '}
+            <span style={{ color: onSurfaceWarm }}>{items.length}</span>
           </span>
         )}
         {phase === 'review' && !isMobile && (
           <span style={{
-            fontSize: '12px', color: '#65625a', flex: 1, textAlign: 'center',
+            fontSize: '12px', color: onSurfaceFaint, flex: 1, textAlign: 'center',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
           }}>
             {item?.fa.filename}
@@ -923,7 +924,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               onClick={togglePerspective}
               disabled={item?.status !== 'ready'}
               style={isPerspective
-                ? { ...ghostBtn('#d9a441', 'rgba(217,164,65,0.55)'), background: 'rgba(217,164,65,0.12)' }
+                ? { ...ghostBtn(primary, 'rgba(217,164,65,0.55)'), background: 'rgba(217,164,65,0.12)' }
                 : ghostBtn()}
               title="Switch between a straight rectangle and four free corners for an angled screen or poster (P)"
             >
@@ -967,7 +968,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                 <button
                   onClick={doDelete}
                   disabled={item?.status !== 'ready'}
-                  style={{ ...ghostBtn('#e07a55', 'rgba(224,122,85,0.55)') }}
+                  style={{ ...ghostBtn(dangerWarmAlt, 'rgba(224,122,85,0.55)') }}
                   title="Remove this image from the batch"
                 >
                   ✕ Delete
@@ -982,7 +983,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             </button>
             <button
               onClick={() => recordAndAdvance(false)}
-              style={ghostBtn('#cf7152', 'rgba(207,113,82,0.35)')}
+              style={ghostBtn(danger, 'rgba(207,113,82,0.35)')}
               title="Skip — leave this image untouched (⌫)"
             >
               Skip
@@ -991,7 +992,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               onClick={() => recordAndAdvance(true)}
               disabled={item?.status !== 'ready' || !quadValid}
               style={{
-                background: '#d9a441', color: '#3d2f00', border: 'none',
+                background: primary, color: onPrimary, border: 'none',
                 borderRadius: '8px', padding: '7px 16px', fontSize: '12.5px',
                 fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                 opacity: item?.status === 'ready' && quadValid ? 1 : 0.4,
@@ -1007,7 +1008,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           onClick={tryClose}
           title="Close"
           style={{
-            background: 'none', border: 'none', color: '#9c988d',
+            background: 'none', border: 'none', color: onSurfaceMuted,
             fontSize: '20px', cursor: 'pointer', padding: '2px 6px', lineHeight: 1,
           }}
         >×</button>
@@ -1019,10 +1020,10 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           <div style={{
             flex: 1, display: 'flex', minHeight: 0,
             flexDirection: isMobile ? 'column' : 'row',
-            gap: '1px', background: '#4a4a52',
+            gap: '1px', background: surfaceContainerDivider,
           }}>
             {/* Original + handles */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#4a4a52', minWidth: 0, minHeight: 0 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: surfaceContainerDivider, minWidth: 0, minHeight: 0 }}>
               <div style={panelLabel()}>
                 {isPerspective
                   ? 'ORIGINAL — DRAG EACH CORNER ONTO THE REAL CORNER'
@@ -1060,7 +1061,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                           <polygon
                             points={quadPoints}
                             fill={quadValid ? 'rgba(217,164,65,0.10)' : 'rgba(207,113,82,0.16)'}
-                            stroke={quadValid ? '#d9a441' : '#cf7152'}
+                            stroke={quadValid ? primary : danger}
                             strokeWidth="0.4"
                             vectorEffect="non-scaling-stroke"
                           />
@@ -1078,7 +1079,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                               left: `${(p.x / item.imgEl.naturalWidth) * 100}%`,
                               top: `${(p.y / item.imgEl.naturalHeight) * 100}%`,
                               width: `${handleSize + 4}px`, height: `${handleSize + 4}px`,
-                              background: quadValid ? '#d9a441' : '#cf7152',
+                              background: quadValid ? primary : danger,
                               border: '2px solid rgba(0,0,0,0.45)',
                               borderRadius: '50%',
                               transform: 'translate(-50%, -50%)',
@@ -1096,7 +1097,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                         <div style={{
                           position: 'absolute',
                           ...boxPct(item.cropBox, item.imgEl),
-                          border: '2px solid #d9a441',
+                          border: `2px solid ${primary}`,
                           boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)',
                           pointerEvents: 'none',
                         }} />
@@ -1111,7 +1112,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                               position: 'absolute',
                               ...handlePos(corner, item.cropBox, item.imgEl),
                               width: `${handleSize}px`, height: `${handleSize}px`,
-                              background: '#d9a441',
+                              background: primary,
                               borderRadius: ['tc', 'bc', 'lc', 'rc'].includes(corner) ? '3px' : '50%',
                               transform: 'translate(-50%, -50%)',
                               cursor: handleCursor[corner],
@@ -1132,7 +1133,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
                       <button
                         onClick={() => { item.status = 'pending'; item.loadPromise = null; loadItem(current); }}
-                        style={ghostBtn('#dcbd76', 'rgba(201,162,83,0.35)')}
+                        style={ghostBtn(warning, 'rgba(201,162,83,0.35)')}
                       >
                         Retry
                       </button>
@@ -1146,14 +1147,14 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             </div>
 
             {/* Cropped result */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#4a4a52', minWidth: 0, minHeight: 0 }}>
-              <div style={{ ...panelLabel(), color: '#d9a441', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: surfaceContainerDivider, minWidth: 0, minHeight: 0 }}>
+              <div style={{ ...panelLabel(), color: primary, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 {isPerspective ? 'STRAIGHTENED RESULT' : 'CROPPED RESULT'}
                 {isPerspective && !quadValid && (
                   <span style={{
                     fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
                     borderRadius: '3px', padding: '1px 6px',
-                    color: '#cf7152', background: 'rgba(207,113,82,0.12)', border: '1px solid rgba(207,113,82,0.45)',
+                    color: danger, background: 'rgba(207,113,82,0.12)', border: '1px solid rgba(207,113,82,0.45)',
                   }}>
                     ⚠ CORNERS CROSS OVER — UNCROSS THEM
                   </span>
@@ -1162,7 +1163,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                   <span style={{
                     fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
                     borderRadius: '3px', padding: '1px 6px',
-                    color: '#cf7152', background: 'rgba(207,113,82,0.12)', border: '1px solid rgba(207,113,82,0.45)',
+                    color: danger, background: 'rgba(207,113,82,0.12)', border: '1px solid rgba(207,113,82,0.45)',
                   }}>
                     ⚠ NO AUTO-CROP — ADJUST BY HAND
                   </span>
@@ -1192,15 +1193,15 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0,
           }}>
             {!isMobile && (
-              <span style={{ fontSize: '11px', color: '#65625a' }}>
+              <span style={{ fontSize: '11px', color: onSurfaceFaint }}>
                 <Kbd>Space</Kbd> approve · <Kbd>⌫</Kbd> skip · <Kbd>←</Kbd> back · <Kbd>Z</Kbd> undo · <Kbd>⇧Z</Kbd> redo · <Kbd>T</Kbd> tighten · <Kbd>R</Kbd> redetect · <Kbd>P</Kbd> perspective
               </span>
             )}
             <div style={{ flex: 1 }} />
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#65625a' }}>
-              <span style={{ color: '#b8cea1' }}>✓ {approvedCount}</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: onSurfaceFaint }}>
+              <span style={{ color: tertiary }}>✓ {approvedCount}</span>
               {'  '}
-              <span style={{ color: '#cf7152' }}>– {skippedCount}</span>
+              <span style={{ color: danger }}>– {skippedCount}</span>
             </span>
           </div>
 
@@ -1209,7 +1210,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             <div style={{
               height: '76px', flexShrink: 0,
               borderTop: '1px solid rgba(255,255,255,0.065)',
-              background: '#111113',
+              background: surfaceContainerCrop,
               overflowX: 'auto', overflowY: 'hidden',
               display: 'flex', alignItems: 'center', gap: '6px',
               padding: '8px 12px', scrollBehavior: 'smooth',
@@ -1223,7 +1224,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                     flexShrink: 0, width: '52px', height: '60px',
                     borderRadius: '4px', overflow: 'hidden', position: 'relative',
                     cursor: 'pointer',
-                    border: `2px solid ${idx === current ? '#d9a441' : 'transparent'}`,
+                    border: `2px solid ${idx === current ? primary : 'transparent'}`,
                   }}
                 >
                   {it.fa.thumbnail && (
@@ -1233,7 +1234,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                     position: 'absolute', bottom: '3px', right: '3px',
                     width: '8px', height: '8px', borderRadius: '50%',
                     border: '1px solid rgba(0,0,0,0.4)',
-                    background: it.decided === 'approved' ? '#b8cea1' : it.decided === 'skipped' ? '#cf7152' : '#65625a',
+                    background: it.decided === 'approved' ? tertiary : it.decided === 'skipped' ? danger : onSurfaceFaint,
                   }} />
                 </div>
               ))}
@@ -1246,11 +1247,11 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       {phase === 'detectAll' && (
         <CenterScreen>
           <Spinner />
-          <div style={{ fontSize: '13px', color: '#9c988d' }}>
+          <div style={{ fontSize: '13px', color: onSurfaceMuted }}>
             Detecting crops — {detectAllProgress ? `${detectAllProgress.done} of ${detectAllProgress.total}` : '…'}
           </div>
           {detectAllProgress && (
-            <div style={{ fontSize: '11px', color: '#65625a', fontFamily: "'JetBrains Mono', monospace" }}>
+            <div style={{ fontSize: '11px', color: onSurfaceFaint, fontFamily: "'JetBrains Mono', monospace" }}>
               {detectAllProgress.filename}
             </div>
           )}
@@ -1260,13 +1261,13 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       {/* ── Summary ── */}
       {phase === 'summary' && (
         <CenterScreen>
-          <div style={{ fontSize: '56px', fontWeight: 700, letterSpacing: '-2px', color: '#d9a441', lineHeight: 1 }}>
+          <div style={{ fontSize: '56px', fontWeight: 700, letterSpacing: '-2px', color: primary, lineHeight: 1 }}>
             {summaryToCrop}
           </div>
-          <div style={{ fontSize: '14px', color: '#9c988d', marginTop: '-10px' }}>
+          <div style={{ fontSize: '14px', color: onSurfaceMuted, marginTop: '-10px' }}>
             image{summaryToCrop === 1 ? '' : 's'} ready to crop
           </div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#65625a' }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: onSurfaceFaint }}>
             {summaryUnchanged > 0 && <>{summaryUnchanged} approved with no crop needed · </>}
             {skippedCount} skipped
           </div>
@@ -1275,20 +1276,20 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               <button
                 onClick={applyCrops}
                 style={{
-                  background: '#d9a441', color: '#3d2f00', fontWeight: 700, fontSize: '14px',
+                  background: primary, color: onPrimary, fontWeight: 700, fontSize: '14px',
                   padding: '12px 28px', borderRadius: '8px', border: 'none', cursor: 'pointer',
                   fontFamily: 'inherit',
                 }}
               >
                 Crop {summaryToCrop} image{summaryToCrop === 1 ? '' : 's'}
               </button>
-              <div style={{ fontSize: '11.5px', color: '#65625a', maxWidth: '360px', textAlign: 'center', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '11.5px', color: onSurfaceFaint, maxWidth: '360px', textAlign: 'center', lineHeight: 1.5 }}>
                 Each original moves to your Drive's _Removed folder (recoverable) and a cropped
                 copy takes its place. All tags and metadata carry over.
               </div>
             </>
           ) : (
-            <div style={{ fontSize: '12.5px', color: '#65625a' }}>Nothing to crop — close, or go back and approve some.</div>
+            <div style={{ fontSize: '12.5px', color: onSurfaceFaint }}>Nothing to crop — close, or go back and approve some.</div>
           )}
           <button onClick={backToReview} style={ghostBtn()}>← Back to review</button>
         </CenterScreen>
@@ -1298,15 +1299,15 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       {phase === 'applying' && (
         <CenterScreen>
           <Spinner />
-          <div style={{ fontSize: '13px', color: '#9c988d' }}>
+          <div style={{ fontSize: '13px', color: onSurfaceMuted }}>
             Cropping {applyProgress ? `${applyProgress.done} of ${applyProgress.total}` : '…'}
           </div>
           {applyProgress && (
-            <div style={{ fontSize: '11px', color: '#65625a', fontFamily: "'JetBrains Mono', monospace" }}>
+            <div style={{ fontSize: '11px', color: onSurfaceFaint, fontFamily: "'JetBrains Mono', monospace" }}>
               {applyProgress.filename}
             </div>
           )}
-          <div style={{ fontSize: '11.5px', color: '#65625a' }}>
+          <div style={{ fontSize: '11.5px', color: onSurfaceFaint }}>
             Downloading, cropping, and swapping each file in Drive — a few seconds per image.
           </div>
         </CenterScreen>
@@ -1315,15 +1316,15 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       {/* ── Done ── */}
       {phase === 'done' && (
         <CenterScreen>
-          <div style={{ fontSize: '56px', fontWeight: 700, letterSpacing: '-2px', color: okResults.length ? '#b8cea1' : '#cf7152', lineHeight: 1 }}>
+          <div style={{ fontSize: '56px', fontWeight: 700, letterSpacing: '-2px', color: okResults.length ? tertiary : danger, lineHeight: 1 }}>
             {okResults.length}
           </div>
-          <div style={{ fontSize: '14px', color: '#9c988d', marginTop: '-10px' }}>
+          <div style={{ fontSize: '14px', color: onSurfaceMuted, marginTop: '-10px' }}>
             image{okResults.length === 1 ? '' : 's'} cropped
           </div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#65625a' }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: onSurfaceFaint }}>
             {summaryUnchangedText(items)}
-            {skippedCount} skipped{failedResults.length > 0 && <> · <span style={{ color: '#cf7152' }}>{failedResults.length} failed</span></>}
+            {skippedCount} skipped{failedResults.length > 0 && <> · <span style={{ color: danger }}>{failedResults.length} failed</span></>}
           </div>
           {failedResults.length > 0 && (
             <div style={{
@@ -1332,12 +1333,12 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               borderRadius: '10px', padding: '12px 14px', textAlign: 'left',
             }}>
               {failedResults.map(r => (
-                <div key={r.fa.id} style={{ fontSize: '12px', color: '#efeadd', marginBottom: '8px', lineHeight: 1.5 }}>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#cf7152' }}>{r.fa.filename}</div>
+                <div key={r.fa.id} style={{ fontSize: '12px', color: onSurfaceWarm, marginBottom: '8px', lineHeight: 1.5 }}>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: danger }}>{r.fa.filename}</div>
                   {r.error}
                 </div>
               ))}
-              <div style={{ fontSize: '11px', color: '#9c988d' }}>
+              <div style={{ fontSize: '11px', color: onSurfaceMuted }}>
                 Nothing was lost — these images are untouched. Fix the issue above and crop them again.
               </div>
             </div>
@@ -1345,7 +1346,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           <button
             onClick={() => onClose(startedRef.current)}
             style={{
-              background: '#d9a441', color: '#3d2f00', fontWeight: 700, fontSize: '14px',
+              background: primary, color: onPrimary, fontWeight: 700, fontSize: '14px',
               padding: '12px 28px', borderRadius: '8px', border: 'none', cursor: 'pointer',
               fontFamily: 'inherit',
             }}
@@ -1366,12 +1367,12 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           <div
             onClick={e => e.stopPropagation()}
             style={{
-              background: '#1a1c20', border: '1px solid rgba(255,255,255,0.12)',
+              background: surfaceContainerLow, border: '1px solid rgba(255,255,255,0.12)',
               borderRadius: '12px', padding: '18px 20px', width: 'min(320px, 90vw)',
               boxShadow: '0 20px 48px rgba(0,0,0,0.6)', animation: 'fadeIn 0.12s ease',
             }}
           >
-            <div style={{ fontSize: '13.5px', color: '#efeadd', lineHeight: 1.5, marginBottom: '16px' }}>
+            <div style={{ fontSize: '13.5px', color: onSurfaceWarm, lineHeight: 1.5, marginBottom: '16px' }}>
               Leave crop review? Your images have not been changed yet.
             </div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -1379,7 +1380,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                 onClick={() => setConfirmClose(false)}
                 style={{
                   background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-                  color: '#9c988d', borderRadius: '6px', padding: '7px 14px',
+                  color: onSurfaceMuted, borderRadius: '6px', padding: '7px 14px',
                   cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
                 }}
               >
@@ -1389,7 +1390,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                 onClick={() => onClose(startedRef.current)}
                 style={{
                   background: 'rgba(255,180,171,0.18)', border: '1px solid rgba(255,180,171,0.6)',
-                  color: '#ffb4ab', borderRadius: '6px', padding: '7px 14px',
+                  color: error, borderRadius: '6px', padding: '7px 14px',
                   cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
                 }}
               >
@@ -1431,7 +1432,7 @@ function PanelNotice({ spinner, text, children }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', maxWidth: '340px', textAlign: 'center' }}>
       {spinner && <Spinner />}
-      <div style={{ fontSize: '12.5px', color: '#9c988d', lineHeight: 1.5 }}>{text}</div>
+      <div style={{ fontSize: '12.5px', color: onSurfaceMuted, lineHeight: 1.5 }}>{text}</div>
       {children}
     </div>
   );
@@ -1441,7 +1442,7 @@ function Spinner() {
   return (
     <span style={{
       width: '18px', height: '18px',
-      border: '2px solid rgba(201,162,83,0.2)', borderTopColor: '#c9a253',
+      border: '2px solid rgba(201,162,83,0.2)', borderTopColor: primaryDim,
       borderRadius: '50%', display: 'inline-block',
       animation: 'spin 0.7s linear infinite',
     }} />
@@ -1452,13 +1453,13 @@ function Kbd({ children }) {
   return (
     <kbd style={{
       fontFamily: "'JetBrains Mono', monospace",
-      background: '#18181b', border: '1px solid rgba(255,255,255,0.12)',
-      borderRadius: '3px', padding: '1px 5px', fontSize: '10px', color: '#efeadd',
+      background: surfaceContainerDark, border: '1px solid rgba(255,255,255,0.12)',
+      borderRadius: '3px', padding: '1px 5px', fontSize: '10px', color: onSurfaceWarm,
     }}>{children}</kbd>
   );
 }
 
-function ghostBtn(color = '#9c988d', borderColor = 'rgba(255,255,255,0.12)') {
+function ghostBtn(color = onSurfaceMuted, borderColor = 'rgba(255,255,255,0.12)') {
   return {
     background: 'none', border: `1px solid ${borderColor}`,
     color, borderRadius: '8px', padding: '7px 12px',
@@ -1470,7 +1471,7 @@ function panelLabel() {
   return {
     padding: '7px 14px', fontSize: '9.5px',
     fontFamily: "'JetBrains Mono', monospace",
-    color: '#65625a', letterSpacing: '0.08em',
+    color: onSurfaceFaint, letterSpacing: '0.08em',
     borderBottom: '1px solid rgba(255,255,255,0.065)', flexShrink: 0,
   };
 }
