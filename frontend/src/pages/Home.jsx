@@ -11,7 +11,14 @@ import { useAuth } from '../AuthContext';
 import { useSync } from '../SyncContext';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
-import { PAGE_BG, SWATCH_COLORS as PRESET_SWATCHES } from '../theme';
+import {
+  PAGE_BG, SWATCH_COLORS as PRESET_SWATCHES,
+  accentBlueLight, accentOrange, accentTeal, accentViolet, accentVioletLight,
+  accentVioletLighter, danger, error, onPrimary, onSurfaceFaint, onSurfaceMuted,
+  onSurfaceWarm, onTertiary, outlineVariant, primary, primaryDim, success,
+  surfaceContainerDark, surfaceContainerHover, surfaceContainerLow,
+  surfaceContainerLowest, surfaceContainerMuted, tertiary, warning
+} from '../theme';
 
 const PER_PAGE = 60;
 const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP' };
@@ -916,7 +923,7 @@ export default function Home() {
         flexDirection: 'column',
         height: '100%',
         background: PAGE_BG,
-        color: '#efeadd',
+        color: onSurfaceWarm,
         fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
         position: 'relative'
       }}>
@@ -928,15 +935,15 @@ export default function Home() {
         <div style={{
           position: 'fixed', inset: 0, zIndex: 500,
           background: 'rgba(10,10,11,0.82)',
-          border: '3px dashed #c9a253',
+          border: `3px dashed ${primaryDim}`,
           margin: '10px',
           borderRadius: '16px',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: '10px', pointerEvents: 'none'
         }}>
           <div style={{ fontSize: '32px' }}>⬆</div>
-          <div style={{ fontSize: '16px', fontWeight: 600, color: '#efeadd' }}>Drop to upload</div>
-          <div style={{ fontSize: '12.5px', color: '#9c988d' }}>Photos go straight into your Drive folder and start tagging automatically</div>
+          <div style={{ fontSize: '16px', fontWeight: 600, color: onSurfaceWarm }}>Drop to upload</div>
+          <div style={{ fontSize: '12.5px', color: onSurfaceMuted }}>Photos go straight into your Drive folder and start tagging automatically</div>
         </div>
       )}
 
@@ -998,7 +1005,7 @@ export default function Home() {
             flex: 1,
             minWidth: 0,
             display: 'flex', alignItems: 'center', gap: '12px',
-            background: '#18181b',
+            background: surfaceContainerDark,
             border: '1px solid rgba(255,255,255,0.12)',
             borderRadius: '10px',
             padding: '0 14px',
@@ -1018,18 +1025,18 @@ export default function Home() {
               disabled={interpreting}
               style={{
                 flex: 1, background: 'transparent', border: 'none', outline: 'none',
-                color: '#efeadd', fontFamily: 'inherit', fontSize: '14px'
+                color: onSurfaceWarm, fontFamily: 'inherit', fontSize: '14px'
               }}
             />
             {interpreting && (
               <span style={{
-                fontSize: '11px', color: '#8b7cf6',
+                fontSize: '11px', color: accentViolet,
                 display: 'flex', alignItems: 'center', gap: '6px'
               }}>
                 <span style={{
                   width: '10px', height: '10px',
                   border: '2px solid rgba(139,124,246,0.25)',
-                  borderTopColor: '#8b7cf6',
+                  borderTopColor: accentViolet,
                   borderRadius: '50%', display: 'inline-block',
                   animation: 'spin 0.7s linear infinite'
                 }} />
@@ -1045,11 +1052,11 @@ export default function Home() {
             title="Select Mode — bulk-select images to crop, tag, or add to a deck (press V)"
             style={{
               height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
-              background: tagMode ? 'rgba(184,206,161,0.14)' : '#18181b',
+              background: tagMode ? 'rgba(184,206,161,0.14)' : surfaceContainerDark,
               border: `1px solid ${tagMode ? 'rgba(184,206,161,0.6)' : 'rgba(255,255,255,0.12)'}`,
               borderRadius: '10px',
               cursor: 'pointer',
-              color: tagMode ? '#b8cea1' : '#9c988d',
+              color: tagMode ? tertiary : onSurfaceMuted,
               fontSize: '16px'
             }}
           >
@@ -1067,11 +1074,11 @@ export default function Home() {
                 title={duplicateScanStatus === 'scanning' ? 'Scanning for duplicates...' : 'Find duplicate images (runs in background)'}
                 style={{
                   height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
-                  background: duplicateScanStatus === 'scanning' ? 'rgba(217,164,65,0.14)' : '#18181b',
+                  background: duplicateScanStatus === 'scanning' ? 'rgba(217,164,65,0.14)' : surfaceContainerDark,
                   border: `1px solid ${duplicateScanStatus === 'scanning' ? 'rgba(217,164,65,0.5)' : 'rgba(255,255,255,0.12)'}`,
                   borderRadius: '10px',
                   cursor: duplicateScanStatus === 'scanning' ? 'default' : 'pointer',
-                  color: duplicateScanStatus === 'scanning' ? '#d9a441' : '#9c988d',
+                  color: duplicateScanStatus === 'scanning' ? primary : onSurfaceMuted,
                   fontSize: '15px',
                   opacity: duplicateScanStatus === 'scanning' ? 0.7 : 1
                 }}
@@ -1093,11 +1100,11 @@ export default function Home() {
                   padding: sync.running ? '0 12px' : 0,
                   width: sync.running ? 'auto' : (isMobile ? '38px' : '46px'),
                   justifyContent: 'center',
-                  background: sync.running ? 'rgba(217,164,65,0.14)' : '#18181b',
+                  background: sync.running ? 'rgba(217,164,65,0.14)' : surfaceContainerDark,
                   border: `1px solid ${sync.running ? 'rgba(217,164,65,0.5)' : 'rgba(255,255,255,0.12)'}`,
                   borderRadius: '10px',
                   cursor: sync.running ? 'default' : 'pointer',
-                  color: sync.running ? '#d9a441' : '#9c988d',
+                  color: sync.running ? primary : onSurfaceMuted,
                   fontSize: '15px',
                   opacity: sync.running ? 0.9 : 1,
                   transition: 'width 0.2s ease'
@@ -1106,7 +1113,7 @@ export default function Home() {
                 {sync.running ? (
                   <span style={{
                     width: '12px', height: '12px', flexShrink: 0,
-                    border: '2px solid rgba(217,164,65,0.3)', borderTopColor: '#d9a441',
+                    border: '2px solid rgba(217,164,65,0.3)', borderTopColor: primary,
                     borderRadius: '50%', display: 'inline-block',
                     animation: 'spin 0.7s linear infinite'
                   }} />
@@ -1133,11 +1140,11 @@ export default function Home() {
               title="Saved searches"
               style={{
                 height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px',
-                background: '#18181b',
+                background: surfaceContainerDark,
                 border: `1px solid ${showBookmarks ? 'rgba(201,162,83,0.5)' : 'rgba(255,255,255,0.12)'}`,
                 borderRadius: '10px',
                 cursor: 'pointer',
-                color: showBookmarks ? '#dcbd76' : '#9c988d',
+                color: showBookmarks ? warning : onSurfaceMuted,
                 fontSize: '16px'
               }}
             >
@@ -1148,7 +1155,7 @@ export default function Home() {
               <div style={{
                 position: 'absolute', top: '54px', right: 0,
                 width: '300px',
-                background: '#18181b',
+                background: surfaceContainerDark,
                 border: '1px solid rgba(255,255,255,0.12)',
                 borderRadius: '10px',
                 boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
@@ -1169,10 +1176,10 @@ export default function Home() {
                       onKeyDown={e => { if (e.key === 'Enter') saveBookmark(); }}
                       placeholder="Name this search…"
                       style={{
-                        flex: 1, background: '#0a0a0b',
+                        flex: 1, background: surfaceContainerLowest,
                         border: '1px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px', padding: '7px 10px',
-                        color: '#efeadd', fontSize: '12px',
+                        color: onSurfaceWarm, fontSize: '12px',
                         fontFamily: 'inherit', outline: 'none'
                       }}
                     />
@@ -1181,7 +1188,7 @@ export default function Home() {
                       style={{
                         background: 'rgba(201,162,83,0.12)',
                         border: '1px solid rgba(201,162,83,0.35)',
-                        color: '#dcbd76', borderRadius: '6px',
+                        color: warning, borderRadius: '6px',
                         padding: '0 12px', fontSize: '12px',
                         cursor: 'pointer', fontFamily: 'inherit'
                       }}
@@ -1194,7 +1201,7 @@ export default function Home() {
                 {/* Saved list */}
                 <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
                   {bookmarks.length === 0 && (
-                    <div style={{ padding: '16px 13px', fontSize: '12px', color: '#65625a' }}>
+                    <div style={{ padding: '16px 13px', fontSize: '12px', color: onSurfaceFaint }}>
                       {hasFilters
                         ? 'No saved searches yet — name this one above.'
                         : 'No saved searches yet. Add some filters, then save them here.'}
@@ -1210,13 +1217,13 @@ export default function Home() {
                         display: 'flex', justifyContent: 'space-between',
                         alignItems: 'center', gap: '8px'
                       }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#222226'}
+                      onMouseEnter={e => e.currentTarget.style.background = surfaceContainerHover}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: '13px', color: '#efeadd' }}>{bm.name}</div>
+                        <div style={{ fontSize: '13px', color: onSurfaceWarm }}>{bm.name}</div>
                         <div style={{
-                          fontSize: '10.5px', color: '#65625a',
+                          fontSize: '10.5px', color: onSurfaceFaint,
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                         }}>
                           {[
@@ -1240,11 +1247,11 @@ export default function Home() {
                         <button
                           onClick={(e) => deleteBookmark(bm.id, e)}
                           style={{
-                            background: 'none', border: 'none', color: '#65625a',
+                            background: 'none', border: 'none', color: onSurfaceFaint,
                             cursor: 'pointer', fontSize: '14px', padding: '2px'
                           }}
-                          onMouseEnter={e => e.currentTarget.style.color = '#cf7152'}
-                          onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+                          onMouseEnter={e => e.currentTarget.style.color = danger}
+                          onMouseLeave={e => e.currentTarget.style.color = onSurfaceFaint}
                         >×</button>
                       </div>
                     </div>
@@ -1255,7 +1262,7 @@ export default function Home() {
           </div>
 
           {nlError && (
-            <p style={{ fontSize: '12px', color: '#ffb4ab', margin: '8px 0 0' }}>
+            <p style={{ fontSize: '12px', color: error, margin: '8px 0 0' }}>
               {nlError}
             </p>
           )}
@@ -1265,7 +1272,7 @@ export default function Home() {
         {showAuto && autocomplete.length > 0 && (
           <div style={{
             position: 'absolute', top: '68px', left: '20px', right: '74px',
-            background: '#18181b',
+            background: surfaceContainerDark,
             border: '1px solid rgba(255,255,255,0.12)',
             borderRadius: '10px',
             boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
@@ -1276,7 +1283,7 @@ export default function Home() {
             <div style={{
               padding: '10px 13px 6px',
               fontSize: '9.5px', fontWeight: 600,
-              letterSpacing: '0.12em', color: '#65625a'
+              letterSpacing: '0.12em', color: onSurfaceFaint
             }}>
               MATCHES
             </div>
@@ -1294,7 +1301,7 @@ export default function Home() {
                   width: '100%', display: 'flex', alignItems: 'center',
                   justifyContent: 'space-between', gap: '10px',
                   padding: '8px 13px',
-                  background: i === highlightedIndex ? '#222226' : 'transparent',
+                  background: i === highlightedIndex ? surfaceContainerHover : 'transparent',
                   border: 'none',
                   cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit'
                 }}
@@ -1302,22 +1309,22 @@ export default function Home() {
                 {opt.type === 'film' ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ fontSize: '11px', flexShrink: 0 }}>🎬</span>
-                    <span style={{ fontSize: '13.5px', color: '#8fc3d8' }}>{opt.value}</span>
-                    <span style={{ fontSize: '11px', color: '#65625a' }}>
+                    <span style={{ fontSize: '13.5px', color: accentBlueLight }}>{opt.value}</span>
+                    <span style={{ fontSize: '11px', color: onSurfaceFaint }}>
                       {FILM_FIELD_LABELS[opt.field] || opt.field}
                     </span>
                   </span>
                 ) : opt.type === 'ar' ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ fontSize: '11px', flexShrink: 0 }}>▭</span>
-                    <span style={{ fontSize: '13.5px', color: '#7dd3c8' }}>{opt.value}</span>
-                    <span style={{ fontSize: '11px', color: '#65625a' }}>Aspect Ratio</span>
+                    <span style={{ fontSize: '13.5px', color: accentTeal }}>{opt.value}</span>
+                    <span style={{ fontSize: '11px', color: onSurfaceFaint }}>Aspect Ratio</span>
                   </span>
                 ) : opt.type === 'note' ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ fontSize: '11px', flexShrink: 0 }}>🔧</span>
-                    <span style={{ fontSize: '13.5px', color: '#e0935a' }}>{opt.value}</span>
-                    <span style={{ fontSize: '11px', color: '#65625a' }}>On-Set Notes</span>
+                    <span style={{ fontSize: '13.5px', color: accentOrange }}>{opt.value}</span>
+                    <span style={{ fontSize: '11px', color: onSurfaceFaint }}>On-Set Notes</span>
                   </span>
                 ) : (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1325,13 +1332,13 @@ export default function Home() {
                       width: '7px', height: '7px', borderRadius: '2px',
                       background: opt.color, flexShrink: 0
                     }} />
-                    <span style={{ fontSize: '13.5px', color: '#efeadd' }}>{opt.value}</span>
-                    <span style={{ fontSize: '11px', color: '#65625a' }}>{opt.catLabel}</span>
+                    <span style={{ fontSize: '13.5px', color: onSurfaceWarm }}>{opt.value}</span>
+                    <span style={{ fontSize: '11px', color: onSurfaceFaint }}>{opt.catLabel}</span>
                   </span>
                 )}
                 <span style={{
                   fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '10px', color: '#65625a'
+                  fontSize: '10px', color: onSurfaceFaint
                 }}>{opt.count}</span>
               </button>
             ))}
@@ -1344,7 +1351,7 @@ export default function Home() {
         }}>
           <span style={{
             fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em',
-            color: '#65625a', marginRight: '2px'
+            color: onSurfaceFaint, marginRight: '2px'
           }}>COLOR</span>
           {PRESET_SWATCHES.map(hex => (
             <button
@@ -1355,7 +1362,7 @@ export default function Home() {
                 width: '20px', height: '20px', borderRadius: '50%',
                 background: hex,
                 border: color === hex
-                  ? '2px solid #efeadd'
+                  ? `2px solid ${onSurfaceWarm}`
                   : '1px solid rgba(255,255,255,0.15)',
                 cursor: 'pointer', padding: 0,
                 transform: color === hex ? 'scale(1.15)' : 'scale(1)',
@@ -1370,7 +1377,7 @@ export default function Home() {
               width: '20px', height: '20px', borderRadius: '50%',
               background: 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)',
               border: color && !PRESET_SWATCHES.includes(color)
-                ? '2px solid #efeadd'
+                ? `2px solid ${onSurfaceWarm}`
                 : '1px solid rgba(255,255,255,0.15)',
               cursor: 'pointer', position: 'relative', overflow: 'hidden',
               transform: color && !PRESET_SWATCHES.includes(color) ? 'scale(1.15)' : 'scale(1)',
@@ -1379,7 +1386,7 @@ export default function Home() {
           >
             <input
               type="color"
-              value={color || '#D9A441'}
+              value={color || primary}
               onChange={e => pickColor(e.target.value)}
               style={{
                 position: 'absolute', inset: 0, opacity: 0,
@@ -1391,12 +1398,12 @@ export default function Home() {
             <button
               onClick={() => setColor(null)}
               style={{
-                background: 'none', border: 'none', color: '#65625a',
+                background: 'none', border: 'none', color: onSurfaceFaint,
                 cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
                 padding: '2px 4px'
               }}
-              onMouseEnter={e => e.currentTarget.style.color = '#cf7152'}
-              onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+              onMouseEnter={e => e.currentTarget.style.color = danger}
+              onMouseLeave={e => e.currentTarget.style.color = onSurfaceFaint}
             >
               clear color
             </button>
@@ -1444,7 +1451,7 @@ export default function Home() {
               <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                 <span title={s.hint} style={{
                   fontSize: '9.5px', fontWeight: 600, letterSpacing: '0.1em',
-                  color: '#65625a', cursor: 'help', whiteSpace: 'nowrap'
+                  color: onSurfaceFaint, cursor: 'help', whiteSpace: 'nowrap'
                 }}>{s.label}</span>
                 <input
                   type="range"
@@ -1452,16 +1459,16 @@ export default function Home() {
                   value={s.pos}
                   onChange={e => s.onChange(Number(e.target.value))}
                   aria-label={s.hint}
-                  style={{ width: isMobile ? '110px' : '130px', accentColor: '#D9A441', cursor: 'pointer' }}
+                  style={{ width: isMobile ? '110px' : '130px', accentColor: primary, cursor: 'pointer' }}
                 />
                 <span style={{
-                  fontSize: '11.5px', color: '#9c988d', whiteSpace: 'nowrap',
+                  fontSize: '11.5px', color: onSurfaceMuted, whiteSpace: 'nowrap',
                   minWidth: s.key === 'prom' ? '152px' : '62px'
                 }}>{s.value}</span>
               </div>
             ))}
 
-            <span style={{ fontSize: '11.5px', color: '#65625a', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: '11.5px', color: onSurfaceFaint, whiteSpace: 'nowrap' }}>
               {loading ? '…' : `${total} image${total === 1 ? '' : 's'}`}
             </span>
 
@@ -1469,11 +1476,11 @@ export default function Home() {
               <button
                 onClick={() => { setProm(DEFAULT_PROM); setExact(DEFAULT_EXACT); }}
                 style={{
-                  background: 'none', border: 'none', color: '#65625a',
+                  background: 'none', border: 'none', color: onSurfaceFaint,
                   cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit', padding: '2px 4px'
                 }}
-                onMouseEnter={e => e.currentTarget.style.color = '#cf7152'}
-                onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+                onMouseEnter={e => e.currentTarget.style.color = danger}
+                onMouseLeave={e => e.currentTarget.style.color = onSurfaceFaint}
               >reset</button>
             )}
           </div>
@@ -1490,13 +1497,13 @@ export default function Home() {
                 border: '1px solid rgba(178,130,240,0.5)',
                 borderRadius: '6px',
                 padding: '4px 8px 4px 9px',
-                fontSize: '12.5px', color: '#c9a8f2', fontWeight: 500
+                fontSize: '12.5px', color: accentVioletLighter, fontWeight: 500
               }}>
                 ≈ Similar to {similarTo.filename}
                 <button
                   onClick={clearSimilar}
                   style={{
-                    background: 'none', border: 'none', color: '#c9a8f2',
+                    background: 'none', border: 'none', color: accentVioletLighter,
                     cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
                   }}
                   onMouseEnter={e => e.currentTarget.style.opacity = '1'}
@@ -1512,13 +1519,13 @@ export default function Home() {
                 border: '1px solid rgba(111,163,184,0.45)',
                 borderRadius: '6px',
                 padding: '4px 8px 4px 9px',
-                fontSize: '12.5px', color: '#8fc3d8', fontWeight: 500
+                fontSize: '12.5px', color: accentBlueLight, fontWeight: 500
               }}>
                 🎬 {film}
                 <button
                   onClick={() => setFilm(null)}
                   style={{
-                    background: 'none', border: 'none', color: '#8fc3d8',
+                    background: 'none', border: 'none', color: accentBlueLight,
                     cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
                   }}
                   onMouseEnter={e => e.currentTarget.style.opacity = '1'}
@@ -1534,13 +1541,13 @@ export default function Home() {
                 border: '1px solid rgba(125,211,200,0.45)',
                 borderRadius: '6px',
                 padding: '4px 8px 4px 9px',
-                fontSize: '12.5px', color: '#7dd3c8', fontWeight: 500
+                fontSize: '12.5px', color: accentTeal, fontWeight: 500
               }}>
                 ▭ {ar}
                 <button
                   onClick={() => setAr(null)}
                   style={{
-                    background: 'none', border: 'none', color: '#7dd3c8',
+                    background: 'none', border: 'none', color: accentTeal,
                     cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
                   }}
                   onMouseEnter={e => e.currentTarget.style.opacity = '1'}
@@ -1559,13 +1566,13 @@ export default function Home() {
                 border: '1px solid rgba(201,162,83,0.35)',
                 borderRadius: '6px',
                 padding: '4px 8px 4px 9px',
-                fontSize: '12.5px', color: '#c9a253', fontWeight: 500
+                fontSize: '12.5px', color: primaryDim, fontWeight: 500
               }}>
                 <span style={{ opacity: 0.65 }}>#</span>{chip}
                 <button
                   onClick={() => removeChip(chip)}
                   style={{
-                    background: 'none', border: 'none', color: '#c9a253',
+                    background: 'none', border: 'none', color: primaryDim,
                     cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
                   }}
                   onMouseEnter={e => e.currentTarget.style.opacity = '1'}
@@ -1585,7 +1592,7 @@ export default function Home() {
                   border: '1px dashed rgba(139,124,246,0.45)',
                   borderRadius: '6px',
                   padding: '4px 8px 4px 9px',
-                  fontSize: '12.5px', color: '#a99bf7',
+                  fontSize: '12.5px', color: accentVioletLight,
                   fontStyle: 'italic'
                 }}
               >
@@ -1593,7 +1600,7 @@ export default function Home() {
                 <button
                   onClick={() => removeNlChip(nl.phrase)}
                   style={{
-                    background: 'none', border: 'none', color: '#a99bf7',
+                    background: 'none', border: 'none', color: accentVioletLight,
                     cursor: 'pointer', padding: 0, fontSize: '14px',
                     lineHeight: 1, opacity: 0.6, fontStyle: 'normal'
                   }}
@@ -1616,14 +1623,14 @@ export default function Home() {
                   border: '1px solid rgba(224,147,90,0.45)',
                   borderRadius: '6px',
                   padding: '4px 8px 4px 9px',
-                  fontSize: '12.5px', color: '#e0935a', fontWeight: 500
+                  fontSize: '12.5px', color: accentOrange, fontWeight: 500
                 }}
               >
                 🔧 {phrase}
                 <button
                   onClick={() => removeNoteChip(phrase)}
                   style={{
-                    background: 'none', border: 'none', color: '#e0935a',
+                    background: 'none', border: 'none', color: accentOrange,
                     cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
                   }}
                   onMouseEnter={e => e.currentTarget.style.opacity = '1'}
@@ -1635,12 +1642,12 @@ export default function Home() {
             <button
               onClick={clearAll}
               style={{
-                background: 'none', border: 'none', color: '#65625a',
+                background: 'none', border: 'none', color: onSurfaceFaint,
                 cursor: 'pointer', fontSize: '12px', padding: '4px 6px',
                 fontFamily: 'inherit'
               }}
-              onMouseEnter={e => e.currentTarget.style.color = '#cf7152'}
-              onMouseLeave={e => e.currentTarget.style.color = '#65625a'}
+              onMouseEnter={e => e.currentTarget.style.color = danger}
+              onMouseLeave={e => e.currentTarget.style.color = onSurfaceFaint}
             >
               Clear all
             </button>
@@ -1660,7 +1667,7 @@ export default function Home() {
             background: 'rgba(139,124,246,0.07)',
             border: '1px solid rgba(139,124,246,0.22)',
             borderRadius: '7px',
-            fontSize: '11.5px', color: '#a99bf7', lineHeight: 1.55
+            fontSize: '11.5px', color: accentVioletLight, lineHeight: 1.55
           }}>
             <span style={{ flexShrink: 0 }}>ⓘ</span>
             <span>
@@ -1683,7 +1690,7 @@ export default function Home() {
             background: 'rgba(224,147,90,0.07)',
             border: '1px solid rgba(224,147,90,0.22)',
             borderRadius: '7px',
-            fontSize: '11.5px', color: '#e0935a', lineHeight: 1.55
+            fontSize: '11.5px', color: accentOrange, lineHeight: 1.55
           }}>
             <span style={{ flexShrink: 0 }}>ⓘ</span>
             <span>
@@ -1702,13 +1709,13 @@ export default function Home() {
             background: 'rgba(178,130,240,0.08)',
             border: '1px solid rgba(178,130,240,0.28)',
             borderRadius: '8px',
-            fontSize: '12px', color: '#c9a8f2'
+            fontSize: '12px', color: accentVioletLighter
           }}>
             <span style={{ flex: 1 }}>{similarNotice}</span>
             <button
               onClick={() => setSimilarNotice(null)}
               style={{
-                background: 'none', border: 'none', color: '#c9a8f2',
+                background: 'none', border: 'none', color: accentVioletLighter,
                 cursor: 'pointer', padding: 0, fontSize: '14px', lineHeight: 1, opacity: 0.6
               }}
               onMouseEnter={e => e.currentTarget.style.opacity = '1'}
@@ -1726,17 +1733,17 @@ export default function Home() {
       }}>
         <span style={{
           fontFamily: "'JetBrains Mono', monospace",
-          fontSize: '12px', color: '#9c988d'
+          fontSize: '12px', color: onSurfaceMuted
         }}>
-          <span style={{ color: '#efeadd', fontWeight: 500 }}>{total}</span> images
+          <span style={{ color: onSurfaceWarm, fontWeight: 500 }}>{total}</span> images
           {images.length > 0 && images.length < total && (
-            <span style={{ color: '#65625a' }}> · {images.length} loaded</span>
+            <span style={{ color: onSurfaceFaint }}> · {images.length} loaded</span>
           )}
           {similarTo && (
-            <span style={{ color: '#65625a' }}> · showing similar matches</span>
+            <span style={{ color: onSurfaceFaint }}> · showing similar matches</span>
           )}
           {!similarTo && hasFilters && (
-            <span style={{ color: '#65625a' }}>
+            <span style={{ color: onSurfaceFaint }}>
               {' '}· {chips.length + nlChips.length + noteChips.length + (color ? 1 : 0) + (film ? 1 : 0)} filter{(chips.length + nlChips.length + noteChips.length + (color ? 1 : 0) + (film ? 1 : 0)) > 1 ? 's' : ''} active
             </span>
           )}
@@ -1745,7 +1752,7 @@ export default function Home() {
           <span style={{
             width: '12px', height: '12px',
             border: '2px solid rgba(201,162,83,0.2)',
-            borderTopColor: '#c9a253',
+            borderTopColor: primaryDim,
             borderRadius: '50%',
             display: 'inline-block',
             animation: 'spin 0.7s linear infinite'
@@ -1766,7 +1773,7 @@ export default function Home() {
             style={{
               background: 'rgba(217,164,65,0.10)',
               border: '1px solid rgba(217,164,65,0.35)',
-              color: '#dcbd76', borderRadius: '7px', padding: '5px 11px',
+              color: warning, borderRadius: '7px', padding: '5px 11px',
               cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
             }}
           >
@@ -1775,14 +1782,14 @@ export default function Home() {
         ))}
 
         {tagRemovalMsg && (
-          <span style={{ fontSize: '11.5px', color: '#b8cea1' }}>{tagRemovalMsg}</span>
+          <span style={{ fontSize: '11.5px', color: tertiary }}>{tagRemovalMsg}</span>
         )}
 
         <div style={{ flex: 1 }} />
 
         {/* Grid density — smaller column target width = more, smaller tiles */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }} title="Grid density">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#65625a" strokeWidth="2">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={onSurfaceFaint} strokeWidth="2">
             <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
             <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
           </svg>
@@ -1793,9 +1800,9 @@ export default function Home() {
             step={10}
             value={colWidth}
             onChange={e => setColWidth(Number(e.target.value))}
-            style={{ width: '90px', accentColor: '#c9a253' }}
+            style={{ width: '90px', accentColor: primaryDim }}
           />
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#65625a" strokeWidth="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={onSurfaceFaint} strokeWidth="2">
             <rect x="3" y="3" width="8" height="8" /><rect x="13" y="3" width="8" height="8" />
             <rect x="3" y="13" width="8" height="8" /><rect x="13" y="13" width="8" height="8" />
           </svg>
@@ -1812,16 +1819,16 @@ export default function Home() {
             alignItems: 'center', justifyContent: 'center', gap: '18px'
           }}>
             <div style={{ textAlign: 'center' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#efeadd', margin: '0 0 6px' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: onSurfaceWarm, margin: '0 0 6px' }}>
                 Welcome to Frame Atlas
               </h2>
-              <p style={{ fontSize: '13px', color: '#9c988d', margin: 0 }}>
+              <p style={{ fontSize: '13px', color: onSurfaceMuted, margin: 0 }}>
                 Three steps and your own reference library is live:
               </p>
             </div>
             <div style={{
-              width: 'min(440px, 90%)', background: '#1a1c20',
-              border: '1px solid #44474f', borderRadius: '14px', padding: '10px 8px'
+              width: 'min(440px, 90%)', background: surfaceContainerLow,
+              border: `1px solid ${outlineVariant}`, borderRadius: '14px', padding: '10px 8px'
             }}>
               {[
                 {
@@ -1852,23 +1859,23 @@ export default function Home() {
                     fontSize: '13px', fontWeight: 700,
                     background: step.done ? 'rgba(127,184,127,0.15)' : 'rgba(201,162,83,0.1)',
                     border: `1px solid ${step.done ? 'rgba(127,184,127,0.5)' : 'rgba(201,162,83,0.35)'}`,
-                    color: step.done ? '#7fb87f' : '#c9a253'
+                    color: step.done ? success : primaryDim
                   }}>
                     {step.done ? '✓' : i + 1}
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '13.5px', fontWeight: 600, color: step.done ? '#7fb87f' : '#efeadd' }}>
+                    <div style={{ fontSize: '13.5px', fontWeight: 600, color: step.done ? success : onSurfaceWarm }}>
                       {step.label}
-                      {step.optional && <span style={{ color: '#65625a', fontWeight: 400 }}> (optional)</span>}
+                      {step.optional && <span style={{ color: onSurfaceFaint, fontWeight: 400 }}> (optional)</span>}
                     </div>
-                    <div style={{ fontSize: '11.5px', color: '#65625a', marginTop: '2px' }}>{step.sub}</div>
+                    <div style={{ fontSize: '11.5px', color: onSurfaceFaint, marginTop: '2px' }}>{step.sub}</div>
                   </div>
-                  <span style={{ color: '#65625a', fontSize: '14px' }}>→</span>
+                  <span style={{ color: onSurfaceFaint, fontSize: '14px' }}>→</span>
                 </Link>
               ))}
             </div>
             <Link to="/account" style={{
-              background: '#d9a441', color: '#3d2f00', borderRadius: '8px',
+              background: primary, color: onPrimary, borderRadius: '8px',
               padding: '10px 20px', fontSize: '13.5px', fontWeight: 600, textDecoration: 'none'
             }}>
               Set up my library
@@ -1881,13 +1888,13 @@ export default function Home() {
           <div style={{
             height: '60%', display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center',
-            gap: '10px', color: '#65625a'
+            gap: '10px', color: onSurfaceFaint
           }}>
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth="1.5" opacity="0.4">
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
             </svg>
-            <p style={{ fontSize: '14px', color: '#9c988d' }}>
+            <p style={{ fontSize: '14px', color: onSurfaceMuted }}>
               {similarTo
                 ? 'No similar images found'
                 : hasFilters ? 'No images match this filter' : 'No images yet — run a sync first'}
@@ -1896,7 +1903,7 @@ export default function Home() {
               <button
                 onClick={clearSimilar}
                 style={{
-                  fontSize: '12px', color: '#dcbd76', background: 'none',
+                  fontSize: '12px', color: warning, background: 'none',
                   border: '1px solid rgba(201,162,83,0.3)',
                   borderRadius: '7px', padding: '7px 14px',
                   cursor: 'pointer', fontFamily: 'inherit'
@@ -1908,7 +1915,7 @@ export default function Home() {
               <button
                 onClick={clearAll}
                 style={{
-                  fontSize: '12px', color: '#dcbd76', background: 'none',
+                  fontSize: '12px', color: warning, background: 'none',
                   border: '1px solid rgba(201,162,83,0.3)',
                   borderRadius: '7px', padding: '7px 14px',
                   cursor: 'pointer', fontFamily: 'inherit'
@@ -1962,11 +1969,11 @@ export default function Home() {
                     position: 'relative',
                     width: '100%',
                     aspectRatio: `${img.ar_float || 1.78}`,
-                    background: '#3d3d42',
+                    background: surfaceContainerMuted,
                     borderRadius: '6px',
                     overflow: 'hidden',
                     cursor: 'pointer',
-                    border: isSelected ? '2px solid #b8cea1' : '1px solid rgba(255,255,255,0.04)',
+                    border: isSelected ? `2px solid ${tertiary}` : '1px solid rgba(255,255,255,0.04)',
                     transition: 'transform 0.15s ease'
                   }}
                   onMouseEnter={e => {
@@ -2018,7 +2025,7 @@ export default function Home() {
                         background: 'none', border: 'none', cursor: 'pointer',
                         padding: isMobile ? '11px' : '4px', lineHeight: 1, zIndex: 2,
                         fontSize: img.is_favorite ? '13px' : '14px',
-                        color: img.is_favorite ? '#dcbd76' : 'rgba(239,234,221,0.65)',
+                        color: img.is_favorite ? warning : 'rgba(239,234,221,0.65)',
                         opacity: img.is_favorite ? 1 : (isMobile ? 0.55 : 0),
                         transition: 'opacity 120ms ease',
                         filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
@@ -2028,7 +2035,7 @@ export default function Home() {
                   {tagMode && img.is_favorite && (
                     <span style={{
                       position: 'absolute', top: '6px', right: '7px',
-                      color: '#dcbd76', fontSize: '13px',
+                      color: warning, fontSize: '13px',
                       filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
                     }}>★</span>
                   )}
@@ -2037,7 +2044,7 @@ export default function Home() {
                     <span style={{
                       position: 'absolute', bottom: '7px', right: '7px',
                       fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: '9px', color: '#c9a8f2',
+                      fontSize: '9px', color: accentVioletLighter,
                       background: 'rgba(30,20,45,0.55)',
                       border: '1px solid rgba(178,130,240,0.35)',
                       padding: '2px 6px', borderRadius: '4px'
@@ -2051,12 +2058,12 @@ export default function Home() {
                     <span style={{
                       position: 'absolute', top: '6px', right: '28px',
                       width: '18px', height: '18px', borderRadius: '50%',
-                      background: '#b8cea1',
+                      background: tertiary,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       boxShadow: '0 1px 3px rgba(0,0,0,0.5)'
                     }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-                        stroke="#243516" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        stroke={onTertiary} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     </span>
@@ -2075,7 +2082,7 @@ export default function Home() {
             left: dragRect.left, top: dragRect.top,
             width: dragRect.width, height: dragRect.height,
             background: 'rgba(184,206,161,0.14)',
-            border: '1px solid #b8cea1',
+            border: `1px solid ${tertiary}`,
             pointerEvents: 'none',
             zIndex: 500
           }} />
@@ -2087,7 +2094,7 @@ export default function Home() {
         {hasMore && (
           <div style={{
             padding: '20px', textAlign: 'center',
-            fontSize: '12px', color: '#65625a',
+            fontSize: '12px', color: onSurfaceFaint,
             fontFamily: "'JetBrains Mono', monospace"
           }}>
             loading more…
@@ -2173,25 +2180,25 @@ export default function Home() {
           position: 'fixed',
           bottom: '20px',
           right: '20px',
-          background: '#1a1c20',
-          border: '1px solid #44474f',
+          background: surfaceContainerLow,
+          border: `1px solid ${outlineVariant}`,
           borderRadius: '10px',
           padding: '12px 16px',
           cursor: 'pointer',
           fontSize: '13px',
-          color: '#efeadd',
+          color: onSurfaceWarm,
           zIndex: 1000,
           maxWidth: '320px',
           boxShadow: '0 12px 32px rgba(0,0,0,0.45)'
         }}
         onClick={() => setShowDuplicates(true)}
-        onMouseEnter={e => e.currentTarget.style.background = '#222226'}
-        onMouseLeave={e => e.currentTarget.style.background = '#1a1c20'}
+        onMouseEnter={e => e.currentTarget.style.background = surfaceContainerHover}
+        onMouseLeave={e => e.currentTarget.style.background = surfaceContainerLow}
         >
           <span style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>
             ⧉ {duplicateScanStatus.groups.length} duplicate group{duplicateScanStatus.groups.length === 1 ? '' : 's'} found
           </span>
-          <span style={{ fontSize: '11px', color: '#65625a' }}>Click to review</span>
+          <span style={{ fontSize: '11px', color: onSurfaceFaint }}>Click to review</span>
         </div>
       )}
 
