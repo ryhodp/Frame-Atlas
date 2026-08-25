@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { error as errorColor, onSurface, onSurfaceDim, onSurfaceMuted, onSurfaceWarmDim, outline, outlineSubtle, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLowestAlt } from '../theme';
+import { black, error as errorColor, onSurface, onSurfaceDim, onSurfaceMuted, onSurfaceWarmDim, outline, outlineSubtle, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLowestAlt, white, withAlpha } from '../theme';
 
 // ── Owner-side Feedback panel (Day 24 / V42) ──────────────────────────────────
 // Reads GET /api/decks/<id>/feedback — the SAME shape and the SAME function
@@ -64,7 +64,7 @@ export default function FeedbackPanel({ deckId, images, onClose }) {
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.5),
         zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
       }}
     >
@@ -72,12 +72,12 @@ export default function FeedbackPanel({ deckId, images, onClose }) {
         onClick={e => e.stopPropagation()}
         style={{
           background: surfaceContainerHigh,
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '12px',
           padding: '20px 22px',
           width: '560px', maxWidth: 'calc(100vw - 48px)',
           maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`
         }}
       >
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '4px' }}>

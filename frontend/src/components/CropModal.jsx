@@ -6,7 +6,7 @@ import {
 } from '../perspective';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useToast } from '../ToastContext';
-import { danger, dangerWarm, error, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primary, primaryDim, surfaceContainerCrop, surfaceContainerDark, surfaceContainerDivider, surfaceContainerLow, surfaceContainerLowest, tertiary, warning } from '../theme';
+import { black, danger, dangerWarm, error, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primary, primaryDim, surfaceContainerCrop, surfaceContainerDark, surfaceContainerDivider, surfaceContainerLow, surfaceContainerLowest, tertiary, warning, white, withAlpha } from '../theme';
 
 // ── CropModal — Frame Atlas V18 ───────────────────────────────────────────────
 // The CropStudio v34 review workflow, embedded as a full-screen modal:
@@ -890,7 +890,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
       <div style={{
         display: 'flex', alignItems: 'center', gap: '10px',
         padding: isMobile ? '10px 12px' : '12px 20px',
-        borderBottom: '1px solid rgba(255,255,255,0.065)',
+        borderBottom: `1px solid ${withAlpha(white,0.065)}`,
         flexWrap: 'wrap', rowGap: '8px', flexShrink: 0,
       }}>
         <span style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.01em' }}>✂ Crop</span>
@@ -924,7 +924,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               onClick={togglePerspective}
               disabled={item?.status !== 'ready'}
               style={isPerspective
-                ? { ...ghostBtn(primary, 'rgba(217,164,65,0.55)'), background: 'rgba(217,164,65,0.12)' }
+                ? { ...ghostBtn(primary, withAlpha(primary,0.55)), background: withAlpha(primary,0.12) }
                 : ghostBtn()}
               title="Switch between a straight rectangle and four free corners for an angled screen or poster (P)"
             >
@@ -968,7 +968,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                 <button
                   onClick={doDelete}
                   disabled={item?.status !== 'ready'}
-                  style={{ ...ghostBtn(dangerWarm, 'rgba(224,122,85,0.55)') }}
+                  style={{ ...ghostBtn(dangerWarm, withAlpha(dangerWarm, 0.55)) }}
                   title="Remove this image from the batch"
                 >
                   ✕ Delete
@@ -983,7 +983,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
             </button>
             <button
               onClick={() => recordAndAdvance(false)}
-              style={ghostBtn(danger, 'rgba(207,113,82,0.35)')}
+              style={ghostBtn(danger, withAlpha(danger,0.35))}
               title="Skip — leave this image untouched (⌫)"
             >
               Skip
@@ -1060,7 +1060,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                         >
                           <polygon
                             points={quadPoints}
-                            fill={quadValid ? 'rgba(217,164,65,0.10)' : 'rgba(207,113,82,0.16)'}
+                            fill={quadValid ? withAlpha(primary,0.10) : withAlpha(danger,0.16)}
                             stroke={quadValid ? primary : danger}
                             strokeWidth="0.4"
                             vectorEffect="non-scaling-stroke"
@@ -1080,13 +1080,13 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                               top: `${(p.y / item.imgEl.naturalHeight) * 100}%`,
                               width: `${handleSize + 4}px`, height: `${handleSize + 4}px`,
                               background: quadValid ? primary : danger,
-                              border: '2px solid rgba(0,0,0,0.45)',
+                              border: `2px solid ${withAlpha(black,0.45)}`,
                               borderRadius: '50%',
                               transform: 'translate(-50%, -50%)',
                               cursor: 'move',
                               touchAction: 'none',
                               zIndex: 10,
-                              boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+                              boxShadow: `0 1px 4px ${withAlpha(black,0.6)}`,
                             }}
                           />
                         ))}
@@ -1098,7 +1098,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                           position: 'absolute',
                           ...boxPct(item.cropBox, item.imgEl),
                           border: `2px solid ${primary}`,
-                          boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)',
+                          boxShadow: `0 0 0 9999px ${withAlpha(black,0.55)}`,
                           pointerEvents: 'none',
                         }} />
                         {HANDLE_CORNERS.map(corner => (
@@ -1118,7 +1118,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                               cursor: handleCursor[corner],
                               touchAction: 'none',
                               zIndex: 10,
-                              boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+                              boxShadow: `0 1px 4px ${withAlpha(black,0.6)}`,
                             }}
                           />
                         ))}
@@ -1133,7 +1133,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
                       <button
                         onClick={() => { item.status = 'pending'; item.loadPromise = null; loadItem(current); }}
-                        style={ghostBtn(warning, 'rgba(201,162,83,0.35)')}
+                        style={ghostBtn(warning, withAlpha(primaryDim,0.35))}
                       >
                         Retry
                       </button>
@@ -1154,7 +1154,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                   <span style={{
                     fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
                     borderRadius: '3px', padding: '1px 6px',
-                    color: danger, background: 'rgba(207,113,82,0.12)', border: '1px solid rgba(207,113,82,0.45)',
+                    color: danger, background: withAlpha(danger,0.12), border: `1px solid ${withAlpha(danger,0.45)}`,
                   }}>
                     ⚠ CORNERS CROSS OVER — UNCROSS THEM
                   </span>
@@ -1163,7 +1163,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                   <span style={{
                     fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
                     borderRadius: '3px', padding: '1px 6px',
-                    color: danger, background: 'rgba(207,113,82,0.12)', border: '1px solid rgba(207,113,82,0.45)',
+                    color: danger, background: withAlpha(danger,0.12), border: `1px solid ${withAlpha(danger,0.45)}`,
                   }}>
                     ⚠ NO AUTO-CROP — ADJUST BY HAND
                   </span>
@@ -1189,7 +1189,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           {/* Footer: hints + tally */}
           <div style={{
             padding: isMobile ? '8px 12px' : '8px 20px',
-            borderTop: '1px solid rgba(255,255,255,0.065)',
+            borderTop: `1px solid ${withAlpha(white,0.065)}`,
             display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0,
           }}>
             {!isMobile && (
@@ -1209,7 +1209,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           {items.length > 1 && (
             <div style={{
               height: '76px', flexShrink: 0,
-              borderTop: '1px solid rgba(255,255,255,0.065)',
+              borderTop: `1px solid ${withAlpha(white,0.065)}`,
               background: surfaceContainerCrop,
               overflowX: 'auto', overflowY: 'hidden',
               display: 'flex', alignItems: 'center', gap: '6px',
@@ -1233,7 +1233,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                   <span style={{
                     position: 'absolute', bottom: '3px', right: '3px',
                     width: '8px', height: '8px', borderRadius: '50%',
-                    border: '1px solid rgba(0,0,0,0.4)',
+                    border: `1px solid ${withAlpha(black,0.4)}`,
                     background: it.decided === 'approved' ? tertiary : it.decided === 'skipped' ? danger : onSurfaceFaint,
                   }} />
                 </div>
@@ -1329,7 +1329,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
           {failedResults.length > 0 && (
             <div style={{
               maxWidth: 'min(480px, 90vw)', maxHeight: '30vh', overflowY: 'auto',
-              background: 'rgba(207,113,82,0.06)', border: '1px solid rgba(207,113,82,0.25)',
+              background: withAlpha(danger,0.06), border: `1px solid ${withAlpha(danger,0.25)}`,
               borderRadius: '10px', padding: '12px 14px', textAlign: 'left',
             }}>
               {failedResults.map(r => (
@@ -1360,16 +1360,16 @@ export default function CropModal({ images, onClose, onImageCropped }) {
         <div
           onClick={() => setConfirmClose(false)}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+            position: 'fixed', inset: 0, background: withAlpha(black,0.5),
             zIndex: 1300, display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
           <div
             onClick={e => e.stopPropagation()}
             style={{
-              background: surfaceContainerLow, border: '1px solid rgba(255,255,255,0.12)',
+              background: surfaceContainerLow, border: `1px solid ${withAlpha(white,0.12)}`,
               borderRadius: '12px', padding: '18px 20px', width: 'min(320px, 90vw)',
-              boxShadow: '0 20px 48px rgba(0,0,0,0.6)', animation: 'fadeIn 0.12s ease',
+              boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`, animation: 'fadeIn 0.12s ease',
             }}
           >
             <div style={{ fontSize: '13.5px', color: onSurfaceWarm, lineHeight: 1.5, marginBottom: '16px' }}>
@@ -1379,7 +1379,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               <button
                 onClick={() => setConfirmClose(false)}
                 style={{
-                  background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
                   color: onSurfaceMuted, borderRadius: '6px', padding: '7px 14px',
                   cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
                 }}
@@ -1389,7 +1389,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
               <button
                 onClick={() => onClose(startedRef.current)}
                 style={{
-                  background: 'rgba(255,180,171,0.18)', border: '1px solid rgba(255,180,171,0.6)',
+                  background: withAlpha(error,0.18), border: `1px solid ${withAlpha(error,0.6)}`,
                   color: error, borderRadius: '6px', padding: '7px 14px',
                   cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
                 }}
@@ -1442,7 +1442,7 @@ function Spinner() {
   return (
     <span style={{
       width: '18px', height: '18px',
-      border: '2px solid rgba(201,162,83,0.2)', borderTopColor: primaryDim,
+      border: `2px solid ${withAlpha(primaryDim,0.2)}`, borderTopColor: primaryDim,
       borderRadius: '50%', display: 'inline-block',
       animation: 'spin 0.7s linear infinite',
     }} />
@@ -1453,13 +1453,13 @@ function Kbd({ children }) {
   return (
     <kbd style={{
       fontFamily: "'JetBrains Mono', monospace",
-      background: surfaceContainerDark, border: '1px solid rgba(255,255,255,0.12)',
+      background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
       borderRadius: '3px', padding: '1px 5px', fontSize: '10px', color: onSurfaceWarm,
     }}>{children}</kbd>
   );
 }
 
-function ghostBtn(color = onSurfaceMuted, borderColor = 'rgba(255,255,255,0.12)') {
+function ghostBtn(color = onSurfaceMuted, borderColor = withAlpha(white,0.12)) {
   return {
     background: 'none', border: `1px solid ${borderColor}`,
     color, borderRadius: '8px', padding: '7px 12px',
@@ -1472,6 +1472,6 @@ function panelLabel() {
     padding: '7px 14px', fontSize: '9.5px',
     fontFamily: "'JetBrains Mono', monospace",
     color: onSurfaceFaint, letterSpacing: '0.08em',
-    borderBottom: '1px solid rgba(255,255,255,0.065)', flexShrink: 0,
+    borderBottom: `1px solid ${withAlpha(white,0.065)}`, flexShrink: 0,
   };
 }

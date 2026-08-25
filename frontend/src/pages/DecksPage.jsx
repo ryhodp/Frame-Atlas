@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useOfflineCache } from '../hooks/useOfflineCache';
-import { PAGE_BG, error, onPrimary, onSurface, onSurfaceCool, onSurfaceMuted, onSurfaceVariant, outline, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary } from '../theme';
+import { PAGE_BG, black, error, offlineAccent, onPrimary, onSurface, onSurfaceCool, onSurfaceMuted, onSurfaceVariant, outline, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, white, withAlpha } from '../theme';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -10,7 +10,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
     <div
       onClick={onCancel}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.5),
         zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
@@ -18,11 +18,11 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
         onClick={e => e.stopPropagation()}
         style={{
           background: surfaceContainerHigh,
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '12px',
           padding: '18px 20px',
           width: '340px',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`,
         }}
       >
         <div style={{ fontSize: '13.5px', color: onSurface, lineHeight: 1.5, marginBottom: '16px' }}>
@@ -33,7 +33,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             onClick={onCancel}
             disabled={busy}
             style={{
-              background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+              background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
               color: onSurfaceMuted, borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
             }}
@@ -44,8 +44,8 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             onClick={onConfirm}
             disabled={busy}
             style={{
-              background: danger ? 'rgba(255,180,171,0.18)' : 'rgba(184,206,161,0.18)',
-              border: `1px solid ${danger ? 'rgba(255,180,171,0.6)' : 'rgba(184,206,161,0.6)'}`,
+              background: danger ? withAlpha(error,0.18) : withAlpha(tertiary,0.18),
+              border: `1px solid ${danger ? withAlpha(error,0.6) : withAlpha(tertiary,0.6)}`,
               color: danger ? error : tertiary,
               borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
@@ -144,7 +144,7 @@ export default function DecksPage() {
       <div style={{ maxWidth: '1400px', margin: '0 auto', padding: isMobile ? '20px 16px' : '32px 24px' }}>
         {showingCached && (
           <div style={{
-            background: 'rgba(140,150,170,0.12)', border: '1px solid rgba(140,150,170,0.35)',
+            background: withAlpha(offlineAccent,0.12), border: `1px solid ${withAlpha(offlineAccent,0.35)}`,
             borderRadius: '8px', padding: '12px 14px', marginBottom: '16px',
             fontSize: '12px', color: onSurfaceCool
           }}>
@@ -178,7 +178,7 @@ export default function DecksPage() {
               onClick={createDeck}
               disabled={!newDeckName.trim() || creating}
               style={{
-                background: newDeckName.trim() ? primary : 'rgba(217,164,65,0.2)',
+                background: newDeckName.trim() ? primary : withAlpha(primary,0.2),
                 color: newDeckName.trim() ? onPrimary : outline,
                 border: 'none', borderRadius: '8px',
                 padding: '9px 16px', fontSize: '14px', fontWeight: 500,
@@ -250,7 +250,7 @@ function DeckCard({ deck, onOpen, onDelete }) {
       }}
       onMouseEnter={e => {
         e.currentTarget.style.transform = 'scale(1.01)';
-        e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.4)';
+        e.currentTarget.style.boxShadow = `0 8px 24px ${withAlpha(black,0.4)}`;
       }}
       onMouseLeave={e => {
         e.currentTarget.style.transform = 'none';
@@ -263,7 +263,7 @@ function DeckCard({ deck, onOpen, onDelete }) {
           title="Delete deck"
           style={{
             position: 'absolute', top: '10px', right: '10px',
-            background: 'rgba(0,0,0,0.5)', border: 'none',
+            background: withAlpha(black,0.5), border: 'none',
             color: error, borderRadius: '6px',
             width: '24px', height: '24px',
             cursor: 'pointer', fontSize: '15px', lineHeight: 1,
@@ -275,8 +275,8 @@ function DeckCard({ deck, onOpen, onDelete }) {
           title={`Shared by ${deck.owner_name}`}
           style={{
             position: 'absolute', top: '10px', right: '10px',
-            background: 'rgba(184,206,161,0.18)',
-            border: '1px solid rgba(184,206,161,0.5)',
+            background: withAlpha(tertiary,0.18),
+            border: `1px solid ${withAlpha(tertiary,0.5)}`,
             color: tertiary, borderRadius: '6px',
             padding: '3px 8px',
             fontSize: '10.5px', lineHeight: 1.4,

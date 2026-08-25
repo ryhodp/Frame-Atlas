@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildSlides } from '../presentationOrder';
-import { onSurface, onSurfaceDim, onSurfaceFaintCool, onSurfaceMuted, onSurfaceWarmDim, outline, primary } from '../theme';
+import { onSurface, onSurfaceDim, onSurfaceFaintCool, onSurfaceMuted, onSurfaceWarmDim, outline, presentationControlBg, primary, white, withAlpha } from '../theme';
 
 // ── Fullscreen deck presentation (Day 23 / V41) ──────────────────────────────
 //
@@ -211,8 +211,8 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
   const atEnd = index === slides.length - 1;
 
   const edgeBtn = {
-    background: 'rgba(20,20,22,0.55)',
-    border: '1px solid rgba(255,255,255,0.14)',
+    background: withAlpha(presentationControlBg,0.55),
+    border: `1px solid ${withAlpha(white,0.14)}`,
     color: onSurface,
     borderRadius: '50%',
     width: '44px', height: '44px',
@@ -222,8 +222,8 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
   };
 
   const pill = {
-    background: 'rgba(20,20,22,0.62)',
-    border: '1px solid rgba(255,255,255,0.14)',
+    background: withAlpha(presentationControlBg,0.62),
+    border: `1px solid ${withAlpha(white,0.14)}`,
     color: onSurface,
     borderRadius: '999px',
     padding: '7px 14px',
@@ -389,8 +389,8 @@ export default function PresentationMode({ deckName, scenes, images, onClose }) 
         {hintVisible && (
           <div style={{
             position: 'absolute', bottom: '22px', left: '50%', transform: 'translateX(-50%)',
-            background: 'rgba(20,20,22,0.72)',
-            border: '1px solid rgba(255,255,255,0.12)',
+            background: withAlpha(presentationControlBg,0.72),
+            border: `1px solid ${withAlpha(white,0.12)}`,
             borderRadius: '999px',
             padding: '9px 18px',
             fontSize: '12.5px', color: onSurfaceMuted,

@@ -1,6 +1,6 @@
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAuth } from '../AuthContext';
-import { error, onSurfaceVariant, primary, surfaceContainerLow, tertiary } from '../theme';
+import { error, onSurfaceVariant, primary, primaryDim, surfaceContainerLow, tertiary, white, withAlpha } from '../theme';
 
 export default function SelectModeHeader({
   selectedIds,
@@ -28,7 +28,7 @@ export default function SelectModeHeader({
       gap: '10px',
       padding: isMobile ? '12px 14px' : '12px 20px',
       background: surfaceContainerLow,
-      borderBottom: '1px solid rgba(255,255,255,0.065)',
+      borderBottom: `1px solid ${withAlpha(white,0.065)}`,
       flexWrap: 'wrap',
       rowGap: '8px'
     }}>
@@ -37,8 +37,8 @@ export default function SelectModeHeader({
         display: 'inline-flex',
         alignItems: 'center',
         gap: '6px',
-        background: 'rgba(184,206,161,0.14)',
-        border: '1px solid rgba(184,206,161,0.5)',
+        background: withAlpha(tertiary,0.14),
+        border: `1px solid ${withAlpha(tertiary,0.5)}`,
         borderRadius: '99px',
         padding: '5px 12px',
         fontSize: '12.5px',
@@ -58,7 +58,7 @@ export default function SelectModeHeader({
           : 'Select every image these filters match — including the ones further down that haven\'t loaded yet'}
         style={{
           background: 'none',
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           color: onSurfaceVariant,
           borderRadius: '8px',
           padding: '7px 12px',
@@ -77,7 +77,7 @@ export default function SelectModeHeader({
         onClick={() => setSelectedIds(new Set())}
         style={{
           background: 'none',
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           color: onSurfaceVariant,
           borderRadius: '8px',
           padding: '7px 12px',
@@ -106,8 +106,8 @@ export default function SelectModeHeader({
           onClick={onCrop}
           title="Auto-detect and remove letterbox bars / screenshot chrome from the selected images"
           style={{
-            background: 'rgba(217,164,65,0.14)',
-            border: '1px solid rgba(217,164,65,0.5)',
+            background: withAlpha(primary,0.14),
+            border: `1px solid ${withAlpha(primary,0.5)}`,
             color: primary,
             borderRadius: '8px',
             padding: '7px 14px',
@@ -128,8 +128,8 @@ export default function SelectModeHeader({
           onClick={onDelete}
           title="Move the selected photos to Drive's _Removed folder and remove them from Frame Atlas"
           style={{
-            background: 'rgba(255,180,171,0.14)',
-            border: '1px solid rgba(255,180,171,0.5)',
+            background: withAlpha(error,0.14),
+            border: `1px solid ${withAlpha(error,0.5)}`,
             color: error,
             borderRadius: '8px',
             padding: '7px 14px',
@@ -152,8 +152,8 @@ export default function SelectModeHeader({
           onClick={onEditTags}
           title="Edit tags and filmography for the selected images"
           style={{
-            background: 'rgba(201,162,83,0.14)',
-            border: '1px solid rgba(201,162,83,0.5)',
+            background: withAlpha(primaryDim,0.14),
+            border: `1px solid ${withAlpha(primaryDim,0.5)}`,
             color: primary,
             borderRadius: '8px',
             padding: '7px 14px',
@@ -173,7 +173,7 @@ export default function SelectModeHeader({
         onClick={onExit}
         style={{
           background: 'none',
-          border: '1px solid rgba(255,180,171,0.35)',
+          border: `1px solid ${withAlpha(error,0.35)}`,
           color: error,
           borderRadius: '8px',
           padding: '7px 12px',

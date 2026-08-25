@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { getViewerToken, getViewerName, setViewerName as saveViewerName } from '../viewerIdentity';
-import { dangerWarm, onPrimary, onSurface, onSurfaceMuted, onSurfaceWarmDim, outline, outlineDim, outlineMuted, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt } from '../theme';
+import { black, dangerWarm, onPrimary, onSurface, onSurfaceMuted, onSurfaceWarmDim, outline, outlineDim, outlineMuted, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, white, withAlpha } from '../theme';
 
 // ── Public read-only lookbook view ────────────────────────────────────────────
 // Rendered at /share/<token> with no login and no app chrome. Anyone with the
@@ -247,7 +247,7 @@ function ShareSection({ title, frames, feedbackProps }) {
               )}
               <div style={{
                 position: 'absolute', top: '8px', left: '8px',
-                background: 'rgba(0,0,0,0.65)', color: onSurface,
+                background: withAlpha(black,0.65), color: onSurface,
                 borderRadius: '6px', minWidth: '22px', height: '22px',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: '12px', fontWeight: 600, padding: '0 6px'
@@ -310,8 +310,8 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
           onClick={handlePickClick}
           style={{
             display: 'flex', alignItems: 'center', gap: '5px',
-            background: picked_by_me ? 'rgba(217,164,65,0.16)' : 'none',
-            border: `1px solid ${picked_by_me ? 'rgba(217,164,65,0.6)' : outlineMuted}`,
+            background: picked_by_me ? withAlpha(primary,0.16) : 'none',
+            border: `1px solid ${picked_by_me ? withAlpha(primary,0.6) : outlineMuted}`,
             color: picked_by_me ? primary : onSurfaceWarmDim,
             borderRadius: '999px', padding: '5px 12px',
             fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit'
@@ -402,16 +402,16 @@ function NamePromptModal({ onSubmit, onClose }) {
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.6),
         zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
       }}
     >
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: surfaceContainerHigh, border: '1px solid rgba(255,255,255,0.12)',
+          background: surfaceContainerHigh, border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '12px', padding: '22px', width: '380px', maxWidth: '100%',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`
         }}
       >
         <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface, marginBottom: '6px' }}>

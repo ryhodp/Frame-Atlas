@@ -17,17 +17,27 @@ Inspired by Arc Browser, Obsidian, and Apple Photos. Every UI decision should ma
 
 These are the exact color values. Use them by name, not by hex.
 
-**Status (V68, Aug 2026):** this table is the source of truth, and — as of
+**Status (V69, Aug 2026):** this table is the source of truth, and — as of
 V67 — it's no longer aspirational: every color in `frontend/src` is imported
 by name from `frontend/src/theme.js`, which this table mirrors exactly. Zero
-raw hex remains anywhere in the frontend (verified by a repo-wide grep, not
-spot-checked). The migration ran in 6 phases (V57–V67), smallest/safest
-files first; `theme.js` itself carries a version note next to each token
-group recording which phase added it. V68 collapsed 5 near-duplicate colors
-that had been kept apart during the migration to stay lossless (see the
-`on-surface-warm-dim` and `danger-warm` rows below) — the first real
-"deliberate design pass" cleanup mentioned as future work in earlier
-versions of this doc.
+raw hex OR raw `rgba(...)` triple remains anywhere in the frontend (verified
+by a repo-wide grep, not spot-checked) — V69 extended the migration to
+translucency: `theme.js` exports a `withAlpha(hex, alpha)` helper, and every
+`rgba(R,G,B,A)` literal that used to hand-copy one of these tokens' RGB
+values (~95% of the ~380 that existed) now calls `withAlpha(token, alpha)`
+instead, so a color and its hover/border/overlay variants can never drift
+apart from each other again — which is exactly what had already happened
+once (see `danger-warm` below). The remaining 5% were repeated tinted-chip
+colors that had genuinely never been given a flat-hex token; they're in the
+tables below now too (`offline-accent`, `accent-similar`, `overlay-violet`,
+`accent-film`, `presentation-control-bg`), alongside plain `white`/`black`
+for the many borders/backdrops that were just translucent white or black.
+The migration itself ran in 6 phases (V57–V67), smallest/safest files
+first; `theme.js` carries a version note next to each token group recording
+which phase added it. V68 collapsed 5 near-duplicate colors kept apart
+during the migration to stay lossless (see `on-surface-warm-dim` and
+`danger-warm` below) — the first real "deliberate design pass" cleanup
+mentioned as future work in earlier versions of this doc.
 
 ### Surfaces (backgrounds and panels)
 | Name | Hex | Use it for |
@@ -121,8 +131,22 @@ versions of this doc.
 | `accent-orange` | `#e0935a` | Note/film suggestions (Home autocomplete) |
 | `heatmap-text-hot` | `#f4e8cd` | Tag-frequency heatmap, hot (well-used) cell text |
 | `heatmap-text-cool` | `#d6c9a8` | Tag-frequency heatmap, cool (rarely-used) cell text |
-| `danger-warm` | `#e07a5f` | Inline warning text (SharePage), CropModal's destructive ghost button. **V68:** absorbed a second near-identical token (`#e07a55`, one hex digit apart) kept distinct mid-migration for the same lossless reason as `on-surface-warm-dim` above |
+| `danger-warm` | `#e07a5f` | Inline warning text (SharePage), CropModal's destructive ghost button. **V68:** absorbed a second near-identical token (`#e07a55`, one hex digit apart) kept distinct mid-migration for the same lossless reason as `on-surface-warm-dim` above. **V69:** this is exactly the drift the `withAlpha()` migration was meant to prevent — CropModal's own border for this button was still hand-typed as `rgba(224,122,85,...)`, the *old* merged-away value, silently one shade off its own button's text since V68. Fixed to `withAlpha(danger-warm, 0.55)` |
 | `on-surface-cool` | `#aab2c0` | Offline-banner text (App shell, DeckDetail) |
+| `offline-accent` | `#8c96aa` | Offline-mode banner background/border (App shell, DecksPage, DeckDetail) — a tinted-chip pair, not just text |
+| `accent-similar` | `#b282f0` | The "Similar to…" chip and similarity-percentage badge border (Home) |
+| `overlay-violet` | `#1e142d` | The similarity badge's dark backdrop — pairs with `accent-similar` |
+| `accent-film` | `#6fa3b8` | The film-credit chip's background/border (Home) |
+| `presentation-control-bg` | `#141416` | PresentationMode's floating nav buttons and pill |
+
+### Neutral base
+| Name | Hex | Use it for |
+|---|---|---|
+| `white` | `#ffffff` | Almost never used at full opacity — nearly every use is `withAlpha(white, …)` for hairline borders, subtle overlays |
+| `black` | `#000000` | Same — modal backdrops, drop shadows, scrims, almost always via `withAlpha(black, …)` |
+
+### Translucency
+Every color above has translucent variants somewhere in the app (a hover fill, a border, a backdrop) — hand-typing each as its own `rgba(R,G,B,A)` literal is exactly the duplication problem this whole system exists to avoid, just for opacity instead of hue. `theme.js` exports `withAlpha(hex, alpha)`, which turns any token into an `rgba()` string: `withAlpha(primary, 0.2)` instead of a separately-typed `rgba(217,164,65,0.2)`. Change the token, every alpha derived from it updates too; a stale RGB triple one digit off from its own token (see `danger-warm` above) becomes structurally impossible. As of V69 this covers every translucent color in the frontend — none are hand-typed RGB triples anymore.
 
 ### Color-search swatch picker
 A separate, deliberately multi-hue 12-color palette (the round swatches under the search bar) — not part of the neutral/gold app-chrome system above. Lives as `SWATCH_COLORS` in `frontend/src/theme.js`.

@@ -7,7 +7,7 @@ import AddPhotosModal from '../components/AddPhotosModal';
 import { describeAddResult } from '../deckAdd';
 import { useOfflineCache, hasRemoteUpdates } from '../hooks/useOfflineCache';
 import { useToast } from '../ToastContext';
-import { error, onPrimary, onSurface, onSurfaceCool, onSurfaceDim, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineFaint, outlineSubtle, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, warning } from '../theme';
+import { black, error, offlineAccent, onPrimary, onSurface, onSurfaceCool, onSurfaceDim, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineFaint, outlineSubtle, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, warning, white, withAlpha } from '../theme';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -15,7 +15,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
     <div
       onClick={onCancel}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.5),
         zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
@@ -23,11 +23,11 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
         onClick={e => e.stopPropagation()}
         style={{
           background: surfaceContainerHigh,
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '12px',
           padding: '18px 20px',
           width: '340px',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`,
         }}
       >
         <div style={{ fontSize: '13.5px', color: onSurface, lineHeight: 1.5, marginBottom: '16px' }}>
@@ -38,7 +38,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             onClick={onCancel}
             disabled={busy}
             style={{
-              background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+              background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
               color: onSurfaceMuted, borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
             }}
@@ -49,8 +49,8 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             onClick={onConfirm}
             disabled={busy}
             style={{
-              background: danger ? 'rgba(255,180,171,0.18)' : 'rgba(184,206,161,0.18)',
-              border: `1px solid ${danger ? 'rgba(255,180,171,0.6)' : 'rgba(184,206,161,0.6)'}`,
+              background: danger ? withAlpha(error,0.18) : withAlpha(tertiary,0.18),
+              border: `1px solid ${danger ? withAlpha(error,0.6) : withAlpha(tertiary,0.6)}`,
               color: danger ? error : tertiary,
               borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
@@ -354,7 +354,7 @@ export default function DeckDetail() {
       {showingCached && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '12px',
-          background: 'rgba(140,150,170,0.12)', border: '1px solid rgba(140,150,170,0.35)',
+          background: withAlpha(offlineAccent,0.12), border: `1px solid ${withAlpha(offlineAccent,0.35)}`,
           borderRadius: '8px', padding: '12px 14px', marginBottom: '16px'
         }}>
           <span style={{ fontSize: '12px', color: onSurfaceCool, flex: 1 }}>
@@ -363,7 +363,7 @@ export default function DeckDetail() {
           <button
             onClick={loadDeck}
             style={{
-              background: 'none', border: '1px solid rgba(140,150,170,0.5)',
+              background: 'none', border: `1px solid ${withAlpha(offlineAccent,0.5)}`,
               color: onSurfaceCool, borderRadius: '6px', padding: '6px 12px',
               fontSize: '12px', fontWeight: 600, cursor: 'pointer',
               fontFamily: 'inherit', flexShrink: 0
@@ -378,7 +378,7 @@ export default function DeckDetail() {
       {remoteUpdates && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '12px',
-          background: 'rgba(217,164,65,0.12)', border: '1px solid rgba(217,164,65,0.35)',
+          background: withAlpha(primary,0.12), border: `1px solid ${withAlpha(primary,0.35)}`,
           borderRadius: '8px', padding: '12px 14px', marginBottom: '16px'
         }}>
           <span style={{ fontSize: '12px', color: warning, flex: 1 }}>
@@ -456,8 +456,8 @@ export default function DeckDetail() {
             <button
               onClick={() => setShareOpen(true)}
               style={{
-                background: deck.share_token ? 'rgba(217,164,65,0.14)' : 'none',
-                border: `1px solid ${deck.share_token ? 'rgba(217,164,65,0.55)' : outlineVariant}`,
+                background: deck.share_token ? withAlpha(primary,0.14) : 'none',
+                border: `1px solid ${deck.share_token ? withAlpha(primary,0.55) : outlineVariant}`,
                 color: deck.share_token ? primary : onSurface,
                 borderRadius: '8px', padding: '8px 16px',
                 cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit',
@@ -514,7 +514,7 @@ export default function DeckDetail() {
           </>
         ) : (
           <div style={{
-            background: 'rgba(184,206,161,0.14)', border: '1px solid rgba(184,206,161,0.4)',
+            background: withAlpha(tertiary,0.14), border: `1px solid ${withAlpha(tertiary,0.4)}`,
             color: tertiary, borderRadius: '8px', padding: '7px 14px',
             fontSize: '12.5px', whiteSpace: 'nowrap'
           }}>
@@ -613,7 +613,7 @@ export default function DeckDetail() {
             onClick={createScene}
             disabled={!newSceneName.trim() || creatingScene}
             style={{
-              background: newSceneName.trim() ? primary : 'rgba(217,164,65,0.2)',
+              background: newSceneName.trim() ? primary : withAlpha(primary,0.2),
               color: newSceneName.trim() ? onPrimary : outline,
               border: 'none', borderRadius: '8px',
               padding: '9px 16px', fontSize: '14px', fontWeight: 500,
@@ -859,7 +859,7 @@ function MembersModal({ deckId, onClose }) {
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.5),
         zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
@@ -867,12 +867,12 @@ function MembersModal({ deckId, onClose }) {
         onClick={e => e.stopPropagation()}
         style={{
           background: surfaceContainerHigh,
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '12px',
           padding: '20px 22px',
           width: '460px', maxWidth: 'calc(100vw - 48px)',
           maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`
         }}
       >
         <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface, marginBottom: '6px' }}>
@@ -901,7 +901,7 @@ function MembersModal({ deckId, onClose }) {
             onClick={sendInvite}
             disabled={!email.trim() || inviting}
             style={{
-              background: email.trim() ? primary : 'rgba(217,164,65,0.2)',
+              background: email.trim() ? primary : withAlpha(primary,0.2),
               color: email.trim() ? onPrimary : outline,
               border: 'none', borderRadius: '8px',
               padding: '9px 16px', fontSize: '13px', fontWeight: 600,
@@ -953,9 +953,9 @@ function MembersModal({ deckId, onClose }) {
               <button
                 onClick={copyLink}
                 style={{
-                  background: copied ? 'rgba(184,206,161,0.18)' : primary,
+                  background: copied ? withAlpha(tertiary,0.18) : primary,
                   color: copied ? tertiary : onPrimary,
-                  border: copied ? '1px solid rgba(184,206,161,0.6)' : 'none',
+                  border: copied ? `1px solid ${withAlpha(tertiary,0.6)}` : 'none',
                   borderRadius: '8px', padding: '9px 14px',
                   fontSize: '12.5px', fontWeight: 600, cursor: 'pointer',
                   fontFamily: 'inherit', whiteSpace: 'nowrap'
@@ -972,7 +972,7 @@ function MembersModal({ deckId, onClose }) {
                   onClick={() => setConfirmRevokeLink(false)}
                   disabled={linkWorking}
                   style={{
-                    background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                    background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
                     color: onSurfaceMuted, borderRadius: '6px', padding: '6px 12px',
                     cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
                   }}
@@ -983,7 +983,7 @@ function MembersModal({ deckId, onClose }) {
                   onClick={revokeLink}
                   disabled={linkWorking}
                   style={{
-                    background: 'rgba(255,180,171,0.18)', border: '1px solid rgba(255,180,171,0.6)',
+                    background: withAlpha(error,0.18), border: `1px solid ${withAlpha(error,0.6)}`,
                     color: error, borderRadius: '6px', padding: '6px 12px',
                     cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
                   }}
@@ -995,7 +995,7 @@ function MembersModal({ deckId, onClose }) {
               <button
                 onClick={() => setConfirmRevokeLink(true)}
                 style={{
-                  background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+                  background: 'none', border: `1px solid ${withAlpha(error,0.35)}`,
                   color: error, borderRadius: '6px', padding: '5px 10px',
                   cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
                 }}
@@ -1006,7 +1006,7 @@ function MembersModal({ deckId, onClose }) {
           </>
         )}
 
-        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '18px 0 12px' }} />
+        <div style={{ borderTop: `1px solid ${withAlpha(white,0.08)}`, margin: '18px 0 12px' }} />
 
         <div style={{ fontSize: '12px', color: outline, marginBottom: '10px' }}>
           {members === null ? 'Loading…' : members.length === 0 ? 'No crew yet.' : `${members.length} crew member${members.length === 1 ? '' : 's'}`}
@@ -1030,7 +1030,7 @@ function MembersModal({ deckId, onClose }) {
                 <button
                   onClick={() => setRemoveTarget(m)}
                   style={{
-                    background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+                    background: 'none', border: `1px solid ${withAlpha(error,0.35)}`,
                     color: error, borderRadius: '6px', padding: '5px 10px',
                     cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit',
                     whiteSpace: 'nowrap'
@@ -1087,7 +1087,7 @@ function ActivityPanel({ deckId, onClose }) {
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.5),
         zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
@@ -1095,12 +1095,12 @@ function ActivityPanel({ deckId, onClose }) {
         onClick={e => e.stopPropagation()}
         style={{
           background: surfaceContainerHigh,
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '12px',
           padding: '20px 22px',
           width: '420px', maxWidth: 'calc(100vw - 48px)',
           maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`
         }}
       >
         <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface, marginBottom: '14px' }}>
@@ -1192,7 +1192,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.5),
         zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
@@ -1200,11 +1200,11 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
         onClick={e => e.stopPropagation()}
         style={{
           background: surfaceContainerHigh,
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '12px',
           padding: '20px 22px',
           width: '440px', maxWidth: 'calc(100vw - 48px)',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`
         }}
       >
         <div style={{ fontSize: '15px', fontWeight: 600, color: onSurface, marginBottom: '6px' }}>
@@ -1247,9 +1247,9 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
               <button
                 onClick={copyLink}
                 style={{
-                  background: copied ? 'rgba(184,206,161,0.18)' : primary,
+                  background: copied ? withAlpha(tertiary,0.18) : primary,
                   color: copied ? tertiary : onPrimary,
-                  border: copied ? '1px solid rgba(184,206,161,0.6)' : 'none',
+                  border: copied ? `1px solid ${withAlpha(tertiary,0.6)}` : 'none',
                   borderRadius: '8px', padding: '9px 14px',
                   fontSize: '12.5px', fontWeight: 600, cursor: 'pointer',
                   fontFamily: 'inherit', whiteSpace: 'nowrap'
@@ -1306,7 +1306,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
                   onClick={() => setConfirmRevoke(false)}
                   disabled={working}
                   style={{
-                    background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                    background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
                     color: onSurfaceMuted, borderRadius: '6px', padding: '6px 12px',
                     cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
                   }}
@@ -1317,8 +1317,8 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
                   onClick={revokeLink}
                   disabled={working}
                   style={{
-                    background: 'rgba(255,180,171,0.18)',
-                    border: '1px solid rgba(255,180,171,0.6)',
+                    background: withAlpha(error,0.18),
+                    border: `1px solid ${withAlpha(error,0.6)}`,
                     color: error, borderRadius: '6px', padding: '6px 12px',
                     cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
                   }}
@@ -1330,7 +1330,7 @@ function ShareModal({ deckId, shareToken, feedbackEnabled, onTokenChange, onFeed
               <button
                 onClick={() => setConfirmRevoke(true)}
                 style={{
-                  background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+                  background: 'none', border: `1px solid ${withAlpha(error,0.35)}`,
                   color: error, borderRadius: '6px', padding: '6px 12px',
                   cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
                 }}
@@ -1375,7 +1375,7 @@ function SceneSection({
         marginBottom: '24px',
         borderRadius: '12px',
         border: `1px solid ${isDragOver ? primary : outlineVariant}`,
-        background: isDragOver ? 'rgba(217,164,65,0.08)' : surfaceContainerLow,
+        background: isDragOver ? withAlpha(primary,0.08) : surfaceContainerLow,
         padding: '14px 16px',
         transition: 'background 150ms ease, border-color 150ms ease'
       }}
@@ -1462,7 +1462,7 @@ function SceneSection({
             onClick={onDelete}
             title="Delete scene"
             style={{
-              background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+              background: 'none', border: `1px solid ${withAlpha(error,0.35)}`,
               color: error, borderRadius: '6px', padding: '5px 10px',
               cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
             }}
@@ -1529,7 +1529,7 @@ function DeckTile({ img, onRemove, canEdit }) {
           title="Remove from this section"
           style={{
             position: 'absolute', top: '4px', right: '4px',
-            background: 'rgba(0,0,0,0.55)', border: 'none',
+            background: withAlpha(black,0.55), border: 'none',
             color: error, borderRadius: '5px',
             width: '20px', height: '20px', lineHeight: 1,
             cursor: 'pointer', fontSize: '13px'
@@ -1634,7 +1634,7 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.5),
         zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
@@ -1646,7 +1646,7 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
           borderRadius: '12px',
           padding: '20px 22px',
           width: '460px', maxWidth: 'calc(100vw - 48px)',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)'
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`
         }}
       >
         <div style={{ fontSize: '15px', fontWeight: 600, color: onSurfaceWarm, marginBottom: '6px' }}>
@@ -1666,7 +1666,7 @@ function ExportModal({ deckId, deckName, hasUnsorted, onClose }) {
                 style={{
                   display: 'flex', gap: '10px', alignItems: 'flex-start',
                   border: `1px solid ${selected ? primary : outlineVariant}`,
-                  background: selected ? 'rgba(217,164,65,0.10)' : 'none',
+                  background: selected ? withAlpha(primary,0.10) : 'none',
                   borderRadius: '8px', padding: '11px 13px',
                   cursor: 'pointer'
                 }}

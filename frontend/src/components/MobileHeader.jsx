@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { onSurfaceWarm, primary, sidebarSurface } from '../theme'
+import { onSurfaceWarm, primary, sidebarSurface, white, withAlpha } from '../theme'
 
 // Sticky top bar shown only below the mobile breakpoint — replaces the
 // fixed sidebar with a hamburger button that opens it as a drawer.
@@ -13,7 +13,7 @@ export default function MobileHeader({ onMenuClick }) {
       gap: '12px',
       padding: '0 14px',
       background: sidebarSurface,
-      borderBottom: '1px solid rgba(255,255,255,0.08)',
+      borderBottom: `1px solid ${withAlpha(white,0.08)}`,
       position: 'sticky',
       top: 0,
       zIndex: 150,
@@ -23,7 +23,7 @@ export default function MobileHeader({ onMenuClick }) {
         aria-label="Open menu"
         style={{
           width: '38px', height: '38px', flexShrink: 0,
-          background: 'transparent', border: '1px solid rgba(255,255,255,0.12)',
+          background: 'transparent', border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '8px', color: onSurfaceWarm, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 import CompositionOverlay, { OVERLAY_MODES, OVERLAY_LABELS, OVERLAY_ROTATABLE } from './CompositionOverlay';
 import { fetchDecks, addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
-import { PAGE_BG, accentBlue, accentVioletLight, danger, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outline, outlineVariant, primary, surfaceBright, surfaceContainerDark, surfaceContainerHigh, surfaceContainerLowestAlt, surfaceContainerWarmDark, tertiary, warning } from '../theme';
+import { PAGE_BG, accentBlue, accentVioletLight, black, danger, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outline, outlineVariant, primary, primaryDim, surfaceBright, surfaceContainerDark, surfaceContainerHigh, surfaceContainerLowestAlt, surfaceContainerWarmDark, tertiary, warning, white, withAlpha } from '../theme';
 
 const CAT_LABELS = {
   'mood': 'Mood', 'lighting_quality': 'Lighting',
@@ -300,7 +300,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         onClick={onClose}
         style={{
           position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.5)',
+          background: withAlpha(black,0.5),
           zIndex: 999,
           animation: 'fadeIn 0.2s ease'
         }}
@@ -313,7 +313,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           position: 'fixed', right: 0, top: 0, bottom: 0,
           width: isMobile ? '100vw' : 'clamp(360px, 45%, 600px)',
           background: PAGE_BG,
-          borderLeft: '1px solid rgba(255,255,255,0.065)',
+          borderLeft: `1px solid ${withAlpha(white,0.065)}`,
           zIndex: 1000,
           display: 'flex', flexDirection: 'column',
           color: onSurfaceWarm,
@@ -324,7 +324,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         {/* Header — filename lives in the metadata card below */}
         <div style={{
           padding: '12px 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.065)',
+          borderBottom: `1px solid ${withAlpha(white,0.065)}`,
           display: 'flex', justifyContent: 'flex-end', alignItems: 'center'
         }}>
           <button
@@ -341,7 +341,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             for attention down at the bottom of a long scroll */}
         <div style={{
           padding: '10px 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.065)',
+          borderBottom: `1px solid ${withAlpha(white,0.065)}`,
           display: 'flex', gap: '8px', alignItems: 'center',
           flexWrap: 'wrap', rowGap: '8px'
         }}>
@@ -349,8 +349,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             onClick={toggleFavorite}
             style={{
               ...footBtn(warning),
-              background: isFavorite ? 'rgba(201,162,83,0.18)' : 'none',
-              borderColor: isFavorite ? 'rgba(201,162,83,0.6)' : 'rgba(201,162,83,0.3)'
+              background: isFavorite ? withAlpha(primaryDim,0.18) : 'none',
+              borderColor: isFavorite ? withAlpha(primaryDim,0.6) : withAlpha(primaryDim,0.3)
             }}
           >
             {isFavorite ? '★ Favorited' : '☆ Favorite'}
@@ -364,8 +364,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               title="Show composition guides over the photo"
               style={{
                 ...footBtn(accentBlue),
-                background: overlayMode !== 'off' ? 'rgba(127,179,217,0.18)' : 'none',
-                borderColor: overlayMode !== 'off' ? 'rgba(127,179,217,0.6)' : 'rgba(127,179,217,0.3)'
+                background: overlayMode !== 'off' ? withAlpha(accentBlue,0.18) : 'none',
+                borderColor: overlayMode !== 'off' ? withAlpha(accentBlue,0.6) : withAlpha(accentBlue,0.3)
               }}
             >
               ▦ {overlayMode === 'off' ? 'Overlay' : OVERLAY_LABELS[overlayMode]}
@@ -377,9 +377,9 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   style={{ position: 'fixed', inset: 0, zIndex: 1001 }} />
                 <div style={{
                   position: 'absolute', top: 'calc(100% + 6px)', left: 0,
-                  background: surfaceContainerDark, border: '1px solid rgba(255,255,255,0.12)',
+                  background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
                   borderRadius: '8px', padding: '4px', zIndex: 1002,
-                  minWidth: '160px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
+                  minWidth: '160px', boxShadow: `0 8px 24px ${withAlpha(black,0.4)}`
                 }}>
                   {OVERLAY_MODES.map(m => (
                     <button
@@ -387,7 +387,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       onClick={() => { setOverlayMode(m); setOverlayMenuOpen(false); }}
                       style={{
                         display: 'block', width: '100%', textAlign: 'left',
-                        background: overlayMode === m ? 'rgba(127,179,217,0.15)' : 'none',
+                        background: overlayMode === m ? withAlpha(accentBlue,0.15) : 'none',
                         border: 'none', color: overlayMode === m ? accentBlue : onSurfaceWarm,
                         borderRadius: '5px', padding: '7px 10px',
                         cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
@@ -432,7 +432,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 // list off-screen with only the "new deck" field reachable.
                 position: 'absolute', top: 'calc(100% + 8px)', left: 0,
                 width: '250px', background: surfaceContainerHigh, border: `1px solid ${outlineVariant}`,
-                borderRadius: '10px', boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+                borderRadius: '10px', boxShadow: `0 8px 32px ${withAlpha(black,0.55)}`,
                 zIndex: 40, maxHeight: '300px', overflowY: 'auto',
               }}>
                 {decks === null && (
@@ -485,7 +485,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     onClick={addToNewDeck}
                     disabled={!newDeckName.trim() || deckBusy}
                     style={{
-                      background: newDeckName.trim() ? primary : 'rgba(217,164,65,0.2)',
+                      background: newDeckName.trim() ? primary : withAlpha(primary,0.2),
                       color: newDeckName.trim() ? onPrimary : outline,
                       border: 'none', borderRadius: '6px', padding: '0 10px',
                       fontSize: '12px', fontWeight: 500, fontFamily: 'inherit',
@@ -555,8 +555,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 disabled={deleting}
                 style={{
                   ...footBtn(onSurfaceWarm),
-                  background: 'rgba(207,113,82,0.85)',
-                  border: '1px solid rgba(207,113,82,1)',
+                  background: withAlpha(danger,0.85),
+                  border: `1px solid ${withAlpha(danger,1)}`,
                   opacity: deleting ? 0.6 : 1
                 }}
               >
@@ -577,8 +577,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         {deleteError && (
           <div style={{
             padding: '10px 20px', fontSize: '11.5px', color: danger,
-            borderBottom: '1px solid rgba(207,113,82,0.25)',
-            background: 'rgba(207,113,82,0.06)'
+            borderBottom: `1px solid ${withAlpha(danger,0.25)}`,
+            background: withAlpha(danger,0.06)
           }}>
             {deleteError}
           </div>
@@ -636,8 +636,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             {(film || editingFilm) && (
               <div style={{
                 marginBottom: '20px', padding: '14px 16px',
-                background: 'rgba(201,162,83,0.05)',
-                border: '1px solid rgba(201,162,83,0.18)',
+                background: withAlpha(primaryDim,0.05),
+                border: `1px solid ${withAlpha(primaryDim,0.18)}`,
                 borderRadius: '10px'
               }}>
                 {!editingFilm ? (
@@ -677,7 +677,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                                 background: 'none', border: 'none', padding: 0,
                                 color: warning, fontSize: '12px', cursor: 'pointer',
                                 fontFamily: 'inherit', textDecoration: 'underline',
-                                textDecorationColor: 'rgba(201,162,83,0.35)', textUnderlineOffset: '2px'
+                                textDecorationColor: withAlpha(primaryDim,0.35), textUnderlineOffset: '2px'
                               }}
                             >
                               {film.director}
@@ -694,7 +694,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                                 background: 'none', border: 'none', padding: 0,
                                 color: warning, fontSize: '12px', cursor: 'pointer',
                                 fontFamily: 'inherit', textDecoration: 'underline',
-                                textDecorationColor: 'rgba(201,162,83,0.35)', textUnderlineOffset: '2px'
+                                textDecorationColor: withAlpha(primaryDim,0.35), textUnderlineOffset: '2px'
                               }}
                             >
                               {film.dp}
@@ -707,7 +707,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       onClick={startEditFilm}
                       title="Edit film info (AI guesses can be wrong)"
                       style={{
-                        background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                        background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
                         color: onSurfaceMuted, borderRadius: '5px', padding: '3px 9px',
                         cursor: 'pointer', fontSize: '10.5px', fontFamily: 'inherit', flexShrink: 0
                       }}
@@ -727,7 +727,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         placeholder="Film title"
                         style={{
                           background: surfaceContainerDark, color: onSurfaceWarm,
-                          border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                          border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
                           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                         }}
                       />
@@ -737,7 +737,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         placeholder="Year"
                         style={{
                           background: surfaceContainerDark, color: onSurfaceWarm,
-                          border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                          border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
                           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                         }}
                       />
@@ -749,7 +749,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         placeholder="Director"
                         style={{
                           background: surfaceContainerDark, color: onSurfaceWarm,
-                          border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                          border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
                           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                         }}
                       />
@@ -759,7 +759,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         placeholder="Cinematographer (DP)"
                         style={{
                           background: surfaceContainerDark, color: onSurfaceWarm,
-                          border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                          border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
                           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                         }}
                       />
@@ -768,8 +768,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       <button
                         onClick={() => saveFilm(filmDraft)}
                         style={{
-                          background: 'rgba(201,162,83,0.12)',
-                          border: '1px solid rgba(201,162,83,0.35)',
+                          background: withAlpha(primaryDim,0.12),
+                          border: `1px solid ${withAlpha(primaryDim,0.35)}`,
                           color: warning, borderRadius: '6px', padding: '5px 13px',
                           fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                         }}
@@ -779,7 +779,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       <button
                         onClick={() => setEditingFilm(false)}
                         style={{
-                          background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                          background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
                           color: onSurfaceMuted, borderRadius: '6px', padding: '5px 13px',
                           fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                         }}
@@ -792,7 +792,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                           onClick={clearFilm}
                           title="Remove film info entirely (wrong guess)"
                           style={{
-                            background: 'none', border: '1px solid rgba(207,113,82,0.3)',
+                            background: 'none', border: `1px solid ${withAlpha(danger,0.3)}`,
                             color: danger, borderRadius: '6px', padding: '5px 13px',
                             fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                           }}
@@ -836,7 +836,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             <div style={{
               display: 'grid', gridTemplateColumns: '1fr 1fr',
               gap: '12px', marginBottom: '20px',
-              padding: '12px', background: 'rgba(255,255,255,0.02)',
+              padding: '12px', background: withAlpha(white,0.02),
               borderRadius: '8px'
             }}>
               <div>
@@ -862,7 +862,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               ));
               const noteFieldStyle = {
                 background: surfaceContainerDark, color: onSurfaceWarm,
-                border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px',
+                border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
                 padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
               };
               return (
@@ -891,8 +891,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   {notesExpanded && (
                     <div style={{
                       marginTop: '10px', padding: '14px 16px',
-                      background: 'rgba(255,255,255,0.02)',
-                      border: '1px solid rgba(255,255,255,0.08)',
+                      background: withAlpha(white,0.02),
+                      border: `1px solid ${withAlpha(white,0.08)}`,
                       borderRadius: '10px'
                     }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
@@ -933,8 +933,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       <button
                         onClick={() => saveNotes(notesDraft)}
                         style={{
-                          background: 'rgba(201,162,83,0.12)',
-                          border: '1px solid rgba(201,162,83,0.35)',
+                          background: withAlpha(primaryDim,0.12),
+                          border: `1px solid ${withAlpha(primaryDim,0.35)}`,
                           color: warning, borderRadius: '6px', padding: '5px 13px',
                           fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                         }}
@@ -961,7 +961,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     <div key={i} title={hex} style={{
                       flex: 1, height: '32px',
                       background: hex, borderRadius: '6px',
-                      border: '1px solid rgba(255,255,255,0.08)'
+                      border: `1px solid ${withAlpha(white,0.08)}`
                     }} />
                   ))}
                 </div>
@@ -982,7 +982,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 onClick={() => setEditingTags(v => !v)}
                 style={{
                   background: 'none',
-                  border: `1px solid ${editingTags ? 'rgba(201,162,83,0.5)' : 'rgba(255,255,255,0.12)'}`,
+                  border: `1px solid ${editingTags ? withAlpha(primaryDim,0.5) : withAlpha(white,0.12)}`,
                   color: editingTags ? warning : onSurfaceMuted,
                   borderRadius: '5px', padding: '3px 9px',
                   cursor: 'pointer', fontSize: '10.5px', fontFamily: 'inherit'
@@ -996,7 +996,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
             {editingTags && (
               <div style={{
                 display: 'flex', gap: '6px', marginBottom: '14px',
-                padding: '10px', background: 'rgba(255,255,255,0.02)',
+                padding: '10px', background: withAlpha(white,0.02),
                 borderRadius: '8px'
               }}>
                 <select
@@ -1004,7 +1004,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   onChange={e => setNewTagCat(e.target.value)}
                   style={{
                     background: surfaceContainerDark, color: onSurfaceWarm,
-                    border: '1px solid rgba(255,255,255,0.12)',
+                    border: `1px solid ${withAlpha(white,0.12)}`,
                     borderRadius: '6px', padding: '6px 8px',
                     fontSize: '11.5px', fontFamily: 'inherit', outline: 'none'
                   }}
@@ -1021,7 +1021,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   placeholder="new tag…"
                   style={{
                     flex: 1, background: surfaceContainerDark, color: onSurfaceWarm,
-                    border: '1px solid rgba(255,255,255,0.12)',
+                    border: `1px solid ${withAlpha(white,0.12)}`,
                     borderRadius: '6px', padding: '6px 10px',
                     fontSize: '11.5px', fontFamily: 'inherit', outline: 'none'
                   }}
@@ -1029,8 +1029,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 <button
                   onClick={addTag}
                   style={{
-                    background: 'rgba(201,162,83,0.12)',
-                    border: '1px solid rgba(201,162,83,0.35)',
+                    background: withAlpha(primaryDim,0.12),
+                    border: `1px solid ${withAlpha(primaryDim,0.35)}`,
                     color: warning, borderRadius: '6px',
                     padding: '0 12px', fontSize: '11.5px',
                     cursor: 'pointer', fontFamily: 'inherit'
@@ -1064,8 +1064,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     {categories[cat].map(val => (
                       <span key={val} style={{
                         display: 'inline-flex', alignItems: 'center', gap: '5px',
-                        background: 'rgba(201,162,83,0.12)',
-                        border: '1px solid rgba(201,162,83,0.25)',
+                        background: withAlpha(primaryDim,0.12),
+                        border: `1px solid ${withAlpha(primaryDim,0.25)}`,
                         borderRadius: '5px',
                         padding: '4px 9px',
                         fontSize: '11.5px', color: warning

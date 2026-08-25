@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
-import { error as errorColor, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outline, outlineVariant, primary, primaryDim, success, successBright, surfaceContainerInput, surfaceContainerLow, warning } from '../theme';
+import { error as errorColor, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outline, outlineVariant, primary, primaryDim, success, successBright, surfaceContainerInput, surfaceContainerLow, warning, white, withAlpha } from '../theme';
 
 // ── Circular progress ring — same visual as the admin Sync button's spirit. ─
 function ProgressRing({ pct, size = 96, stroke = 7, color }) {
@@ -10,7 +10,7 @@ function ProgressRing({ pct, size = 96, stroke = 7, color }) {
   const offset = circ - (Math.min(100, Math.max(0, pct)) / 100) * circ;
   return (
     <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={withAlpha(white,0.07)} strokeWidth={stroke} />
       <circle
         cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
         strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={offset}
@@ -246,7 +246,7 @@ export default function AccountPage() {
         {robotEmail ? (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
             <code style={{
-              flex: 1, background: surfaceContainerInput, border: '1px solid rgba(255,255,255,0.12)',
+              flex: 1, background: surfaceContainerInput, border: `1px solid ${withAlpha(white,0.12)}`,
               borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: warning,
               fontFamily: "'JetBrains Mono', monospace", overflowWrap: 'anywhere'
             }}>
@@ -268,8 +268,8 @@ export default function AccountPage() {
         </div>
         {setup?.folder_connected && (
           <div style={{
-            marginBottom: '12px', padding: '10px 12px', background: 'rgba(201,162,83,0.08)',
-            border: '1px solid rgba(201,162,83,0.25)', borderRadius: '8px', fontSize: '13px', color: onSurfaceMuted
+            marginBottom: '12px', padding: '10px 12px', background: withAlpha(primaryDim,0.08),
+            border: `1px solid ${withAlpha(primaryDim,0.25)}`, borderRadius: '8px', fontSize: '13px', color: onSurfaceMuted
           }}>
             Connected: <span style={{ color: primaryDim, fontWeight: 600 }}>📁 {setup.folder_name}</span>
           </div>
@@ -281,7 +281,7 @@ export default function AccountPage() {
             onKeyDown={e => { if (e.key === 'Enter') connectFolder(); }}
             placeholder={setup?.folder_connected ? 'Connect a different folder…' : 'https://drive.google.com/drive/folders/…'}
             style={{
-              flex: 1, background: surfaceContainerInput, border: '1px solid rgba(255,255,255,0.12)',
+              flex: 1, background: surfaceContainerInput, border: `1px solid ${withAlpha(white,0.12)}`,
               borderRadius: '8px', padding: '9px 12px', fontSize: '13px', color: onSurfaceWarm,
               fontFamily: 'inherit', outline: 'none'
             }}
@@ -346,8 +346,8 @@ export default function AccountPage() {
 
           {keyStatus?.has_key && (
             <div style={{
-              marginBottom: '12px', padding: '10px 12px', background: 'rgba(127,184,127,0.08)',
-              border: '1px solid rgba(127,184,127,0.25)', borderRadius: '8px', fontSize: '13px', color: success
+              marginBottom: '12px', padding: '10px 12px', background: withAlpha(success,0.08),
+              border: `1px solid ${withAlpha(success,0.25)}`, borderRadius: '8px', fontSize: '13px', color: success
             }}>
               ✓ Key saved (•••••••{keyStatus.key_last4})
             </div>
@@ -360,7 +360,7 @@ export default function AccountPage() {
               onChange={e => setGeminiKey(e.target.value)}
               placeholder={keyStatus?.has_key ? 'Replace saved key…' : 'Paste your Gemini API key'}
               style={{
-                flex: 1, background: surfaceContainerInput, border: '1px solid rgba(255,255,255,0.12)',
+                flex: 1, background: surfaceContainerInput, border: `1px solid ${withAlpha(white,0.12)}`,
                 borderRadius: '8px', padding: '9px 12px', fontSize: '13px', color: onSurfaceWarm,
                 fontFamily: 'inherit', outline: 'none'
               }}
@@ -410,8 +410,8 @@ export default function AccountPage() {
 
       {error && (
         <div style={{
-          marginTop: '16px', padding: '10px 12px', background: 'rgba(255,180,171,0.1)',
-          border: '1px solid rgba(255,180,171,0.35)', color: errorColor, borderRadius: '8px', fontSize: '12.5px'
+          marginTop: '16px', padding: '10px 12px', background: withAlpha(errorColor,0.1),
+          border: `1px solid ${withAlpha(errorColor,0.35)}`, color: errorColor, borderRadius: '8px', fontSize: '12.5px'
         }}>
           {error}
         </div>
@@ -427,7 +427,7 @@ export default function AccountPage() {
 
 function primaryBtnStyle(disabled) {
   return {
-    background: disabled ? 'rgba(217,164,65,0.2)' : primary,
+    background: disabled ? withAlpha(primary,0.2) : primary,
     color: disabled ? outline : onPrimary,
     border: 'none', borderRadius: '8px', padding: '10px 18px',
     fontSize: '13.5px', fontWeight: 600, cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit'
@@ -436,7 +436,7 @@ function primaryBtnStyle(disabled) {
 
 function secondaryBtnStyle(disabled) {
   return {
-    background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: disabled ? onSurfaceFaint : primary,
+    background: 'none', border: `1px solid ${withAlpha(primary,0.4)}`, color: disabled ? onSurfaceFaint : primary,
     borderRadius: '8px', padding: '9px 16px', fontSize: '13px',
     cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit'
   };

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { danger, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primaryDim, success, surfaceContainerDark, surfaceContainerLowest, warning } from '../theme';
+import { black, danger, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primaryDim, success, surfaceContainerDark, surfaceContainerLowest, warning, white, withAlpha } from '../theme';
 
 const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
   const isMobile = useIsMobile();
@@ -180,7 +180,7 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
         style={{
           height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
           background: surfaceContainerDark,
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '10px',
           cursor: 'pointer',
           color: onSurfaceMuted,
@@ -194,15 +194,15 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
         <>
           <div
             onClick={closePanel}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 999 }}
+            style={{ position: 'fixed', inset: 0, background: withAlpha(black,0.6), zIndex: 999 }}
           />
           <div style={{
             position: 'fixed', top: '8vh', left: '50%', transform: 'translateX(-50%)',
             width: 'min(640px, 92vw)', maxHeight: '84vh', overflowY: 'auto',
-            background: surfaceContainerLowest, border: '1px solid rgba(255,255,255,0.1)',
+            background: surfaceContainerLowest, border: `1px solid ${withAlpha(white,0.1)}`,
             borderRadius: '14px', zIndex: 1000, padding: '20px',
             color: onSurfaceWarm, fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
-            boxShadow: '0 30px 80px rgba(0,0,0,0.7)'
+            boxShadow: `0 30px 80px ${withAlpha(black,0.7)}`
           }}>
             <div style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -223,12 +223,12 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
               onDrop={handleDrop}
               onClick={() => !uploading && fileInputRef.current?.click()}
               style={{
-                border: `2px dashed ${dragOver ? primaryDim : 'rgba(255,255,255,0.18)'}`,
+                border: `2px dashed ${dragOver ? primaryDim : withAlpha(white,0.18)}`,
                 borderRadius: '10px',
                 padding: '32px 20px',
                 textAlign: 'center',
                 cursor: uploading ? 'default' : 'pointer',
-                background: dragOver ? 'rgba(201,162,83,0.08)' : 'transparent',
+                background: dragOver ? withAlpha(primaryDim,0.08) : 'transparent',
                 transition: 'background 120ms ease, border-color 120ms ease',
                 opacity: uploading ? 0.6 : 1
               }}
@@ -237,14 +237,14 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
                   <span style={{
                     display: 'inline-block', width: '16px', height: '16px',
-                    border: '2px solid rgba(201,162,83,0.25)', borderTopColor: primaryDim,
+                    border: `2px solid ${withAlpha(primaryDim,0.25)}`, borderTopColor: primaryDim,
                     borderRadius: '50%', animation: 'spin 0.7s linear infinite'
                   }} />
                   <div style={{ fontSize: '13px', color: onSurfaceWarm }}>
                     Uploading… {uploadProgress}%
                   </div>
                   <div style={{
-                    width: '200px', height: '4px', background: 'rgba(201,162,83,0.1)',
+                    width: '200px', height: '4px', background: withAlpha(primaryDim,0.1),
                     borderRadius: '2px', overflow: 'hidden'
                   }}>
                     <div style={{
@@ -271,7 +271,7 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                 {results.map(r => (
                   <div key={r.filename} style={{
                     display: 'flex', alignItems: 'flex-start', gap: '10px',
-                    padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.06)'
+                    padding: '10px 0', borderBottom: `1px solid ${withAlpha(white,0.06)}`
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
@@ -305,7 +305,7 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                               onClick={() => uploadAnyway(r.filename)}
                               disabled={uploading}
                               style={{
-                                background: 'none', border: '1px solid rgba(201,162,83,0.35)',
+                                background: 'none', border: `1px solid ${withAlpha(primaryDim,0.35)}`,
                                 color: warning, borderRadius: '5px', padding: '5px 10px',
                                 fontSize: '10.5px', cursor: 'pointer', fontFamily: 'inherit'
                               }}
@@ -315,7 +315,7 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                             <button
                               onClick={() => dismissResult(r.filename)}
                               style={{
-                                background: 'none', border: '1px solid rgba(255,255,255,0.15)',
+                                background: 'none', border: `1px solid ${withAlpha(white,0.15)}`,
                                 color: onSurfaceMuted, borderRadius: '5px', padding: '5px 10px',
                                 fontSize: '10.5px', cursor: 'pointer', fontFamily: 'inherit'
                               }}

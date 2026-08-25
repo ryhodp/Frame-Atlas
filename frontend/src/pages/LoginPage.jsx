@@ -1,10 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
-import {
-  PAGE_BG, surfaceContainerLow, surfaceContainerLowest, outlineVariant,
-  onSurface, onSurfaceMuted, outline, error as errorColor, primary, onPrimary
-} from '../theme';
+import { PAGE_BG, error as errorColor, onPrimary, onSurface, onSurfaceMuted, outline, outlineVariant, primary, surfaceContainerLow, surfaceContainerLowest, withAlpha } from '../theme';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -124,8 +121,8 @@ export const inputStyle = {
 };
 
 export const errorStyle = {
-  background: 'rgba(255,180,171,0.1)',
-  border: '1px solid rgba(255,180,171,0.35)',
+  background: withAlpha(errorColor,0.1),
+  border: `1px solid ${withAlpha(errorColor,0.35)}`,
   color: errorColor,
   borderRadius: '8px',
   padding: '10px 12px',
@@ -136,7 +133,7 @@ export const errorStyle = {
 export function submitStyle(disabled) {
   return {
     width: '100%',
-    background: disabled ? 'rgba(217,164,65,0.2)' : primary,
+    background: disabled ? withAlpha(primary,0.2) : primary,
     color: disabled ? outline : onPrimary,
     border: 'none',
     borderRadius: '8px',

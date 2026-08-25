@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../AuthContext';
-import { heatmapTextCool, heatmapTextHot, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onSurfaceWarmDim, primary, primaryDim, surfaceContainerDark, tertiary, warning } from '../theme';
+import { heatmapTextCool, heatmapTextHot, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onSurfaceWarmDim, primary, primaryDim, surfaceContainerDark, tertiary, warning, white, withAlpha } from '../theme';
 
 // ── Section wrapper — dark panel with an uppercase label ─────────────────────
 function Panel({ label, children, style }) {
   return (
     <div style={{
       background: surfaceContainerDark,
-      border: '1px solid rgba(255,255,255,0.08)',
+      border: `1px solid ${withAlpha(white,0.08)}`,
       borderRadius: '12px',
       padding: '18px 20px',
       ...style
@@ -29,7 +29,7 @@ function StatCard({ label, value, accent }) {
     <div style={{
       flex: 1, minWidth: '130px',
       background: surfaceContainerDark,
-      border: '1px solid rgba(255,255,255,0.08)',
+      border: `1px solid ${withAlpha(white,0.08)}`,
       borderRadius: '12px',
       padding: '16px 18px'
     }}>
@@ -135,7 +135,7 @@ function GrowthChart({ growth }) {
         <g key={t}>
           <line
             x1={PAD_L} x2={W - PAD_R} y1={yFor(t)} y2={yFor(t)}
-            stroke="rgba(255,255,255,0.06)" strokeWidth="1"
+            stroke={withAlpha(white,0.06)} strokeWidth="1"
           />
           <text
             x={PAD_L - 8} y={yFor(t) + 3} textAnchor="end"
@@ -147,7 +147,7 @@ function GrowthChart({ growth }) {
       ))}
       <line
         x1={PAD_L} x2={W - PAD_R} y1={PAD_T + plotH} y2={PAD_T + plotH}
-        stroke="rgba(255,255,255,0.12)" strokeWidth="1"
+        stroke={withAlpha(white,0.12)} strokeWidth="1"
       />
 
       {/* Area + line */}
@@ -198,8 +198,8 @@ function TagHeatmap({ categories, categoryLabels, maxChips = 40 }) {
             title={`${categoryLabels?.[t.category] || t.category} — used ${t.count}×`}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '7px',
-              background: `rgba(201,162,83,${alpha.toFixed(3)})`,
-              border: '1px solid rgba(201,162,83,0.25)',
+              background: withAlpha(primaryDim, alpha.toFixed(3)),
+              border: `1px solid ${withAlpha(primaryDim,0.25)}`,
               borderRadius: '6px',
               padding: '5px 9px',
               fontSize: `${11 + heat * 3}px`,
@@ -209,7 +209,7 @@ function TagHeatmap({ categories, categoryLabels, maxChips = 40 }) {
             {t.value}
             <span style={{
               fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '9px', color: 'rgba(239,234,221,0.45)'
+              fontSize: '9px', color: withAlpha(onSurfaceWarm,0.45)
             }}>
               {t.count}
             </span>
@@ -298,12 +298,12 @@ function AllUsersPanel() {
             </thead>
             <tbody>
               {users.map(u => (
-                <tr key={u.id} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <tr key={u.id} style={{ borderTop: `1px solid ${withAlpha(white,0.06)}` }}>
                   <td style={{ ...td, color: onSurfaceWarm }}>{u.name}</td>
                   <td style={td}>
                     <span style={{
                       fontSize: '10.5px', padding: '2px 7px', borderRadius: '5px',
-                      background: u.role === 'admin' ? 'rgba(217,164,65,0.15)' : 'rgba(255,255,255,0.06)',
+                      background: u.role === 'admin' ? withAlpha(primary,0.15) : withAlpha(white,0.06),
                       color: u.role === 'admin' ? primary : onSurfaceMuted
                     }}>
                       {u.role}
@@ -382,8 +382,8 @@ export default function AnalyticsPage() {
               key={t.key}
               onClick={() => setTab(t.key)}
               style={{
-                background: tab === t.key ? 'rgba(217,164,65,0.15)' : 'transparent',
-                border: `1px solid ${tab === t.key ? 'rgba(217,164,65,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                background: tab === t.key ? withAlpha(primary,0.15) : 'transparent',
+                border: `1px solid ${tab === t.key ? withAlpha(primary,0.4) : withAlpha(white,0.1)}`,
                 color: tab === t.key ? primary : onSurfaceMuted,
                 borderRadius: '8px', padding: '7px 14px', fontSize: '12.5px',
                 cursor: 'pointer', fontFamily: 'inherit'

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback } from 'react';
-import { danger, primary, tertiary } from './theme';
+import { danger, primary, tertiary, withAlpha } from './theme';
 
 const ToastContext = createContext(null);
 
@@ -62,18 +62,18 @@ function ToastContainer({ toasts }) {
             animation: 'slideIn 0.2s ease',
             pointerEvents: 'auto',
             ...(toast.type === 'success' && {
-              background: 'rgba(184,206,161,0.18)',
-              border: '1px solid rgba(184,206,161,0.4)',
+              background: withAlpha(tertiary,0.18),
+              border: `1px solid ${withAlpha(tertiary,0.4)}`,
               color: tertiary,
             }),
             ...(toast.type === 'error' && {
-              background: 'rgba(207,113,82,0.18)',
-              border: '1px solid rgba(207,113,82,0.4)',
+              background: withAlpha(danger,0.18),
+              border: `1px solid ${withAlpha(danger,0.4)}`,
               color: danger,
             }),
             ...(toast.type === 'info' && {
-              background: 'rgba(217,164,65,0.18)',
-              border: '1px solid rgba(217,164,65,0.4)',
+              background: withAlpha(primary,0.18),
+              border: `1px solid ${withAlpha(primary,0.4)}`,
               color: primary,
             }),
           }}

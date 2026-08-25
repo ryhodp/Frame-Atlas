@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { onSurfaceFaint, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, primary, sidebarSurface } from '../theme'
+import { black, onSurfaceFaint, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, primary, sidebarSurface, white, withAlpha } from '../theme'
 
 // Minimal line icons, matching the app's existing inline-SVG convention
 // (no icon library dependency) — kept intentionally simple/geometric.
@@ -68,7 +68,7 @@ function Sidebar({ mobileOpen = false, onClose }) {
         <div
           onClick={onClose}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+            position: 'fixed', inset: 0, background: withAlpha(black,0.55),
             zIndex: 200,
           }}
         />
@@ -83,7 +83,7 @@ function Sidebar({ mobileOpen = false, onClose }) {
           top: 0,
           left: 0,
           background: sidebarSurface,
-          borderRight: '1px solid rgba(255,255,255,0.08)',
+          borderRight: `1px solid ${withAlpha(white,0.08)}`,
           display: 'flex',
           flexDirection: 'column',
           padding: '20px 14px',
@@ -99,7 +99,7 @@ function Sidebar({ mobileOpen = false, onClose }) {
           position: 'sticky',
           top: 0,
           background: sidebarSurface,
-          borderRight: '1px solid rgba(255,255,255,0.08)',
+          borderRight: `1px solid ${withAlpha(white,0.08)}`,
           display: 'flex',
           flexDirection: 'column',
           padding: '20px 14px',
@@ -136,10 +136,10 @@ function Sidebar({ mobileOpen = false, onClose }) {
                   padding: '9px 10px', borderRadius: '8px',
                   fontSize: '13.5px', fontWeight: 500,
                   color: isActive ? onSurfaceWarm : outline,
-                  background: isActive ? 'rgba(217,164,65,0.12)' : 'transparent',
+                  background: isActive ? withAlpha(primary,0.12) : 'transparent',
                   textDecoration: 'none', transition: 'background 120ms ease, color 120ms ease',
                 }}
-                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = onSurfaceVariant } }}
+                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = withAlpha(white,0.04); e.currentTarget.style.color = onSurfaceVariant } }}
                 onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = outline } }}
               >
                 <span style={{ color: isActive ? primary : 'inherit', display: 'flex', flexShrink: 0 }}>
@@ -156,13 +156,13 @@ function Sidebar({ mobileOpen = false, onClose }) {
         {/* Account footer */}
         {user && (
           <div style={{
-            borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '14px',
+            borderTop: `1px solid ${withAlpha(white,0.08)}`, paddingTop: '14px',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '14px 8px 4px',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
               <div style={{
                 width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
-                background: 'rgba(217,164,65,0.16)', border: '1px solid rgba(217,164,65,0.4)',
+                background: withAlpha(primary,0.16), border: `1px solid ${withAlpha(primary,0.4)}`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: '10.5px', fontWeight: 600, color: primary,
               }}>
@@ -176,7 +176,7 @@ function Sidebar({ mobileOpen = false, onClose }) {
               onClick={handleLogout}
               title="Log out"
               style={{
-                background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: onSurfaceFaint,
+                background: 'none', border: `1px solid ${withAlpha(white,0.12)}`, color: onSurfaceFaint,
                 borderRadius: '6px', padding: '5px 9px', fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
               }}
             >

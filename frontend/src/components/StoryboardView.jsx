@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PAGE_BG, error, onPrimary, onSurface, outline, outlineDim, outlineVariant, primary, surfaceContainerLow, surfaceContainerLowestAlt, tertiary } from '../theme';
+import { PAGE_BG, error, onPrimary, onSurface, outline, outlineDim, outlineVariant, primary, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, withAlpha } from '../theme';
 
 // ── Full-screen storyboard for one scene (or Unsorted) ────────────────────────
 // Frames appear in sequence order with a number badge and an always-visible
@@ -188,7 +188,7 @@ function StoryboardCard({
         borderRadius: '12px',
         overflow: 'hidden',
         opacity: isDragging ? 0.35 : 1,
-        boxShadow: isDropTarget ? '0 0 0 2px rgba(217,164,65,0.35)' : 'none',
+        boxShadow: isDropTarget ? `0 0 0 2px ${withAlpha(primary,0.35)}` : 'none',
         transition: 'border-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease',
         cursor: 'grab'
       }}

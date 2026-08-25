@@ -5,7 +5,7 @@ import TagModeBar from '../components/TagModeBar';
 import CropModal from '../components/CropModal';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { PAGE_BG, accentBlueMuted, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onTertiary, surfaceContainerWarmDark, tertiary, warning } from '../theme';
+import { PAGE_BG, accentBlueMuted, black, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onTertiary, surfaceContainerWarmDark, tertiary, warning, white, withAlpha } from '../theme';
 
 // Two personalities in one page. view="favorites" shows starred images
 // (click the star to unstar); view="recent" shows images added within a
@@ -299,7 +299,7 @@ export default function CollectionPage({ view }) {
       {/* Page header */}
       <div style={{
         padding: '24px 24px 16px',
-        borderBottom: '1px solid rgba(255,255,255,0.065)',
+        borderBottom: `1px solid ${withAlpha(white,0.065)}`,
         display: 'flex', alignItems: 'flex-start', gap: '16px'
       }}>
         <div style={{ flex: 1 }}>
@@ -384,7 +384,7 @@ export default function CollectionPage({ view }) {
                     borderRadius: '6px',
                     overflow: 'hidden',
                     cursor: 'pointer',
-                    border: isSelected ? `2px solid ${tertiary}` : '1px solid rgba(255,255,255,0.04)',
+                    border: isSelected ? `2px solid ${tertiary}` : `1px solid ${withAlpha(white,0.04)}`,
                     transition: 'transform 0.15s ease'
                   }}
                   onMouseEnter={e => {
@@ -413,7 +413,7 @@ export default function CollectionPage({ view }) {
 
                   <div style={{
                     position: 'absolute', inset: 0,
-                    background: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.7) 100%)',
+                    background: `linear-gradient(180deg, ${withAlpha(black,0)} 55%, ${withAlpha(black,0.7)} 100%)`,
                     pointerEvents: 'none'
                   }} />
 
@@ -431,10 +431,10 @@ export default function CollectionPage({ view }) {
                         background: 'none', border: 'none', cursor: 'pointer',
                         padding: isMobile ? '11px' : '4px', lineHeight: 1, zIndex: 2,
                         fontSize: img.is_favorite ? '13px' : '14px',
-                        color: img.is_favorite ? warning : 'rgba(239,234,221,0.65)',
+                        color: img.is_favorite ? warning : withAlpha(onSurfaceWarm,0.65),
                         opacity: img.is_favorite ? 1 : (isMobile ? 0.55 : 0),
                         transition: 'opacity 120ms ease',
-                        filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                        filter: `drop-shadow(0 1px 2px ${withAlpha(black,0.7)})`
                       }}
                     >★</button>
                   )}
@@ -442,7 +442,7 @@ export default function CollectionPage({ view }) {
                     <span style={{
                       position: 'absolute', top: '6px', right: '7px',
                       color: warning, fontSize: '13px',
-                      filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                      filter: `drop-shadow(0 1px 2px ${withAlpha(black,0.7)})`
                     }}>★</span>
                   )}
 
@@ -456,7 +456,7 @@ export default function CollectionPage({ view }) {
                         position: 'absolute', top: '4px', right: '5px',
                         background: 'none', border: 'none', cursor: 'pointer',
                         color: cfg.accent, fontSize: '15px', padding: '4px',
-                        filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))', lineHeight: 1
+                        filter: `drop-shadow(0 1px 2px ${withAlpha(black,0.7)})`, lineHeight: 1
                       }}
                     >
                       {cfg.icon}
@@ -465,7 +465,7 @@ export default function CollectionPage({ view }) {
                     <span style={{
                       position: 'absolute', top: '6px', right: '7px',
                       color: cfg.accent, fontSize: '13px',
-                      filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                      filter: `drop-shadow(0 1px 2px ${withAlpha(black,0.7)})`
                     }}>
                       {cfg.icon}
                     </span>
@@ -479,7 +479,7 @@ export default function CollectionPage({ view }) {
                       width: '18px', height: '18px', borderRadius: '50%',
                       background: tertiary,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.5)'
+                      boxShadow: `0 1px 3px ${withAlpha(black,0.5)}`
                     }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
                         stroke={onTertiary} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">

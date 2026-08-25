@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useToast } from '../ToastContext';
-import { danger, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primary, primaryDim, surfaceContainerLowest, surfaceContainerWarmDark, warning } from '../theme';
+import { black, danger, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primary, primaryDim, surfaceContainerLowest, surfaceContainerWarmDark, warning, white, withAlpha } from '../theme';
 
 export default function DuplicateReview({ onClose, onImageDeleted, onResync, initialGroups }) {
   const [groups, setGroups] = useState(initialGroups || null);   // null = scanning
@@ -114,7 +114,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
       <div
         onClick={onClose}
         style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          position: 'fixed', inset: 0, background: withAlpha(black,0.6),
           zIndex: 999, animation: 'fadeIn 0.2s ease'
         }}
       />
@@ -122,19 +122,19 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
         position: 'fixed', top: '5vh', left: '50%', transform: 'translateX(-50%)',
         width: 'min(860px, 92vw)', maxHeight: '90vh',
         background: surfaceContainerLowest,
-        border: '1px solid rgba(255,255,255,0.1)',
+        border: `1px solid ${withAlpha(white,0.1)}`,
         borderRadius: '14px',
         zIndex: 1000,
         display: 'flex', flexDirection: 'column',
         color: onSurfaceWarm,
         fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
-        boxShadow: '0 30px 80px rgba(0,0,0,0.7)',
+        boxShadow: `0 30px 80px ${withAlpha(black,0.7)}`,
         overflow: 'hidden'
       }}>
         {/* Header */}
         <div style={{
           padding: '16px 22px',
-          borderBottom: '1px solid rgba(255,255,255,0.065)',
+          borderBottom: `1px solid ${withAlpha(white,0.065)}`,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px'
         }}>
           <div>
@@ -153,8 +153,8 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                 onClick={() => setConfirmBulk(true)}
                 disabled={selectedCount === 0}
                 style={{
-                  background: selectedCount === 0 ? 'rgba(207,113,82,0.15)' : 'rgba(207,113,82,0.85)',
-                  border: '1px solid rgba(207,113,82,1)',
+                  background: selectedCount === 0 ? withAlpha(danger,0.15) : withAlpha(danger,0.85),
+                  border: `1px solid ${withAlpha(danger,1)}`,
                   color: onSurfaceWarm, borderRadius: '6px',
                   padding: '7px 14px', fontSize: '11.5px', fontWeight: 600,
                   cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
@@ -173,8 +173,8 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                 <button
                   onClick={confirmDelete}
                   style={{
-                    background: 'rgba(207,113,82,0.85)',
-                    border: '1px solid rgba(207,113,82,1)',
+                    background: withAlpha(danger,0.85),
+                    border: `1px solid ${withAlpha(danger,1)}`,
                     color: onSurfaceWarm, borderRadius: '6px',
                     padding: '7px 14px', fontSize: '11.5px', fontWeight: 600,
                     cursor: 'pointer', fontFamily: 'inherit'
@@ -186,7 +186,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                   onClick={() => setConfirmBulk(false)}
                   style={{
                     background: 'none',
-                    border: '1px solid rgba(255,255,255,0.15)',
+                    border: `1px solid ${withAlpha(white,0.15)}`,
                     color: onSurfaceMuted, borderRadius: '6px',
                     padding: '7px 10px', fontSize: '11.5px',
                     cursor: 'pointer', fontFamily: 'inherit'
@@ -209,8 +209,8 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
         {error && (
           <div style={{
             padding: '10px 22px', fontSize: '11.5px', color: danger,
-            background: 'rgba(207,113,82,0.06)',
-            borderBottom: '1px solid rgba(207,113,82,0.25)'
+            background: withAlpha(danger,0.06),
+            borderBottom: `1px solid ${withAlpha(danger,0.25)}`
           }}>
             {error}
           </div>
@@ -225,7 +225,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
             }}>
               <span style={{
                 width: '14px', height: '14px',
-                border: '2px solid rgba(201,162,83,0.2)',
+                border: `2px solid ${withAlpha(primaryDim,0.2)}`,
                 borderTopColor: primaryDim,
                 borderRadius: '50%', display: 'inline-block',
                 animation: 'spin 0.7s linear infinite'
@@ -247,8 +247,8 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
             <div key={gi} style={{
               marginBottom: '20px',
               padding: '14px',
-              background: 'rgba(255,255,255,0.02)',
-              border: '1px solid rgba(255,255,255,0.06)',
+              background: withAlpha(white,0.02),
+              border: `1px solid ${withAlpha(white,0.06)}`,
               borderRadius: '10px'
             }}>
               <div style={{
@@ -268,7 +268,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                       width: '100%', height: '130px',
                       background: surfaceContainerWarmDark, borderRadius: '7px',
                       overflow: 'hidden', marginBottom: '6px',
-                      border: '1px solid rgba(255,255,255,0.06)'
+                      border: `1px solid ${withAlpha(white,0.06)}`
                     }}>
                       <img
                         src={img.thumbnail}
@@ -280,7 +280,7 @@ export default function DuplicateReview({ onClose, onImageDeleted, onResync, ini
                         style={{
                           position: 'absolute', top: '6px', left: '6px',
                           display: 'flex', alignItems: 'center',
-                          background: 'rgba(0,0,0,0.55)', borderRadius: '5px',
+                          background: withAlpha(black,0.55), borderRadius: '5px',
                           padding: '4px 5px', cursor: 'pointer'
                         }}
                       >

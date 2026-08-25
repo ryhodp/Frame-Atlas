@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  onSurface, primary, onPrimary, outline, error as errorColor,
-  surfaceContainerLow, outlineVariant, onSurfaceFaint, onSurfaceMuted
-} from '../theme';
+import { error as errorColor, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, outline, outlineVariant, primary, surfaceContainerLow, white, withAlpha } from '../theme';
 
 export default function AdminInvitesPage() {
   const [codes, setCodes] = useState([]);
@@ -78,7 +75,7 @@ export default function AdminInvitesPage() {
 
       {error && (
         <div style={{
-          background: 'rgba(255,180,171,0.1)', border: '1px solid rgba(255,180,171,0.35)',
+          background: withAlpha(errorColor,0.1), border: `1px solid ${withAlpha(errorColor,0.35)}`,
           color: errorColor, borderRadius: '8px', padding: '10px 12px', fontSize: '12.5px', marginBottom: '16px'
         }}>{error}</div>
       )}
@@ -116,7 +113,7 @@ export default function AdminInvitesPage() {
                   <button
                     onClick={() => copy(c.code, c.id)}
                     style={{
-                      background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: primary,
+                      background: 'none', border: `1px solid ${withAlpha(primary,0.4)}`, color: primary,
                       borderRadius: '6px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit'
                     }}
                   >
@@ -126,7 +123,7 @@ export default function AdminInvitesPage() {
                     onClick={() => revoke(c.id)}
                     title="Revoke this code"
                     style={{
-                      background: 'none', border: '1px solid rgba(255,255,255,0.12)', color: onSurfaceMuted,
+                      background: 'none', border: `1px solid ${withAlpha(white,0.12)}`, color: onSurfaceMuted,
                       borderRadius: '6px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit'
                     }}
                   >

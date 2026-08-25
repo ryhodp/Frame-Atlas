@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { useOfflineCache } from '../hooks/useOfflineCache'
-import { error, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onSurfaceWarmFaint, outlineVariant, primaryDim, surfaceContainerLow, tertiary } from '../theme'
+import { error, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onSurfaceWarmFaint, outlineVariant, primaryDim, surfaceContainerLow, tertiary, white, withAlpha } from '../theme'
 
 function formatSpendPeriod() {
   const now = new Date()
@@ -194,7 +194,7 @@ export default function SettingsPage() {
                 onClick={handleConnectDefaultFolder}
                 disabled={connectingFolder}
                 style={{
-                  background: 'rgba(184,206,161,0.18)', border: '1px solid rgba(184,206,161,0.5)',
+                  background: withAlpha(tertiary,0.18), border: `1px solid ${withAlpha(tertiary,0.5)}`,
                   color: tertiary, borderRadius: '6px', padding: '7px 14px', fontSize: '12px',
                   cursor: 'pointer', fontFamily: 'inherit', opacity: connectingFolder ? 0.6 : 1
                 }}
@@ -226,8 +226,8 @@ export default function SettingsPage() {
                 onClick={handleGoogleDisconnect}
                 disabled={disconnecting}
                 style={{
-                  background: 'rgba(255,180,171,0.12)',
-                  border: '1px solid rgba(255,180,171,0.3)',
+                  background: withAlpha(error,0.12),
+                  border: `1px solid ${withAlpha(error,0.3)}`,
                   color: error,
                   borderRadius: '6px',
                   padding: '7px 14px',
@@ -243,8 +243,8 @@ export default function SettingsPage() {
               <button
                 onClick={handleGoogleConnect}
                 style={{
-                  background: 'rgba(184,206,161,0.18)',
-                  border: '1px solid rgba(184,206,161,0.5)',
+                  background: withAlpha(tertiary,0.18),
+                  border: `1px solid ${withAlpha(tertiary,0.5)}`,
                   color: tertiary,
                   borderRadius: '6px',
                   padding: '7px 14px',
@@ -295,8 +295,8 @@ export default function SettingsPage() {
             onClick={handleBackupNow}
             disabled={backingUp}
             style={{
-              background: 'rgba(184,206,161,0.18)',
-              border: '1px solid rgba(184,206,161,0.5)',
+              background: withAlpha(tertiary,0.18),
+              border: `1px solid ${withAlpha(tertiary,0.5)}`,
               color: tertiary,
               borderRadius: '6px',
               padding: '7px 14px',
@@ -359,8 +359,8 @@ export default function SettingsPage() {
           onClick={handleClearCache}
           disabled={clearing || cachedDecks.length === 0}
           style={{
-            background: cachedDecks.length > 0 ? 'rgba(255,180,171,0.12)' : 'rgba(255,180,171,0.06)',
-            border: '1px solid rgba(255,180,171,0.3)',
+            background: cachedDecks.length > 0 ? withAlpha(error,0.12) : withAlpha(error,0.06),
+            border: `1px solid ${withAlpha(error,0.3)}`,
             color: cachedDecks.length > 0 ? error : onSurfaceWarmFaint,
             borderRadius: '6px',
             padding: '7px 14px',
@@ -381,7 +381,7 @@ function Row({ label, value }) {
   return (
     <div style={{
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.06)'
+      padding: '10px 0', borderBottom: `1px solid ${withAlpha(white,0.06)}`
     }}>
       <span style={{ fontSize: '13px', color: onSurfaceMuted }}>{label}</span>
       <span style={{ fontSize: '13.5px', color: onSurfaceWarm }}>{value}</span>

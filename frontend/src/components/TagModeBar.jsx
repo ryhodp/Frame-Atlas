@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SIDEBAR_WIDTH } from './Sidebar';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { accentViolet, accentVioletLight, error, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineVariant, primary, surfaceBright, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, warning } from '../theme';
+import { accentViolet, accentVioletLight, black, error, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineVariant, primary, primaryDim, surfaceBright, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, warning, white, withAlpha } from '../theme';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../ToastContext';
 import { addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
@@ -12,7 +12,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
     <div
       onClick={onCancel}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.5),
         zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
@@ -20,11 +20,11 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
         onClick={e => e.stopPropagation()}
         style={{
           background: surfaceContainerHigh,
-          border: '1px solid rgba(255,255,255,0.12)',
+          border: `1px solid ${withAlpha(white,0.12)}`,
           borderRadius: '12px',
           padding: '18px 20px',
           width: '320px',
-          boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
+          boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`,
           animation: 'fapop 0.12s ease'
         }}
       >
@@ -36,7 +36,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             onClick={onCancel}
             disabled={busy}
             style={{
-              background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+              background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
               color: onSurfaceMuted, borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
             }}
@@ -47,8 +47,8 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             onClick={onConfirm}
             disabled={busy}
             style={{
-              background: danger ? 'rgba(255,180,171,0.18)' : 'rgba(184,206,161,0.18)',
-              border: `1px solid ${danger ? 'rgba(255,180,171,0.6)' : 'rgba(184,206,161,0.6)'}`,
+              background: danger ? withAlpha(error,0.18) : withAlpha(tertiary,0.18),
+              border: `1px solid ${danger ? withAlpha(error,0.6) : withAlpha(tertiary,0.6)}`,
               color: danger ? error : tertiary,
               borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
@@ -507,7 +507,7 @@ export default function TagModeBar({
           zIndex: 900,
           background: surfaceContainerLow,
           borderLeft: isOpen ? `1px solid ${outlineVariant}` : 'none',
-          boxShadow: isOpen ? '-12px 0 32px rgba(0,0,0,0.45)' : 'none',
+          boxShadow: isOpen ? `-12px 0 32px ${withAlpha(black,0.45)}` : 'none',
           overflowY: 'auto',
           transition: 'width 0.2s ease, border-left 0.2s ease',
           visibility: isOpen ? 'visible' : 'hidden'
@@ -578,7 +578,7 @@ export default function TagModeBar({
                       background: surfaceContainerHigh,
                       border: `1px solid ${outlineVariant}`,
                       borderRadius: '10px',
-                      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                      boxShadow: `0 8px 32px ${withAlpha(black,0.5)}`,
                       maxHeight: '220px', overflowY: 'auto',
                       zIndex: 60
                     }}>
@@ -623,7 +623,7 @@ export default function TagModeBar({
                 disabled={!canApply}
                 style={{
                   marginTop: '8px',
-                  background: canApply ? primary : 'rgba(217,164,65,0.2)',
+                  background: canApply ? primary : withAlpha(primary,0.2),
                   color: canApply ? onPrimary : outline,
                   border: 'none', borderRadius: '8px',
                   padding: '8px 14px', fontSize: '12.5px', fontWeight: 500,
@@ -672,7 +672,7 @@ export default function TagModeBar({
                   disabled={!canSetFilm}
                   style={{
                     flex: 1,
-                    background: canSetFilm ? primary : 'rgba(217,164,65,0.2)',
+                    background: canSetFilm ? primary : withAlpha(primary,0.2),
                     color: canSetFilm ? onPrimary : outline,
                     border: 'none', borderRadius: '8px',
                     padding: '8px 10px', fontSize: '12.5px', fontWeight: 500,
@@ -685,7 +685,7 @@ export default function TagModeBar({
                   onClick={openFilmClearConfirm}
                   title="Clear filmography from every selected image"
                   style={{
-                    background: 'none', border: '1px solid rgba(255,180,171,0.35)',
+                    background: 'none', border: `1px solid ${withAlpha(error,0.35)}`,
                     color: error, borderRadius: '8px',
                     padding: '8px 10px', fontSize: '12.5px',
                     cursor: 'pointer', fontFamily: 'inherit'
@@ -744,8 +744,8 @@ export default function TagModeBar({
                                 key={`${tag.category}:${tag.value}`}
                                 style={{
                                   display: 'inline-flex', alignItems: 'center', gap: '6px',
-                                  background: isMatch ? 'rgba(217,164,65,0.2)' : 'rgba(201,162,83,0.12)',
-                                  border: `1px solid ${isMatch ? 'rgba(217,164,65,0.7)' : 'rgba(201,162,83,0.25)'}`,
+                                  background: isMatch ? withAlpha(primary,0.2) : withAlpha(primaryDim,0.12),
+                                  border: `1px solid ${isMatch ? withAlpha(primary,0.7) : withAlpha(primaryDim,0.25)}`,
                                   borderRadius: '5px',
                                   padding: '4px 9px',
                                   fontSize: '11.5px', color: tag.color || warning
@@ -806,8 +806,8 @@ export default function TagModeBar({
               <button
                 onClick={toggleDeckPicker}
                 style={{
-                  background: showDeckPicker ? 'rgba(217,164,65,0.14)' : 'none',
-                  border: `1px solid ${showDeckPicker ? 'rgba(217,164,65,0.5)' : outlineVariant}`,
+                  background: showDeckPicker ? withAlpha(primary,0.14) : 'none',
+                  border: `1px solid ${showDeckPicker ? withAlpha(primary,0.5) : outlineVariant}`,
                   color: showDeckPicker ? primary : onSurface,
                   borderRadius: '8px', padding: '8px 14px',
                   fontSize: '12.5px', fontWeight: 500,
@@ -829,7 +829,7 @@ export default function TagModeBar({
                   background: surfaceContainerHigh,
                   border: `1px solid ${outlineVariant}`,
                   borderRadius: '10px',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                  boxShadow: `0 8px 32px ${withAlpha(black,0.5)}`,
                   maxHeight: '260px', overflowY: 'auto',
                   zIndex: 60
                 }}>
@@ -877,7 +877,7 @@ export default function TagModeBar({
                       onClick={createDeckAndAdd}
                       disabled={!newDeckName.trim() || addingToDeck}
                       style={{
-                        background: newDeckName.trim() ? primary : 'rgba(217,164,65,0.2)',
+                        background: newDeckName.trim() ? primary : withAlpha(primary,0.2),
                         color: newDeckName.trim() ? onPrimary : outline,
                         border: 'none', borderRadius: '6px',
                         padding: '0 10px', fontSize: '12px', fontWeight: 500,

@@ -22,7 +22,7 @@ import InviteAcceptPage from './pages/InviteAcceptPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import { ToastProvider } from './ToastContext'
 import { SyncProvider } from './SyncContext'
-import { PAGE_BG, onSurface, onSurfaceCool, onSurfaceWarm, outline } from './theme'
+import { PAGE_BG, offlineAccent, onSurface, onSurfaceCool, onSurfaceWarm, outline, withAlpha } from './theme'
 import './App.css'
 
 // Inner shell so we can read the current route (useLocation only works inside
@@ -130,8 +130,8 @@ function Shell() {
             they look empty. Decks are the part that still works. */}
         {offline && (
           <div style={{
-            background: 'rgba(140,150,170,0.14)',
-            borderBottom: '1px solid rgba(140,150,170,0.3)',
+            background: withAlpha(offlineAccent,0.14),
+            borderBottom: `1px solid ${withAlpha(offlineAccent,0.3)}`,
             padding: '9px 16px', fontSize: '12px', color: onSurfaceCool,
             display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap'
           }}>
@@ -139,7 +139,7 @@ function Shell() {
             <button
               onClick={refresh}
               style={{
-                background: 'none', border: '1px solid rgba(140,150,170,0.5)',
+                background: 'none', border: `1px solid ${withAlpha(offlineAccent,0.5)}`,
                 color: onSurfaceCool, borderRadius: '5px', padding: '3px 10px',
                 fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
               }}

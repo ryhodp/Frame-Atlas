@@ -11,14 +11,7 @@ import { useAuth } from '../AuthContext';
 import { useSync } from '../SyncContext';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
-import {
-  PAGE_BG, SWATCH_COLORS as PRESET_SWATCHES,
-  accentBlueLight, accentOrange, accentTeal, accentViolet, accentVioletLight,
-  accentVioletLighter, danger, error, onPrimary, onSurfaceFaint, onSurfaceMuted,
-  onSurfaceWarm, onTertiary, outlineVariant, primary, primaryDim, success,
-  surfaceContainerDark, surfaceContainerHover, surfaceContainerLow,
-  surfaceContainerLowest, surfaceContainerMuted, tertiary, warning
-} from '../theme';
+import { PAGE_BG, SWATCH_COLORS as PRESET_SWATCHES, accentBlueLight, accentFilm, accentOrange, accentSimilar, accentTeal, accentViolet, accentVioletLight, accentVioletLighter, black, danger, error, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onTertiary, outlineVariant, overlayViolet, primary, primaryDim, success, surfaceContainerDark, surfaceContainerHover, surfaceContainerLow, surfaceContainerLowest, surfaceContainerMuted, tertiary, warning, white, withAlpha } from '../theme';
 
 const PER_PAGE = 60;
 const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP' };
@@ -934,7 +927,7 @@ export default function Home() {
       {pageDragOver && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 500,
-          background: 'rgba(10,10,11,0.82)',
+          background: withAlpha(surfaceContainerLowest,0.82),
           border: `3px dashed ${primaryDim}`,
           margin: '10px',
           borderRadius: '16px',
@@ -994,7 +987,7 @@ export default function Home() {
         data-search-area
         style={{
           padding: isMobile ? '12px 14px' : '16px 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.065)',
+          borderBottom: `1px solid ${withAlpha(white,0.065)}`,
           position: 'relative',
           zIndex: 40
         }}
@@ -1006,13 +999,13 @@ export default function Home() {
             minWidth: 0,
             display: 'flex', alignItems: 'center', gap: '12px',
             background: surfaceContainerDark,
-            border: '1px solid rgba(255,255,255,0.12)',
+            border: `1px solid ${withAlpha(white,0.12)}`,
             borderRadius: '10px',
             padding: '0 14px',
             height: '46px'
           }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-              stroke="rgba(255,255,255,0.3)" strokeWidth="2">
+              stroke={withAlpha(white,0.3)} strokeWidth="2">
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
             </svg>
             <input
@@ -1035,7 +1028,7 @@ export default function Home() {
               }}>
                 <span style={{
                   width: '10px', height: '10px',
-                  border: '2px solid rgba(139,124,246,0.25)',
+                  border: `2px solid ${withAlpha(accentViolet,0.25)}`,
                   borderTopColor: accentViolet,
                   borderRadius: '50%', display: 'inline-block',
                   animation: 'spin 0.7s linear infinite'
@@ -1052,8 +1045,8 @@ export default function Home() {
             title="Select Mode — bulk-select images to crop, tag, or add to a deck (press V)"
             style={{
               height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
-              background: tagMode ? 'rgba(184,206,161,0.14)' : surfaceContainerDark,
-              border: `1px solid ${tagMode ? 'rgba(184,206,161,0.6)' : 'rgba(255,255,255,0.12)'}`,
+              background: tagMode ? withAlpha(tertiary,0.14) : surfaceContainerDark,
+              border: `1px solid ${tagMode ? withAlpha(tertiary,0.6) : withAlpha(white,0.12)}`,
               borderRadius: '10px',
               cursor: 'pointer',
               color: tagMode ? tertiary : onSurfaceMuted,
@@ -1074,8 +1067,8 @@ export default function Home() {
                 title={duplicateScanStatus === 'scanning' ? 'Scanning for duplicates...' : 'Find duplicate images (runs in background)'}
                 style={{
                   height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
-                  background: duplicateScanStatus === 'scanning' ? 'rgba(217,164,65,0.14)' : surfaceContainerDark,
-                  border: `1px solid ${duplicateScanStatus === 'scanning' ? 'rgba(217,164,65,0.5)' : 'rgba(255,255,255,0.12)'}`,
+                  background: duplicateScanStatus === 'scanning' ? withAlpha(primary,0.14) : surfaceContainerDark,
+                  border: `1px solid ${duplicateScanStatus === 'scanning' ? withAlpha(primary,0.5) : withAlpha(white,0.12)}`,
                   borderRadius: '10px',
                   cursor: duplicateScanStatus === 'scanning' ? 'default' : 'pointer',
                   color: duplicateScanStatus === 'scanning' ? primary : onSurfaceMuted,
@@ -1100,8 +1093,8 @@ export default function Home() {
                   padding: sync.running ? '0 12px' : 0,
                   width: sync.running ? 'auto' : (isMobile ? '38px' : '46px'),
                   justifyContent: 'center',
-                  background: sync.running ? 'rgba(217,164,65,0.14)' : surfaceContainerDark,
-                  border: `1px solid ${sync.running ? 'rgba(217,164,65,0.5)' : 'rgba(255,255,255,0.12)'}`,
+                  background: sync.running ? withAlpha(primary,0.14) : surfaceContainerDark,
+                  border: `1px solid ${sync.running ? withAlpha(primary,0.5) : withAlpha(white,0.12)}`,
                   borderRadius: '10px',
                   cursor: sync.running ? 'default' : 'pointer',
                   color: sync.running ? primary : onSurfaceMuted,
@@ -1113,7 +1106,7 @@ export default function Home() {
                 {sync.running ? (
                   <span style={{
                     width: '12px', height: '12px', flexShrink: 0,
-                    border: '2px solid rgba(217,164,65,0.3)', borderTopColor: primary,
+                    border: `2px solid ${withAlpha(primary,0.3)}`, borderTopColor: primary,
                     borderRadius: '50%', display: 'inline-block',
                     animation: 'spin 0.7s linear infinite'
                   }} />
@@ -1141,7 +1134,7 @@ export default function Home() {
               style={{
                 height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px',
                 background: surfaceContainerDark,
-                border: `1px solid ${showBookmarks ? 'rgba(201,162,83,0.5)' : 'rgba(255,255,255,0.12)'}`,
+                border: `1px solid ${showBookmarks ? withAlpha(primaryDim,0.5) : withAlpha(white,0.12)}`,
                 borderRadius: '10px',
                 cursor: 'pointer',
                 color: showBookmarks ? warning : onSurfaceMuted,
@@ -1156,9 +1149,9 @@ export default function Home() {
                 position: 'absolute', top: '54px', right: 0,
                 width: '300px',
                 background: surfaceContainerDark,
-                border: '1px solid rgba(255,255,255,0.12)',
+                border: `1px solid ${withAlpha(white,0.12)}`,
                 borderRadius: '10px',
-                boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
+                boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`,
                 zIndex: 60,
                 animation: 'fapop 0.12s ease',
                 overflow: 'hidden'
@@ -1167,7 +1160,7 @@ export default function Home() {
                 {hasFilters && (
                   <div style={{
                     padding: '12px 13px',
-                    borderBottom: '1px solid rgba(255,255,255,0.065)',
+                    borderBottom: `1px solid ${withAlpha(white,0.065)}`,
                     display: 'flex', gap: '6px'
                   }}>
                     <input
@@ -1177,7 +1170,7 @@ export default function Home() {
                       placeholder="Name this search…"
                       style={{
                         flex: 1, background: surfaceContainerLowest,
-                        border: '1px solid rgba(255,255,255,0.1)',
+                        border: `1px solid ${withAlpha(white,0.1)}`,
                         borderRadius: '6px', padding: '7px 10px',
                         color: onSurfaceWarm, fontSize: '12px',
                         fontFamily: 'inherit', outline: 'none'
@@ -1186,8 +1179,8 @@ export default function Home() {
                     <button
                       onClick={saveBookmark}
                       style={{
-                        background: 'rgba(201,162,83,0.12)',
-                        border: '1px solid rgba(201,162,83,0.35)',
+                        background: withAlpha(primaryDim,0.12),
+                        border: `1px solid ${withAlpha(primaryDim,0.35)}`,
                         color: warning, borderRadius: '6px',
                         padding: '0 12px', fontSize: '12px',
                         cursor: 'pointer', fontFamily: 'inherit'
@@ -1241,7 +1234,7 @@ export default function Home() {
                           <span style={{
                             width: '12px', height: '12px', borderRadius: '3px',
                             background: bm.state.color,
-                            border: '1px solid rgba(255,255,255,0.15)'
+                            border: `1px solid ${withAlpha(white,0.15)}`
                           }} />
                         )}
                         <button
@@ -1273,9 +1266,9 @@ export default function Home() {
           <div style={{
             position: 'absolute', top: '68px', left: '20px', right: '74px',
             background: surfaceContainerDark,
-            border: '1px solid rgba(255,255,255,0.12)',
+            border: `1px solid ${withAlpha(white,0.12)}`,
             borderRadius: '10px',
-            boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
+            boxShadow: `0 20px 48px ${withAlpha(black,0.6)}`,
             maxHeight: '320px', overflowY: 'auto',
             zIndex: 50,
             animation: 'fapop 0.12s ease'
@@ -1363,7 +1356,7 @@ export default function Home() {
                 background: hex,
                 border: color === hex
                   ? `2px solid ${onSurfaceWarm}`
-                  : '1px solid rgba(255,255,255,0.15)',
+                  : `1px solid ${withAlpha(white,0.15)}`,
                 cursor: 'pointer', padding: 0,
                 transform: color === hex ? 'scale(1.15)' : 'scale(1)',
                 transition: 'transform 0.12s ease'
@@ -1378,7 +1371,7 @@ export default function Home() {
               background: 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)',
               border: color && !PRESET_SWATCHES.includes(color)
                 ? `2px solid ${onSurfaceWarm}`
-                : '1px solid rgba(255,255,255,0.15)',
+                : `1px solid ${withAlpha(white,0.15)}`,
               cursor: 'pointer', position: 'relative', overflow: 'hidden',
               transform: color && !PRESET_SWATCHES.includes(color) ? 'scale(1.15)' : 'scale(1)',
               transition: 'transform 0.12s ease'
@@ -1423,8 +1416,8 @@ export default function Home() {
             display: 'flex', alignItems: 'center', flexWrap: 'wrap',
             gap: isMobile ? '10px' : '18px',
             marginTop: '10px', padding: '9px 12px',
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.07)',
+            background: withAlpha(white,0.03),
+            border: `1px solid ${withAlpha(white,0.07)}`,
             borderRadius: '7px'
           }}>
             {[
@@ -1493,8 +1486,8 @@ export default function Home() {
             {similarTo && (
               <span style={{
                 display: 'inline-flex', alignItems: 'center', gap: '6px',
-                background: 'rgba(178,130,240,0.14)',
-                border: '1px solid rgba(178,130,240,0.5)',
+                background: withAlpha(accentSimilar,0.14),
+                border: `1px solid ${withAlpha(accentSimilar,0.5)}`,
                 borderRadius: '6px',
                 padding: '4px 8px 4px 9px',
                 fontSize: '12.5px', color: accentVioletLighter, fontWeight: 500
@@ -1515,8 +1508,8 @@ export default function Home() {
             {film && (
               <span style={{
                 display: 'inline-flex', alignItems: 'center', gap: '6px',
-                background: 'rgba(111,163,184,0.12)',
-                border: '1px solid rgba(111,163,184,0.45)',
+                background: withAlpha(accentFilm,0.12),
+                border: `1px solid ${withAlpha(accentFilm,0.45)}`,
                 borderRadius: '6px',
                 padding: '4px 8px 4px 9px',
                 fontSize: '12.5px', color: accentBlueLight, fontWeight: 500
@@ -1537,8 +1530,8 @@ export default function Home() {
             {ar && (
               <span style={{
                 display: 'inline-flex', alignItems: 'center', gap: '6px',
-                background: 'rgba(125,211,200,0.12)',
-                border: '1px solid rgba(125,211,200,0.45)',
+                background: withAlpha(accentTeal,0.12),
+                border: `1px solid ${withAlpha(accentTeal,0.45)}`,
                 borderRadius: '6px',
                 padding: '4px 8px 4px 9px',
                 fontSize: '12.5px', color: accentTeal, fontWeight: 500
@@ -1562,8 +1555,8 @@ export default function Home() {
             {chips.map(chip => (
               <span key={chip} title={`Exact tag — showing only photos actually tagged “${chip}”`} style={{
                 display: 'inline-flex', alignItems: 'center', gap: '6px',
-                background: 'rgba(201,162,83,0.12)',
-                border: '1px solid rgba(201,162,83,0.35)',
+                background: withAlpha(primaryDim,0.12),
+                border: `1px solid ${withAlpha(primaryDim,0.35)}`,
                 borderRadius: '6px',
                 padding: '4px 8px 4px 9px',
                 fontSize: '12.5px', color: primaryDim, fontWeight: 500
@@ -1588,8 +1581,8 @@ export default function Home() {
                 title={`Describe-it search — finds photos tagged any of: ${nl.tags.join(', ')}`}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '6px',
-                  background: 'rgba(139,124,246,0.12)',
-                  border: '1px dashed rgba(139,124,246,0.45)',
+                  background: withAlpha(accentViolet,0.12),
+                  border: `1px dashed ${withAlpha(accentViolet,0.45)}`,
                   borderRadius: '6px',
                   padding: '4px 8px 4px 9px',
                   fontSize: '12.5px', color: accentVioletLight,
@@ -1619,8 +1612,8 @@ export default function Home() {
                 title={`On-set notes search — finds photos whose Camera/Lens/Filter/Stop/On-Set Notes mention “${phrase}”`}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '6px',
-                  background: 'rgba(224,147,90,0.14)',
-                  border: '1px solid rgba(224,147,90,0.45)',
+                  background: withAlpha(accentOrange,0.14),
+                  border: `1px solid ${withAlpha(accentOrange,0.45)}`,
                   borderRadius: '6px',
                   padding: '4px 8px 4px 9px',
                   fontSize: '12.5px', color: accentOrange, fontWeight: 500
@@ -1664,8 +1657,8 @@ export default function Home() {
           <div style={{
             display: 'flex', gap: '8px', marginTop: '10px',
             padding: '8px 12px',
-            background: 'rgba(139,124,246,0.07)',
-            border: '1px solid rgba(139,124,246,0.22)',
+            background: withAlpha(accentViolet,0.07),
+            border: `1px solid ${withAlpha(accentViolet,0.22)}`,
             borderRadius: '7px',
             fontSize: '11.5px', color: accentVioletLight, lineHeight: 1.55
           }}>
@@ -1687,8 +1680,8 @@ export default function Home() {
           <div style={{
             display: 'flex', gap: '8px', marginTop: '10px',
             padding: '8px 12px',
-            background: 'rgba(224,147,90,0.07)',
-            border: '1px solid rgba(224,147,90,0.22)',
+            background: withAlpha(accentOrange,0.07),
+            border: `1px solid ${withAlpha(accentOrange,0.22)}`,
             borderRadius: '7px',
             fontSize: '11.5px', color: accentOrange, lineHeight: 1.55
           }}>
@@ -1706,8 +1699,8 @@ export default function Home() {
           <div style={{
             display: 'flex', alignItems: 'center', gap: '10px',
             marginTop: '12px', padding: '9px 13px',
-            background: 'rgba(178,130,240,0.08)',
-            border: '1px solid rgba(178,130,240,0.28)',
+            background: withAlpha(accentSimilar,0.08),
+            border: `1px solid ${withAlpha(accentSimilar,0.28)}`,
             borderRadius: '8px',
             fontSize: '12px', color: accentVioletLighter
           }}>
@@ -1728,7 +1721,7 @@ export default function Home() {
       {/* ── Result count bar ────────────────────────────────────────────────── */}
       <div style={{
         padding: isMobile ? '10px 14px' : '10px 20px',
-        borderBottom: '1px solid rgba(255,255,255,0.065)',
+        borderBottom: `1px solid ${withAlpha(white,0.065)}`,
         display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', rowGap: '8px'
       }}>
         <span style={{
@@ -1751,7 +1744,7 @@ export default function Home() {
         {loading && (
           <span style={{
             width: '12px', height: '12px',
-            border: '2px solid rgba(201,162,83,0.2)',
+            border: `2px solid ${withAlpha(primaryDim,0.2)}`,
             borderTopColor: primaryDim,
             borderRadius: '50%',
             display: 'inline-block',
@@ -1771,8 +1764,8 @@ export default function Home() {
             onClick={() => setRemovingTag(chip)}
             title={`Take the tag “${chip}” off every photo in these results. The photos themselves are not touched.`}
             style={{
-              background: 'rgba(217,164,65,0.10)',
-              border: '1px solid rgba(217,164,65,0.35)',
+              background: withAlpha(primary,0.10),
+              border: `1px solid ${withAlpha(primary,0.35)}`,
               color: warning, borderRadius: '7px', padding: '5px 11px',
               cursor: 'pointer', fontSize: '11.5px', fontFamily: 'inherit'
             }}
@@ -1851,14 +1844,14 @@ export default function Home() {
                 <Link key={i} to="/account" style={{
                   display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 14px',
                   textDecoration: 'none', borderRadius: '10px',
-                  borderBottom: i < 2 ? '1px solid rgba(255,255,255,0.05)' : 'none'
+                  borderBottom: i < 2 ? `1px solid ${withAlpha(white,0.05)}` : 'none'
                 }}>
                   <div style={{
                     width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: '13px', fontWeight: 700,
-                    background: step.done ? 'rgba(127,184,127,0.15)' : 'rgba(201,162,83,0.1)',
-                    border: `1px solid ${step.done ? 'rgba(127,184,127,0.5)' : 'rgba(201,162,83,0.35)'}`,
+                    background: step.done ? withAlpha(success,0.15) : withAlpha(primaryDim,0.1),
+                    border: `1px solid ${step.done ? withAlpha(success,0.5) : withAlpha(primaryDim,0.35)}`,
                     color: step.done ? success : primaryDim
                   }}>
                     {step.done ? '✓' : i + 1}
@@ -1904,7 +1897,7 @@ export default function Home() {
                 onClick={clearSimilar}
                 style={{
                   fontSize: '12px', color: warning, background: 'none',
-                  border: '1px solid rgba(201,162,83,0.3)',
+                  border: `1px solid ${withAlpha(primaryDim,0.3)}`,
                   borderRadius: '7px', padding: '7px 14px',
                   cursor: 'pointer', fontFamily: 'inherit'
                 }}
@@ -1916,7 +1909,7 @@ export default function Home() {
                 onClick={clearAll}
                 style={{
                   fontSize: '12px', color: warning, background: 'none',
-                  border: '1px solid rgba(201,162,83,0.3)',
+                  border: `1px solid ${withAlpha(primaryDim,0.3)}`,
                   borderRadius: '7px', padding: '7px 14px',
                   cursor: 'pointer', fontFamily: 'inherit'
                 }}
@@ -1973,7 +1966,7 @@ export default function Home() {
                     borderRadius: '6px',
                     overflow: 'hidden',
                     cursor: 'pointer',
-                    border: isSelected ? `2px solid ${tertiary}` : '1px solid rgba(255,255,255,0.04)',
+                    border: isSelected ? `2px solid ${tertiary}` : `1px solid ${withAlpha(white,0.04)}`,
                     transition: 'transform 0.15s ease'
                   }}
                   onMouseEnter={e => {
@@ -2004,7 +1997,7 @@ export default function Home() {
                   {/* Gradient overlay */}
                   <div style={{
                     position: 'absolute', inset: 0,
-                    background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.78) 100%)',
+                    background: `linear-gradient(180deg, ${withAlpha(black,0)} 40%, ${withAlpha(black,0.78)} 100%)`,
                     pointerEvents: 'none'
                   }} />
 
@@ -2025,10 +2018,10 @@ export default function Home() {
                         background: 'none', border: 'none', cursor: 'pointer',
                         padding: isMobile ? '11px' : '4px', lineHeight: 1, zIndex: 2,
                         fontSize: img.is_favorite ? '13px' : '14px',
-                        color: img.is_favorite ? warning : 'rgba(239,234,221,0.65)',
+                        color: img.is_favorite ? warning : withAlpha(onSurfaceWarm,0.65),
                         opacity: img.is_favorite ? 1 : (isMobile ? 0.55 : 0),
                         transition: 'opacity 120ms ease',
-                        filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                        filter: `drop-shadow(0 1px 2px ${withAlpha(black,0.7)})`
                       }}
                     >★</button>
                   )}
@@ -2036,7 +2029,7 @@ export default function Home() {
                     <span style={{
                       position: 'absolute', top: '6px', right: '7px',
                       color: warning, fontSize: '13px',
-                      filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
+                      filter: `drop-shadow(0 1px 2px ${withAlpha(black,0.7)})`
                     }}>★</span>
                   )}
                   {/* Similarity badge — only shown while browsing "Find Similar" results */}
@@ -2045,8 +2038,8 @@ export default function Home() {
                       position: 'absolute', bottom: '7px', right: '7px',
                       fontFamily: "'JetBrains Mono', monospace",
                       fontSize: '9px', color: accentVioletLighter,
-                      background: 'rgba(30,20,45,0.55)',
-                      border: '1px solid rgba(178,130,240,0.35)',
+                      background: withAlpha(overlayViolet,0.55),
+                      border: `1px solid ${withAlpha(accentSimilar,0.35)}`,
                       padding: '2px 6px', borderRadius: '4px'
                     }}>
                       {Math.round(img.similarity * 100)}%
@@ -2060,7 +2053,7 @@ export default function Home() {
                       width: '18px', height: '18px', borderRadius: '50%',
                       background: tertiary,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.5)'
+                      boxShadow: `0 1px 3px ${withAlpha(black,0.5)}`
                     }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
                         stroke={onTertiary} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -2081,7 +2074,7 @@ export default function Home() {
             position: 'fixed',
             left: dragRect.left, top: dragRect.top,
             width: dragRect.width, height: dragRect.height,
-            background: 'rgba(184,206,161,0.14)',
+            background: withAlpha(tertiary,0.14),
             border: `1px solid ${tertiary}`,
             pointerEvents: 'none',
             zIndex: 500
@@ -2189,7 +2182,7 @@ export default function Home() {
           color: onSurfaceWarm,
           zIndex: 1000,
           maxWidth: '320px',
-          boxShadow: '0 12px 32px rgba(0,0,0,0.45)'
+          boxShadow: `0 12px 32px ${withAlpha(black,0.45)}`
         }}
         onClick={() => setShowDuplicates(true)}
         onMouseEnter={e => e.currentTarget.style.background = surfaceContainerHover}

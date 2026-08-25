@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { error as errorColor, onPrimary, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerMuted } from '../theme';
+import { black, error as errorColor, onPrimary, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerMuted, white, withAlpha } from '../theme';
 
 // How many ids we hand the server in one request. Matches SQL_PARAM_CHUNK in
 // backend/app.py — big id lists get sliced up there too, and batching here as
@@ -94,7 +94,7 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
     <div
       onClick={() => !busy && onClose()}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.62),
         zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '20px'
       }}
@@ -108,7 +108,7 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
           width: 'min(920px, 100%)',
           maxHeight: '86vh',
           display: 'flex', flexDirection: 'column',
-          boxShadow: '0 24px 60px rgba(0,0,0,0.65)',
+          boxShadow: `0 24px 60px ${withAlpha(black,0.65)}`,
           animation: 'fapop 0.12s ease'
         }}
       >
@@ -192,7 +192,7 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
                       style={{
                         position: 'relative', width: '100%', aspectRatio: '1',
                         borderRadius: '5px', overflow: 'hidden', background: surfaceContainerMuted,
-                        border: '1px solid rgba(255,255,255,0.06)'
+                        border: `1px solid ${withAlpha(white,0.06)}`
                       }}
                     >
                       <img
@@ -241,7 +241,7 @@ export default function TagRemovalPreview({ value, filterParams, onClose, onRemo
             onClick={runRemoval}
             disabled={!totalChosen || busy}
             style={{
-              background: totalChosen && !busy ? primary : 'rgba(217,164,65,0.22)',
+              background: totalChosen && !busy ? primary : withAlpha(primary,0.22),
               color: totalChosen && !busy ? onPrimary : outline,
               border: 'none', borderRadius: '8px', padding: '8px 18px',
               fontSize: '12.5px', fontWeight: 600,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addImagesToDeck } from '../deckAdd';
-import { danger, onPrimary, onSurface, outline, outlineSubtle, outlineVariant, primary, surfaceBright, surfaceContainerHigh, surfaceContainerLowAlt, surfaceContainerLowestAlt, tertiary } from '../theme';
+import { black, danger, onPrimary, onSurface, outline, outlineSubtle, outlineVariant, primary, surfaceBright, surfaceContainerHigh, surfaceContainerLowAlt, surfaceContainerLowestAlt, tertiary, withAlpha } from '../theme';
 
 // ── AddPhotosModal — Frame Atlas V46 ─────────────────────────────────────────
 // Pick photos out of your library and drop them into a deck, without leaving
@@ -165,7 +165,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)',
+        position: 'fixed', inset: 0, background: withAlpha(black,0.72),
         zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '24px',
       }}
@@ -176,7 +176,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
           background: surfaceContainerLowAlt, border: `1px solid ${outlineSubtle}`, borderRadius: '14px',
           width: 'min(1080px, 100%)', height: 'min(760px, 100%)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+          boxShadow: `0 24px 64px ${withAlpha(black,0.6)}`,
         }}
       >
         {/* Header */}
@@ -213,7 +213,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                 key={chip}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '7px',
-                  background: 'rgba(217,164,65,0.14)', border: '1px solid rgba(217,164,65,0.5)',
+                  background: withAlpha(primary,0.14), border: `1px solid ${withAlpha(primary,0.5)}`,
                   color: primary, borderRadius: '6px', padding: '4px 9px', fontSize: '12px',
                 }}
               >
@@ -252,7 +252,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
             <div style={{
               position: 'absolute', top: 'calc(100% - 4px)', left: '22px', right: '22px',
               background: surfaceContainerHigh, border: `1px solid ${outlineVariant}`, borderRadius: '10px',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 20,
+              boxShadow: `0 8px 32px ${withAlpha(black,0.5)}`, zIndex: 20,
               maxHeight: '240px', overflowY: 'auto',
             }}>
               {auto.map(s => (
@@ -282,7 +282,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
           {loadError && (
             <div style={{
-              background: 'rgba(207,113,82,0.08)', border: '1px solid rgba(207,113,82,0.3)',
+              background: withAlpha(danger,0.08), border: `1px solid ${withAlpha(danger,0.3)}`,
               color: danger, borderRadius: '8px', padding: '10px 12px',
               fontSize: '12.5px', marginBottom: '14px',
             }}>
@@ -334,7 +334,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
                   {already && (
                     <span style={{
                       position: 'absolute', bottom: '4px', left: '4px', right: '4px',
-                      background: 'rgba(0,0,0,0.72)', color: tertiary,
+                      background: withAlpha(black,0.72), color: tertiary,
                       fontSize: '10px', borderRadius: '4px', padding: '2px 5px',
                     }}>
                       In deck
@@ -405,7 +405,7 @@ export default function AddPhotosModal({ deckId, deckName, existingImageIds, onC
             onClick={submit}
             disabled={count === 0 || adding}
             style={{
-              background: count > 0 && !adding ? primary : 'rgba(217,164,65,0.2)',
+              background: count > 0 && !adding ? primary : withAlpha(primary,0.2),
               color: count > 0 && !adding ? onPrimary : outline,
               border: 'none', borderRadius: '8px', padding: '10px 22px',
               fontSize: '13px', fontWeight: 700, fontFamily: 'inherit',

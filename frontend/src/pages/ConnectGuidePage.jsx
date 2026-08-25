@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outlineVariant, primary, primaryDim, surfaceContainerLow, warning } from '../theme';
+import { onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outlineVariant, primary, primaryDim, surfaceContainerLow, warning, white, withAlpha } from '../theme';
 
 // V17: the guide now walks through the "share your folder with the robot
 // email" flow (how personal libraries actually connect). The old Google
@@ -69,8 +69,8 @@ function StepCard({ step }) {
     <div style={{ background: surfaceContainerLow, border: `1px solid ${outlineVariant}`, borderRadius: '12px', padding: '20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
         <div style={{
-          width: '24px', height: '24px', borderRadius: '50%', background: 'rgba(201,162,83,0.15)',
-          border: '1px solid rgba(201,162,83,0.4)', color: primaryDim, fontSize: '12px', fontWeight: 700,
+          width: '24px', height: '24px', borderRadius: '50%', background: withAlpha(primaryDim,0.15),
+          border: `1px solid ${withAlpha(primaryDim,0.4)}`, color: primaryDim, fontSize: '12px', fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
         }}>
           {step.n}
@@ -83,7 +83,7 @@ function StepCard({ step }) {
       <img
         src={step.image}
         alt=""
-        style={{ width: '100%', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', display: 'block' }}
+        style={{ width: '100%', borderRadius: '8px', border: `1px solid ${withAlpha(white,0.08)}`, display: 'block' }}
         onError={e => { e.currentTarget.style.display = 'none'; }}
       />
     </div>
@@ -128,8 +128,8 @@ export default function ConnectGuidePage() {
       {robotEmail && (
         <div style={{
           display: 'flex', gap: '8px', alignItems: 'stretch', marginBottom: '24px',
-          padding: '14px 16px', background: 'rgba(201,162,83,0.06)',
-          border: '1px solid rgba(201,162,83,0.25)', borderRadius: '10px'
+          padding: '14px 16px', background: withAlpha(primaryDim,0.06),
+          border: `1px solid ${withAlpha(primaryDim,0.25)}`, borderRadius: '10px'
         }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em', color: onSurfaceFaint, marginBottom: '6px' }}>
@@ -140,7 +140,7 @@ export default function ConnectGuidePage() {
             </code>
           </div>
           <button onClick={copyEmail} style={{
-            background: 'none', border: '1px solid rgba(217,164,65,0.4)', color: primary,
+            background: 'none', border: `1px solid ${withAlpha(primary,0.4)}`, color: primary,
             borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer',
             fontFamily: 'inherit', alignSelf: 'center'
           }}>
@@ -165,8 +165,8 @@ export default function ConnectGuidePage() {
       </div>
 
       <div style={{
-        marginTop: '20px', padding: '14px 16px', background: 'rgba(255,255,255,0.03)',
-        border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px'
+        marginTop: '20px', padding: '14px 16px', background: withAlpha(white,0.03),
+        border: `1px solid ${withAlpha(white,0.08)}`, borderRadius: '10px'
       }}>
         <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: 0, lineHeight: 1.6 }}>
           Still stuck? Message Ryan directly — screenshots of whatever screen you're on make it a lot

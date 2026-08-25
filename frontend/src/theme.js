@@ -11,6 +11,21 @@
 // found already in heavy use across the app (frequency counts in DESIGN.md);
 // added here as real tokens rather than left as scattered hex.
 
+// Turns a token hex into an rgba() string at the given opacity — V69, for
+// centralizing the ~380 rgba(...) translucency variants (hover states,
+// borders, overlay backdrops) that were hand-typed as separate RGB triples
+// copy-pasted FROM these same hex values. Ties every translucent variant
+// back to its source token: change the token, every alpha derived from it
+// updates too, and a typo'd RGB triple (e.g. one digit off from its own
+// token) becomes structurally impossible.
+export function withAlpha(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 // ── Surfaces (backgrounds and panels) ───────────────────────────────────────
 // Full page/screen canvases — the app shell, auth screens, and full-screen
 // editors (Storyboard, Crop). Lighter than pure near-black (V52/V55) so dark
@@ -43,6 +58,13 @@ export const surfaceContainerInput = '#0f1013';        // AccountPage's own inpu
 export const surfaceContainerCrop = '#111113';         // CropModal side panel
 export const surfaceContainerHover = '#222226';        // autocomplete row hover/highlight (Home)
 export const surfaceContainerDivider = '#4a4a52';      // CropModal workspace panes + the 1px gutter between them
+// V69: pure white/black, for withAlpha() call sites that were previously a
+// bare rgba(255,255,255,...) or rgba(0,0,0,...) literal — hairline borders,
+// modal backdrops, drop shadows. Not really "surfaces" in the Material sense
+// but grouped here since nothing else in this file is a better fit.
+export const white = '#ffffff';
+export const black = '#000000';
+export const presentationControlBg = '#141416';       // PresentationMode's floating nav buttons/pill
 
 // Border shades subtler than outlineVariant (#44474f)
 export const outlineSubtle = '#33353b';                // modal/panel borders
@@ -122,6 +144,13 @@ export const accentBlueLight = '#8fc3d8';      // aspect-ratio suggestions (Home
 export const accentOrange = '#e0935a';         // note/film suggestions (Home)
 export const onSurfaceCool = '#aab2c0';        // offline-banner text (DeckDetail)
 export const accentBlueMuted = '#7fa9d9';       // Recent view accent (CollectionPage)
+// V69: found via the rgba() survey — each was already a repeated pattern
+// (a tinted chip background/border pair), just never given a flat-hex name
+// because the flat hex form itself never appeared, only rgba(...) variants.
+export const offlineAccent = '#8c96aa';         // offline-mode banners (App shell, DecksPage, DeckDetail)
+export const accentSimilar = '#b282f0';         // "Similar to" chip + similarity badge border (Home)
+export const overlayViolet = '#1e142d';         // similarity badge's dark backdrop, pairs with accentSimilar
+export const accentFilm = '#6fa3b8';            // film chip background/border (Home)
 
 // ── Color-search swatch picker ──────────────────────────────────────────
 // A deliberately multi-hue palette — NOT app chrome, kept separate from the
