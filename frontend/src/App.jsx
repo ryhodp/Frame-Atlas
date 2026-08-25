@@ -22,7 +22,7 @@ import InviteAcceptPage from './pages/InviteAcceptPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import { ToastProvider } from './ToastContext'
 import { SyncProvider } from './SyncContext'
-import { PAGE_BG } from './theme'
+import { PAGE_BG, onSurface, onSurfaceCool, onSurfaceWarm, outline } from './theme'
 import './App.css'
 
 // Inner shell so we can read the current route (useLocation only works inside
@@ -81,7 +81,7 @@ function Shell() {
   if (backendHealthy === null || needsSetup === null || authLoading) {
     return (
       <div style={{ minHeight: '100vh', background: PAGE_BG, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <p style={{ textAlign: 'center', color: '#8e9099' }}>Connecting to backend...</p>
+        <p style={{ textAlign: 'center', color: outline }}>Connecting to backend...</p>
       </div>
     )
   }
@@ -92,8 +92,8 @@ function Shell() {
     return (
       <div style={{ minHeight: '100vh', background: PAGE_BG, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
         <div style={{ textAlign: 'center', maxWidth: '380px' }}>
-          <p style={{ color: '#e2e2e6', fontSize: '15px', marginBottom: '8px' }}>Can't reach Frame Atlas</p>
-          <p style={{ color: '#8e9099', fontSize: '13px', lineHeight: 1.6 }}>
+          <p style={{ color: onSurface, fontSize: '15px', marginBottom: '8px' }}>Can't reach Frame Atlas</p>
+          <p style={{ color: outline, fontSize: '13px', lineHeight: 1.6 }}>
             You appear to be offline. Decks you've opened before are available
             once you've signed in on this device at least once.
           </p>
@@ -120,7 +120,7 @@ function Shell() {
   return (
     <div style={{
       display: 'flex', flexDirection: isMobile ? 'column' : 'row',
-      background: PAGE_BG, color: '#efeadd',
+      background: PAGE_BG, color: onSurfaceWarm,
       height: '100vh', overflow: 'hidden',
     }}>
       {isMobile && <MobileHeader onMenuClick={() => setMobileNavOpen(true)} />}
@@ -132,7 +132,7 @@ function Shell() {
           <div style={{
             background: 'rgba(140,150,170,0.14)',
             borderBottom: '1px solid rgba(140,150,170,0.3)',
-            padding: '9px 16px', fontSize: '12px', color: '#aab2c0',
+            padding: '9px 16px', fontSize: '12px', color: onSurfaceCool,
             display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap'
           }}>
             <span>⚡ Offline — showing saved decks. Search and syncing need a connection.</span>
@@ -140,7 +140,7 @@ function Shell() {
               onClick={refresh}
               style={{
                 background: 'none', border: '1px solid rgba(140,150,170,0.5)',
-                color: '#aab2c0', borderRadius: '5px', padding: '3px 10px',
+                color: onSurfaceCool, borderRadius: '5px', padding: '3px 10px',
                 fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
               }}
             >

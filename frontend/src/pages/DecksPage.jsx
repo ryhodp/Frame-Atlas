@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useOfflineCache } from '../hooks/useOfflineCache';
-import { PAGE_BG } from '../theme';
+import { PAGE_BG, error, onPrimary, onSurface, onSurfaceCool, onSurfaceMuted, onSurfaceVariant, outline, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary } from '../theme';
 
 // ── Confirm step — small inline modal, dark panel look (same pattern as TagModeBar) ──
 function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm, onCancel }) {
@@ -17,7 +17,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#2a2c31',
+          background: surfaceContainerHigh,
           border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: '12px',
           padding: '18px 20px',
@@ -25,7 +25,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
           boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
         }}
       >
-        <div style={{ fontSize: '13.5px', color: '#e2e2e6', lineHeight: 1.5, marginBottom: '16px' }}>
+        <div style={{ fontSize: '13.5px', color: onSurface, lineHeight: 1.5, marginBottom: '16px' }}>
           {text}
         </div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -34,7 +34,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             disabled={busy}
             style={{
               background: 'none', border: '1px solid rgba(255,255,255,0.12)',
-              color: '#9c988d', borderRadius: '6px', padding: '7px 14px',
+              color: onSurfaceMuted, borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit'
             }}
           >
@@ -46,7 +46,7 @@ function ConfirmModal({ text, confirmLabel = 'Confirm', danger, busy, onConfirm,
             style={{
               background: danger ? 'rgba(255,180,171,0.18)' : 'rgba(184,206,161,0.18)',
               border: `1px solid ${danger ? 'rgba(255,180,171,0.6)' : 'rgba(184,206,161,0.6)'}`,
-              color: danger ? '#ffb4ab' : '#b8cea1',
+              color: danger ? error : tertiary,
               borderRadius: '6px', padding: '7px 14px',
               cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit',
               opacity: busy ? 0.6 : 1
@@ -146,14 +146,14 @@ export default function DecksPage() {
           <div style={{
             background: 'rgba(140,150,170,0.12)', border: '1px solid rgba(140,150,170,0.35)',
             borderRadius: '8px', padding: '12px 14px', marginBottom: '16px',
-            fontSize: '12px', color: '#aab2c0'
+            fontSize: '12px', color: onSurfaceCool
           }}>
             ⚡ Offline — showing {decks.length} deck{decks.length === 1 ? '' : 's'} saved to this device.
           </div>
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: '16px' }}>
-          <h1 style={{ fontSize: isMobile ? '24px' : '32px', lineHeight: isMobile ? '30px' : '40px', fontWeight: 700, color: '#e2e2e6', margin: 0 }}>
+          <h1 style={{ fontSize: isMobile ? '24px' : '32px', lineHeight: isMobile ? '30px' : '40px', fontWeight: 700, color: onSurface, margin: 0 }}>
             Decks
           </h1>
 
@@ -165,8 +165,8 @@ export default function DecksPage() {
               onKeyDown={e => { if (e.key === 'Enter') createDeck(); }}
               placeholder="New deck name…"
               style={{
-                background: '#1a1c20', color: '#e2e2e6',
-                border: '1px solid #44474f',
+                background: surfaceContainerLow, color: onSurface,
+                border: `1px solid ${outlineVariant}`,
                 borderRadius: '8px', padding: '9px 12px',
                 fontSize: '14px', fontFamily: 'inherit', outline: 'none',
                 width: isMobile ? undefined : '220px',
@@ -178,8 +178,8 @@ export default function DecksPage() {
               onClick={createDeck}
               disabled={!newDeckName.trim() || creating}
               style={{
-                background: newDeckName.trim() ? '#d9a441' : 'rgba(217,164,65,0.2)',
-                color: newDeckName.trim() ? '#3d2f00' : '#8e9099',
+                background: newDeckName.trim() ? primary : 'rgba(217,164,65,0.2)',
+                color: newDeckName.trim() ? onPrimary : outline,
                 border: 'none', borderRadius: '8px',
                 padding: '9px 16px', fontSize: '14px', fontWeight: 500,
                 cursor: newDeckName.trim() ? 'pointer' : 'default',
@@ -192,11 +192,11 @@ export default function DecksPage() {
         </div>
 
         {loading ? (
-          <div style={{ color: '#8e9099', fontSize: '14px' }}>Loading decks…</div>
+          <div style={{ color: outline, fontSize: '14px' }}>Loading decks…</div>
         ) : decks.length === 0 ? (
           <div style={{
-            color: '#8e9099', fontSize: '14px',
-            background: '#1a1c20', border: '1px solid #44474f',
+            color: outline, fontSize: '14px',
+            background: surfaceContainerLow, border: `1px solid ${outlineVariant}`,
             borderRadius: '12px', padding: '32px', textAlign: 'center'
           }}>
             No decks yet. Create one above to start building a lookbook.
@@ -240,8 +240,8 @@ function DeckCard({ deck, onOpen, onDelete }) {
     <div
       onClick={onOpen}
       style={{
-        background: '#1a1c20',
-        border: '1px solid #44474f',
+        background: surfaceContainerLow,
+        border: `1px solid ${outlineVariant}`,
         borderRadius: '12px',
         padding: '16px',
         cursor: 'pointer',
@@ -264,7 +264,7 @@ function DeckCard({ deck, onOpen, onDelete }) {
           style={{
             position: 'absolute', top: '10px', right: '10px',
             background: 'rgba(0,0,0,0.5)', border: 'none',
-            color: '#ffb4ab', borderRadius: '6px',
+            color: error, borderRadius: '6px',
             width: '24px', height: '24px',
             cursor: 'pointer', fontSize: '15px', lineHeight: 1,
             zIndex: 2
@@ -277,7 +277,7 @@ function DeckCard({ deck, onOpen, onDelete }) {
             position: 'absolute', top: '10px', right: '10px',
             background: 'rgba(184,206,161,0.18)',
             border: '1px solid rgba(184,206,161,0.5)',
-            color: '#b8cea1', borderRadius: '6px',
+            color: tertiary, borderRadius: '6px',
             padding: '3px 8px',
             fontSize: '10.5px', lineHeight: 1.4,
             zIndex: 2, whiteSpace: 'nowrap'
@@ -296,7 +296,7 @@ function DeckCard({ deck, onOpen, onDelete }) {
         aspectRatio: '1',
         borderRadius: '8px',
         overflow: 'hidden',
-        background: '#111317',
+        background: surfaceContainerLowestAlt,
         marginBottom: '12px'
       }}>
         {Array.from({ length: 4 }).map((_, i) => (
@@ -308,15 +308,15 @@ function DeckCard({ deck, onOpen, onDelete }) {
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             />
           ) : (
-            <div key={i} style={{ width: '100%', height: '100%', background: '#2a2c31' }} />
+            <div key={i} style={{ width: '100%', height: '100%', background: surfaceContainerHigh }} />
           )
         ))}
       </div>
 
-      <div style={{ fontSize: '16px', fontWeight: 500, color: '#e2e2e6', marginBottom: '4px' }}>
+      <div style={{ fontSize: '16px', fontWeight: 500, color: onSurface, marginBottom: '4px' }}>
         {deck.name}
       </div>
-      <div style={{ fontSize: '13px', color: '#c4c6d0' }}>
+      <div style={{ fontSize: '13px', color: onSurfaceVariant }}>
         {deck.image_count} photo{deck.image_count === 1 ? '' : 's'}
       </div>
     </div>

@@ -5,7 +5,7 @@ import TagModeBar from '../components/TagModeBar';
 import CropModal from '../components/CropModal';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { PAGE_BG } from '../theme';
+import { PAGE_BG, accentBlueMuted, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onTertiary, surfaceContainerWarmDark, tertiary, warning } from '../theme';
 
 // Two personalities in one page. view="favorites" shows starred images
 // (click the star to unstar); view="recent" shows images added within a
@@ -16,14 +16,14 @@ const VIEW_CONFIG = {
     title: 'Favorites',
     subtitle: 'Every image you’ve starred. Click the star to unstar.',
     icon: '★',
-    accent: '#dcbd76',
+    accent: warning,
     emptyText: 'No favorites yet — open any image and hit ☆ Favorite.',
   },
   recent: {
     title: 'Recently Added',
     subtitle: 'Images added to your library within the window below.',
     icon: null,
-    accent: '#7fa9d9',
+    accent: accentBlueMuted,
     emptyText: 'Nothing added in this window — try dragging the slider further back.',
   },
 };
@@ -272,7 +272,7 @@ export default function CollectionPage({ view }) {
       background: PAGE_BG,
       minHeight: '100%',
       fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
-      color: '#efeadd'
+      color: onSurfaceWarm
     }}>
       {/* ── Select Mode header (only when tagMode is on) ──────────────────── */}
       {tagMode && (
@@ -311,12 +311,12 @@ export default function CollectionPage({ view }) {
             {cfg.title}
             <span style={{
               fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '13px', fontWeight: 400, color: '#9c988d'
+              fontSize: '13px', fontWeight: 400, color: onSurfaceMuted
             }}>
               {images.length}
             </span>
           </h2>
-          <p style={{ fontSize: '12.5px', color: '#9c988d', margin: 0, maxWidth: '560px' }}>
+          <p style={{ fontSize: '12.5px', color: onSurfaceMuted, margin: 0, maxWidth: '560px' }}>
             {cfg.subtitle}
           </p>
         </div>
@@ -324,8 +324,8 @@ export default function CollectionPage({ view }) {
         {/* Day-range slider — recent view only */}
         {view === 'recent' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, width: '260px' }}>
-            <span style={{ fontSize: '12px', color: '#9c988d', whiteSpace: 'nowrap' }}>
-              Last <strong style={{ color: '#efeadd' }}>{days}</strong> day{days === 1 ? '' : 's'}
+            <span style={{ fontSize: '12px', color: onSurfaceMuted, whiteSpace: 'nowrap' }}>
+              Last <strong style={{ color: onSurfaceWarm }}>{days}</strong> day{days === 1 ? '' : 's'}
             </span>
             <input
               type="range"
@@ -343,7 +343,7 @@ export default function CollectionPage({ view }) {
       {/* Grid */}
       <div style={{ padding: '16px' }}>
         {loading && (
-          <div style={{ padding: '40px', textAlign: 'center', fontSize: '13px', color: '#65625a' }}>
+          <div style={{ padding: '40px', textAlign: 'center', fontSize: '13px', color: onSurfaceFaint }}>
             Loading…
           </div>
         )}
@@ -351,10 +351,10 @@ export default function CollectionPage({ view }) {
         {!loading && images.length === 0 && (
           <div style={{
             padding: '80px 20px', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', gap: '10px', color: '#65625a'
+            alignItems: 'center', gap: '10px', color: onSurfaceFaint
           }}>
             <span style={{ fontSize: '32px', opacity: 0.4, color: cfg.accent }}>{cfg.icon}</span>
-            <p style={{ fontSize: '14px', color: '#9c988d', margin: 0 }}>{cfg.emptyText}</p>
+            <p style={{ fontSize: '14px', color: onSurfaceMuted, margin: 0 }}>{cfg.emptyText}</p>
           </div>
         )}
 
@@ -380,11 +380,11 @@ export default function CollectionPage({ view }) {
                     position: 'relative',
                     width: '100%',
                     aspectRatio: `${img.ar_float || 1.78}`,
-                    background: '#141318',
+                    background: surfaceContainerWarmDark,
                     borderRadius: '6px',
                     overflow: 'hidden',
                     cursor: 'pointer',
-                    border: isSelected ? '2px solid #b8cea1' : '1px solid rgba(255,255,255,0.04)',
+                    border: isSelected ? `2px solid ${tertiary}` : '1px solid rgba(255,255,255,0.04)',
                     transition: 'transform 0.15s ease'
                   }}
                   onMouseEnter={e => {
@@ -431,7 +431,7 @@ export default function CollectionPage({ view }) {
                         background: 'none', border: 'none', cursor: 'pointer',
                         padding: isMobile ? '11px' : '4px', lineHeight: 1, zIndex: 2,
                         fontSize: img.is_favorite ? '13px' : '14px',
-                        color: img.is_favorite ? '#dcbd76' : 'rgba(239,234,221,0.65)',
+                        color: img.is_favorite ? warning : 'rgba(239,234,221,0.65)',
                         opacity: img.is_favorite ? 1 : (isMobile ? 0.55 : 0),
                         transition: 'opacity 120ms ease',
                         filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
@@ -441,7 +441,7 @@ export default function CollectionPage({ view }) {
                   {view !== 'favorites' && tagMode && img.is_favorite && (
                     <span style={{
                       position: 'absolute', top: '6px', right: '7px',
-                      color: '#dcbd76', fontSize: '13px',
+                      color: warning, fontSize: '13px',
                       filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))'
                     }}>★</span>
                   )}
@@ -477,12 +477,12 @@ export default function CollectionPage({ view }) {
                     <span style={{
                       position: 'absolute', top: '6px', left: '7px',
                       width: '18px', height: '18px', borderRadius: '50%',
-                      background: '#b8cea1',
+                      background: tertiary,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       boxShadow: '0 1px 3px rgba(0,0,0,0.5)'
                     }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-                        stroke="#243516" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        stroke={onTertiary} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     </span>

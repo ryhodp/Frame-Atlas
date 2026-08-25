@@ -123,6 +123,7 @@ export const dangerWarmAlt = '#e07a55';        // CropModal destructive ghost bu
 export const accentBlueLight = '#8fc3d8';      // aspect-ratio suggestions (Home)
 export const accentOrange = '#e0935a';         // note/film suggestions (Home)
 export const onSurfaceCool = '#aab2c0';        // offline-banner text (DeckDetail)
+export const accentBlueMuted = '#7fa9d9';       // Recent view accent (CollectionPage)
 
 // ── Color-search swatch picker ──────────────────────────────────────────
 // A deliberately multi-hue palette — NOT app chrome, kept separate from the

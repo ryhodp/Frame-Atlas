@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback } from 'react';
+import { danger, primary, tertiary } from './theme';
 
 const ToastContext = createContext(null);
 
@@ -63,17 +64,17 @@ function ToastContainer({ toasts }) {
             ...(toast.type === 'success' && {
               background: 'rgba(184,206,161,0.18)',
               border: '1px solid rgba(184,206,161,0.4)',
-              color: '#b8cea1',
+              color: tertiary,
             }),
             ...(toast.type === 'error' && {
               background: 'rgba(207,113,82,0.18)',
               border: '1px solid rgba(207,113,82,0.4)',
-              color: '#cf7152',
+              color: danger,
             }),
             ...(toast.type === 'info' && {
               background: 'rgba(217,164,65,0.18)',
               border: '1px solid rgba(217,164,65,0.4)',
-              color: '#d9a441',
+              color: primary,
             }),
           }}
         >
