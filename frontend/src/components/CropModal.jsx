@@ -6,7 +6,7 @@ import {
 } from '../perspective';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useToast } from '../ToastContext';
-import { danger, dangerWarmAlt, error, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primary, primaryDim, surfaceContainerCrop, surfaceContainerDark, surfaceContainerDivider, surfaceContainerLow, surfaceContainerLowest, tertiary, warning } from '../theme';
+import { danger, dangerWarm, error, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primary, primaryDim, surfaceContainerCrop, surfaceContainerDark, surfaceContainerDivider, surfaceContainerLow, surfaceContainerLowest, tertiary, warning } from '../theme';
 
 // ── CropModal — Frame Atlas V18 ───────────────────────────────────────────────
 // The CropStudio v34 review workflow, embedded as a full-screen modal:
@@ -968,7 +968,7 @@ export default function CropModal({ images, onClose, onImageCropped }) {
                 <button
                   onClick={doDelete}
                   disabled={item?.status !== 'ready'}
-                  style={{ ...ghostBtn(dangerWarmAlt, 'rgba(224,122,85,0.55)') }}
+                  style={{ ...ghostBtn(dangerWarm, 'rgba(224,122,85,0.55)') }}
                   title="Remove this image from the batch"
                 >
                   ✕ Delete

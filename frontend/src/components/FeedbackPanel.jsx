@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { error as errorColor, onSurface, onSurfaceDim, onSurfaceMuted, onSurfaceWarmDimAlt, outline, outlineSubtle, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLowestAlt } from '../theme';
+import { error as errorColor, onSurface, onSurfaceDim, onSurfaceMuted, onSurfaceWarmDim, outline, outlineSubtle, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLowestAlt } from '../theme';
 
 // ── Owner-side Feedback panel (Day 24 / V42) ──────────────────────────────────
 // Reads GET /api/decks/<id>/feedback — the SAME shape and the SAME function
@@ -158,7 +158,7 @@ function FrameFeedback({ image, data, onDeleteComment }) {
           <div key={c.id} style={{ display: 'flex', gap: '6px', marginBottom: '5px', alignItems: 'flex-start' }}>
             <div style={{ minWidth: 0, flex: 1 }}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: onSurface }}>{c.viewer_name}</span>
-              <span style={{ fontSize: '13px', color: onSurfaceWarmDimAlt, marginLeft: '6px' }}>{c.body}</span>
+              <span style={{ fontSize: '13px', color: onSurfaceWarmDim, marginLeft: '6px' }}>{c.body}</span>
             </div>
             <button
               onClick={() => onDeleteComment(c.id)}

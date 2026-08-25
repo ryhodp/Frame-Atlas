@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { getViewerToken, getViewerName, setViewerName as saveViewerName } from '../viewerIdentity';
-import { dangerWarm, onPrimary, onSurface, onSurfaceMuted, onSurfaceWarmDimAlt, outline, outlineDim, outlineMuted, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt } from '../theme';
+import { dangerWarm, onPrimary, onSurface, onSurfaceMuted, onSurfaceWarmDim, outline, outlineDim, outlineMuted, outlineVariant, primary, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt } from '../theme';
 
 // ── Public read-only lookbook view ────────────────────────────────────────────
 // Rendered at /share/<token> with no login and no app chrome. Anyone with the
@@ -175,7 +175,7 @@ export default function SharePage() {
         {deck.feedback_enabled && (
           <div style={{ fontSize: '12.5px', color: outline, marginTop: '12px' }}>
             Pick your favorite frames and leave notes — {viewerName
-              ? <>you're leaving feedback as <strong style={{ color: onSurfaceWarmDimAlt }}>{viewerName}</strong></>
+              ? <>you're leaving feedback as <strong style={{ color: onSurfaceWarmDim }}>{viewerName}</strong></>
               : "everyone with this link can see what's picked and said"}.
           </div>
         )}
@@ -258,7 +258,7 @@ function ShareSection({ title, frames, feedbackProps }) {
             {frame.storyboard_note && (
               <div style={{
                 padding: '10px 12px', fontSize: '13px', lineHeight: 1.5,
-                color: onSurfaceWarmDimAlt, borderTop: `1px solid ${outlineDim}`,
+                color: onSurfaceWarmDim, borderTop: `1px solid ${outlineDim}`,
                 whiteSpace: 'pre-wrap'
               }}>
                 {frame.storyboard_note}
@@ -312,7 +312,7 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
             display: 'flex', alignItems: 'center', gap: '5px',
             background: picked_by_me ? 'rgba(217,164,65,0.16)' : 'none',
             border: `1px solid ${picked_by_me ? 'rgba(217,164,65,0.6)' : outlineMuted}`,
-            color: picked_by_me ? primary : onSurfaceWarmDimAlt,
+            color: picked_by_me ? primary : onSurfaceWarmDim,
             borderRadius: '999px', padding: '5px 12px',
             fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit'
           }}
@@ -343,7 +343,7 @@ function FeedbackStrip({ deckImageId, feedback, ensureName, doPick, doUnpick, do
               <div style={{ fontSize: '12px', fontWeight: 600, color: primary, marginBottom: '1px' }}>
                 {c.viewer_name}
               </div>
-              <div style={{ fontSize: '13px', color: onSurfaceWarmDimAlt, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+              <div style={{ fontSize: '13px', color: onSurfaceWarmDim, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
                 {c.body}
               </div>
             </div>

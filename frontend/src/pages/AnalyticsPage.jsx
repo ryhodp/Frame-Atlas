@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../AuthContext';
-import { heatmapTextCool, heatmapTextHot, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onSurfaceWarmMuted, primary, primaryDim, surfaceContainerDark, tertiary, warning } from '../theme';
+import { heatmapTextCool, heatmapTextHot, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onSurfaceWarmDim, primary, primaryDim, surfaceContainerDark, tertiary, warning } from '../theme';
 
 // ── Section wrapper — dark panel with an uppercase label ─────────────────────
 function Panel({ label, children, style }) {
@@ -60,7 +60,7 @@ function BarList({ items, color, maxBars = 10 }) {
         <div key={item.value} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{
             width: '110px', flexShrink: 0, textAlign: 'right',
-            fontSize: '11.5px', color: onSurfaceWarmMuted,
+            fontSize: '11.5px', color: onSurfaceWarmDim,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
           }}>
             {item.value}
@@ -268,7 +268,7 @@ function AllUsersPanel() {
     textAlign: 'left', fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
     color: onSurfaceFaint, padding: '0 14px 10px', whiteSpace: 'nowrap'
   };
-  const td = { fontSize: '12.5px', color: onSurfaceWarmMuted, padding: '10px 14px', whiteSpace: 'nowrap' };
+  const td = { fontSize: '12.5px', color: onSurfaceWarmDim, padding: '10px 14px', whiteSpace: 'nowrap' };
 
   return (
     <>

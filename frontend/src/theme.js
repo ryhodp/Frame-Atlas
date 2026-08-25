@@ -58,18 +58,16 @@ export const onSurfaceVariant = '#c4c6d0';
 export const onSurfaceWarm = '#efeadd';
 export const onSurfaceMuted = '#9c988d';   // subtitles, secondary/supporting text
 export const onSurfaceFaint = '#65625a';   // least-prominent text and icons
-// V58 (Phase 3) additions from the components pass.
-export const onSurfaceWarmDim = '#c9c6bd';     // dimmed warm text (PresentationMode captions)
-// Within one RGB step of onSurfaceWarmDim — visually identical, almost
-// certainly drift rather than intent. Kept distinct so this migration stays
-// lossless; the two should be collapsed in a deliberate design pass, not here.
-export const onSurfaceWarmDimAlt = '#c9c5ba';  // comment body text (FeedbackPanel)
+// V68: onSurfaceWarmDim used to be 3 near-identical warm grays (#c9c6bd,
+// #c9c5ba, #c8c3b8 — within 1-3 RGB steps of each other, invisible to the
+// eye) kept apart during the migration so it stayed lossless. Collapsed here
+// into one token, valued at #c9c5ba (the most-used of the three, 5 call
+// sites vs. 2 and 2) — dimmed warm secondary text: presentation captions,
+// feedback comment bodies, share-page viewer name/pick label, analytics
+// table cells. The two merged names are gone; nothing imports them anymore.
+export const onSurfaceWarmDim = '#c9c5ba';
 export const onSurfaceDim = '#6b6d75';         // dim cool-gray text
 export const onSurfaceFaintCool = '#4e5058';   // faintest cool-gray text (PresentationMode filename)
-// V59 (Phase 4) additions from the mid-size pages. onSurfaceWarmMuted is a
-// third shade in the same near-identical warm-gray family as onSurfaceWarmDim
-// /onSurfaceWarmDimAlt above — same consolidation note applies to all three.
-export const onSurfaceWarmMuted = '#c8c3b8';   // table cell / stat text (AnalyticsPage)
 export const onSurfaceWarmFaint = '#8e7f77';   // disabled warm text (SettingsPage)
 
 // ── Borders ──────────────────────────────────────────────────────────────
@@ -116,10 +114,10 @@ export const accentTeal = '#7dd3c8';
 // V59 (Phase 4): tag-frequency heatmap text, hot vs. cool cell (AnalyticsPage)
 export const heatmapTextHot = '#f4e8cd';
 export const heatmapTextCool = '#d6c9a8';
-export const dangerWarm = '#e07a5f';   // inline warning text (SharePage)
-// V62: within one hex digit of dangerWarm above — same drift-not-intent case
-// as the onSurfaceWarmDim family. Kept distinct to stay lossless.
-export const dangerWarmAlt = '#e07a55';        // CropModal destructive ghost button
+// V68: dangerWarmAlt (#e07a55) merged in here — one hex digit apart from
+// this value, same drift-not-intent case as onSurfaceWarmDim above. Used for
+// inline warning text (SharePage) and the CropModal destructive ghost button.
+export const dangerWarm = '#e07a5f';
 export const accentBlueLight = '#8fc3d8';      // aspect-ratio suggestions (Home)
 export const accentOrange = '#e0935a';         // note/film suggestions (Home)
 export const onSurfaceCool = '#aab2c0';        // offline-banner text (DeckDetail)

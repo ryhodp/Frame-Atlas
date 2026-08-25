@@ -15,50 +15,61 @@ Inspired by Arc Browser, Obsidian, and Apple Photos. Every UI decision should ma
 
 ## Color System
 
-These are the exact color values. Use them by name, not by hex, wherever possible.
+These are the exact color values. Use them by name, not by hex.
 
-**Status (V56, Aug 2026):** this table is the source of truth, mirrored in
-`frontend/src/theme.js`. "Use them by name" is still not actually wired up
-app-wide — the frontend mostly hand-types raw hex at each call site rather
-than importing these tokens — but as of V56, every value below at least has a
-real exported name to migrate *to*, and the table itself matches what the
-code actually ships (verified via a full frequency scan of every hex color in
-`frontend/src`, not spot-checked). That migration is in progress, one file/
-area at a time — check `frontend/src/theme.js` for which tokens are actually
-imported anywhere yet. `surface`/`surface-dim` and `surface-container-lowest`
-were corrected in V55 (previously documented as `#111317` and `#0c0e12`, but
-the code had never actually used those values). V56 added the rest: several
-heavily-used colors were never documented at all despite being clearly
-deliberate (e.g. two text grays used 106× and 94× — more than several
-"official" tokens combined).
+**Status (V68, Aug 2026):** this table is the source of truth, and — as of
+V67 — it's no longer aspirational: every color in `frontend/src` is imported
+by name from `frontend/src/theme.js`, which this table mirrors exactly. Zero
+raw hex remains anywhere in the frontend (verified by a repo-wide grep, not
+spot-checked). The migration ran in 6 phases (V57–V67), smallest/safest
+files first; `theme.js` itself carries a version note next to each token
+group recording which phase added it. V68 collapsed 5 near-duplicate colors
+that had been kept apart during the migration to stay lossless (see the
+`on-surface-warm-dim` and `danger-warm` rows below) — the first real
+"deliberate design pass" cleanup mentioned as future work in earlier
+versions of this doc.
 
 ### Surfaces (backgrounds and panels)
 | Name | Hex | Use it for |
 |---|---|---|
-| `surface` | `#1c1e22` | Full page/screen canvases — the app shell, auth screens, Home, Favorites/Recent, Decks, image detail panel, Storyboard editor. See `frontend/src/theme.js`'s `PAGE_BG` |
-| `surface-dim` | `#1c1e22` | Same as surface — dimmed contexts |
-| `surface-bright` | `#37393e` | Highlighted surface areas |
-| `surface-container-highest` | `#37393e` | Topmost floating elements |
+| `surface` / `surface-dim` | `#1c1e22` | Full page/screen canvases — the app shell, auth screens, Home, Favorites/Recent, Decks, image detail panel, Storyboard editor. `theme.js`'s `PAGE_BG` |
+| `surface-bright` / `surface-container-highest` | `#37393e` | Topmost floating elements, highlighted surface areas |
 | `surface-container-high` | `#2a2c31` | Elevated panels, dropdowns |
 | `surface-container-low` | `#1a1c20` | Cards, panels resting on surface |
 | `surface-container-lowest` | `#0a0a0b` | Modals (Duplicate Review, Upload) and the Crop tool's full-screen editor — near-black on purpose for maximum contrast while judging an image closely |
-| `surface-container-lowest-alt` | `#111317` | Input field backgrounds specifically. Visually close to `surface-container-lowest` but a distinct value used consistently across many components — kept as its own token (V56 decision) rather than assumed to be drift and merged |
+| `surface-container-lowest-alt` | `#111317` | Input field backgrounds specifically — visually close to `surface-container-lowest` but a distinct, consistently-used value; kept as its own token rather than merged |
 | `sidebar-surface` | `#111114` | The left sidebar / mobile nav drawer |
+| `surface-container-dark` | `#18181b` | Dropdowns/popovers (ImageDetail, CropModal) |
+| `surface-container-warm-dark` | `#141318` | Warm near-black thumbnail/preview backdrop |
+| `surface-container-low-alt` | `#1b1d21` | AddPhotosModal panel |
+| `surface-container-muted` | `#3d3d42` | Progress-bar track (TagRemovalPreview) |
+| `surface-container-input` | `#0f1013` | AccountPage's own input backgrounds |
+| `surface-container-crop` | `#111113` | CropModal side panel |
+| `surface-container-hover` | `#222226` | Autocomplete row hover/highlight (Home) |
+| `surface-container-divider` | `#4a4a52` | CropModal workspace panes + the 1px gutter between them |
 
 ### Text
 | Name | Hex | Use it for |
 |---|---|---|
 | `on-surface` | `#e2e2e6` | Primary body text on cards/panels |
-| `on-surface-warm` | `#efeadd` | Primary body text on the lighter photo-grid pages (Home, Favorites/Recent, Decks) — warmer than `on-surface`, sits on `surface`/`surface-dim`. Undocumented until V56 despite being one of the most-used colors in the app (64 uses) |
+| `on-surface-warm` | `#efeadd` | Primary body text on the lighter photo-grid pages (Home, Favorites/Recent, Decks) — warmer than `on-surface` |
 | `on-surface-variant` | `#c4c6d0` | Secondary/supporting text, labels |
-| `on-surface-muted` | `#9c988d` | Subtitles, secondary/supporting text — a distinct, far more common gray than `on-surface-variant` (94 uses vs. 7). Undocumented until V56 |
-| `on-surface-faint` | `#65625a` | Least-prominent text and icons (footer hints, quiet labels) — the single most-used color in the app (106 uses), undocumented until V56 |
+| `on-surface-muted` | `#9c988d` | Subtitles, secondary/supporting text |
+| `on-surface-faint` | `#65625a` | Least-prominent text and icons (footer hints, quiet labels) |
+| `on-surface-warm-dim` | `#c9c5ba` | Dimmed warm secondary text: presentation captions, feedback comment bodies, share-page viewer name/pick label, analytics table cells. **V68:** was 3 separate near-identical tokens (`#c9c6bd`/`#c9c5ba`/`#c8c3b8`, invisible to the eye apart) kept distinct mid-migration to stay lossless — collapsed into this one value, the most-used of the three |
+| `on-surface-dim` | `#6b6d75` | Dim cool-gray text |
+| `on-surface-faint-cool` | `#4e5058` | Faintest cool-gray text (PresentationMode filename) |
+| `on-surface-warm-faint` | `#8e7f77` | Disabled warm text (SettingsPage) |
 
 ### Borders
 | Name | Hex | Use it for |
 |---|---|---|
 | `outline` | `#8e9099` | Visible borders (input fields, dividers) |
 | `outline-variant` | `#44474f` | Subtle borders (panel edges, separators) |
+| `outline-subtle` | `#33353b` | Modal/panel borders |
+| `outline-dim` | `#2c2f35` | Faint dividers (StoryboardView) |
+| `outline-muted` | `#3a3d44` | SharePage card/input borders |
+| `outline-faint` | `#35373d` | DeckDetail card borders |
 
 ### Primary — Warm Gold (the accent color)
 | Name | Hex | Use it for |
@@ -67,7 +78,7 @@ deliberate (e.g. two text grays used 106× and 94× — more than several
 | `on-primary` | `#3d2f00` | Text/icons sitting ON a gold background |
 | `primary-container` | `#594400` | Gold tinted backgrounds (hover states, badges) |
 | `on-primary-container` | `#ffdf9d` | Text sitting inside a gold container |
-| `primary-dim` | `#c9a253` | A dimmer gold — links, loading spinners. Added V56 |
+| `primary-dim` | `#c9a253` | A dimmer gold — links, loading spinners |
 
 ### Secondary — Warm Taupe
 | Name | Hex | Use it for |
@@ -93,7 +104,7 @@ deliberate (e.g. two text grays used 106× and 94× — more than several
 | `error-container` | `#93000a` | Error background fill |
 | `on-error-container` | `#ffdad6` | Text inside error containers |
 
-### Additional semantic accents *(undocumented until V56, already in real use)*
+### Additional semantic accents
 | Name | Hex | Use it for |
 |---|---|---|
 | `warning` | `#dcbd76` | Warning/highlight gold — distinct from `primary` |
@@ -104,9 +115,14 @@ deliberate (e.g. two text grays used 106× and 94× — more than several
 | `accent-violet-light` | `#a99bf7` | Lighter variant of `accent-violet` |
 | `accent-violet-lighter` | `#c9a8f2` | Lightest variant of `accent-violet` |
 | `accent-blue` | `#7fb3d9` | Composition-guide overlay accent |
+| `accent-blue-light` | `#8fc3d8` | Aspect-ratio suggestions (Home autocomplete) |
+| `accent-blue-muted` | `#7fa9d9` | Recent view's accent (CollectionPage) |
 | `accent-teal` | `#7dd3c8` | A secondary accent color |
-
-*(Not exhaustive — a handful of very-rarely-used one-off colors elsewhere in the app haven't been catalogued yet. They'll get named as the token migration reaches whichever file they live in, not invented speculatively ahead of time.)*
+| `accent-orange` | `#e0935a` | Note/film suggestions (Home autocomplete) |
+| `heatmap-text-hot` | `#f4e8cd` | Tag-frequency heatmap, hot (well-used) cell text |
+| `heatmap-text-cool` | `#d6c9a8` | Tag-frequency heatmap, cool (rarely-used) cell text |
+| `danger-warm` | `#e07a5f` | Inline warning text (SharePage), CropModal's destructive ghost button. **V68:** absorbed a second near-identical token (`#e07a55`, one hex digit apart) kept distinct mid-migration for the same lossless reason as `on-surface-warm-dim` above |
+| `on-surface-cool` | `#aab2c0` | Offline-banner text (App shell, DeckDetail) |
 
 ### Color-search swatch picker
 A separate, deliberately multi-hue 12-color palette (the round swatches under the search bar) — not part of the neutral/gold app-chrome system above. Lives as `SWATCH_COLORS` in `frontend/src/theme.js`.
