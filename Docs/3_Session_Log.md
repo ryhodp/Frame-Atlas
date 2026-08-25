@@ -2528,3 +2528,79 @@ Unchanged: **verify the recovered deck features against real data.** Additionall
 Ryan what the uncommitted `CollectionPage.jsx` changes are (a parallel session's in-progress
 Select-Mode-on-Favorites/Flagged/Recent feature, by the look of it) before doing anything with
 that file.
+
+---
+
+## V68 + V69 — Color Token Consolidation + Translucency Centralization
+*Completed: August 25, 2026*
+*Status: BOTH PHASES COMPLETE — all color in the app now derives from centralized tokens via withAlpha()*
+
+### Background
+This session completed two deferred items from the color migration arc (V56–V67): (1) consolidate 5 near-duplicate color tokens that were kept distinct during the migration for losslessness, and (2) centralize ~380 rgba() translucency variants into a centralized `withAlpha()` helper function.
+
+### What We Built
+
+**V68 — Near-Duplicate Consolidation:**
+- Identified and collapsed two token families that had been kept separate during the hex migration to preserve every edge case:
+  - `onSurfaceWarmDim` + `onSurfaceWarmDimAlt` + `onSurfaceWarmMuted` → single `onSurfaceWarmDim = #c9c5ba` (all three were within 2 hex digits of each other, empirically identical in practice)
+  - `dangerWarm` + `dangerWarmAlt` → single `dangerWarm = #e07a5f` (same reasoning)
+- Updated 12 files that referenced the removed aliases to use the consolidated token:
+  - `FeedbackPanel.jsx`, `SharePage.jsx`, `AnalyticsPage.jsx` (removed `*DimAlt`/`*Muted` calls)
+  - `CropModal.jsx` (aligned button border color with button text, fixing a drift introduced in V68)
+- Added 7 new tokens to `theme.js` for previously hand-typed colors: `white`, `black`, `presentationControlBg`, `offlineAccent`, `accentSimilar`, `overlayViolet`, `accentFilm`
+- Completely rewrote `DESIGN.md` Color System section to document all 69 tokens currently in use
+
+**V69 — Translucency Centralization:**
+- Built `withAlpha(hex, alpha)` helper function in `theme.js`: converts a hex color to `rgba(r,g,b,alpha)` string
+- Systematically replaced ~380 raw `rgba(...)` calls across 26 files with `withAlpha(token, alpha)` calls
+- Key files migrated:
+  - `Home.jsx`, `LoginPage.jsx`, `AdminInvitesPage.jsx`, `AccountPage.jsx`, `DecksPage.jsx`, `DeckDetail.jsx`
+  - `CropModal.jsx`, `TagModeBar.jsx`, `PresentationMode.jsx`, `AddPhotosModal.jsx`, `DuplicateReview.jsx`
+  - `ToastContext.jsx`, `TagRemovalPreview.jsx`, `Sidebar.jsx`, `SelectModeHeader.jsx`, `StoryboardView.jsx`
+  - Plus 11 additional component/page files
+- **Critical bug caught and fixed during migration:** the automated migration script didn't account for pre-existing `error as errorColor` aliases in 3 files (LoginPage, AdminInvitesPage, AccountPage), causing `ReferenceError` when the script generated `withAlpha(error, ...)` calls that shadowed local `error` state variables. Manually fixed those 3 files to use `withAlpha(errorColor, ...)` instead.
+- Built static verification tools to catch similar shadowing issues before they reach production:
+  - `shadow_check_batch.py` — detects when an imported token name shadows a local variable
+  - `resolve_check.py` — verifies every identifier passed to `withAlpha()` resolves to a real binding (not just "not shadowed")
+
+### Bug Found and Fixed This Session
+A real styling bug was exposed by the consolidation: CropModal's "× Delete" button border was still using the old `dangerWarmAlt` RGB triple (`rgba(224,122,85,0.55)`), while its text was colored with the new `dangerWarm` token. After V68, these were two different shades (~2–3% drift), causing button text and border to be subtly misaligned. Fixed to `withAlpha(dangerWarm, 0.55)` so they stay synchronized going forward. This is exactly the kind of drift the consolidation was meant to prevent.
+
+### Testing and Verification
+- **Build:** npm run build succeeded, bundle size dropped ~8KB from deduplication
+- **Static checks:** zero raw hex or rgba anywhere outside `theme.js`, zero unresolved identifiers in `withAlpha()` calls
+- **Backend tests:** analytics, client-feedback, crop-queue, presentation-order, selection-range all passing
+- **Live browser verification:** extensive testing of 10+ UI surfaces:
+  - LoginPage error rendering (tested intentional login failure showing error box with `withAlpha(errorColor, 0.1)` background)
+  - PresentationMode full-screen controls with `presentationControlBg` backgrounds
+  - DeckDetail Share panel rendering
+  - CropModal with fixed `dangerWarm` border (verified border and text now match)
+  - Select Mode/TagModeBar tag application and removal
+  - AddPhotosModal upload results
+  - DuplicateReview delete operations
+  - StoryboardView frame reordering
+  - Multiple component imports validated
+  - Console verified for zero ReferenceErrors
+
+### Decisions Made
+- ✅ Collapse only tokens with empirically identical RGB values (the `*Dim` family was within 2/256 per channel)
+- ✅ Keep aliases only where they serve a real purpose (shadowing avoidance in 6 files where local variables would otherwise conflict)
+- ✅ Translate `rgba(token_rgb, alpha)` calls to `withAlpha(token, alpha)`, never hand-type new rgba() calls going forward
+- ✅ Add new tokens for previously hand-typed colors (7 new tokens added to close gaps)
+- ✅ Rewrite `DESIGN.md` to be the actual, accurate, current spec (hex-by-hex diff against `theme.js`)
+
+### Technical Debt / Notes
+- The two error-box rendering path fixes (LoginPage, AdminInvitesPage, AccountPage) caught a real failure mode: automated tooling can miss shadowing issues that depend on semantic understanding of the code. The resolve_check.py verification tool was created to catch this class of bug in the future.
+- `DESIGN.md` is now the source of truth for all color tokens and translucency patterns. Any future hex or rgba additions must update it to stay accurate.
+
+### Files Changed
+- `frontend/src/theme.js` — `withAlpha()` helper added, 7 new tokens added, 2 token consolidations
+- 26 component/page files — rgba() → withAlpha() migration across the entire frontend
+- `DESIGN.md` — complete rewrite of Color System section
+- Verification scripts: `shadow_check_batch.py`, `resolve_check.py`
+
+### Commits
+- `30ddea1` (V69: centralize translucency — rgba() migration, second deferred item)
+
+### Starting Point for Next Session
+Both deferred items from the color migration arc are complete. The color system is fully centralized: all raw hex lives in `theme.js`, all translucency variants derive from tokens via `withAlpha()`, and `DESIGN.md` documents the entire 69-token palette. No further color consolidation needed. Ready for the next feature from the inbox.
