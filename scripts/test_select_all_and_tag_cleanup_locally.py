@@ -62,7 +62,7 @@ def main():
     sys.modules["fa_v32_app"] = mod
     spec.loader.exec_module(mod)
     mod.app.config["TESTING"] = True
-    mod.trigger_tagging = lambda *a, **k: None
+    mod.tagging.trigger_tagging = lambda *a, **k: None
     print("App imported OK.")
 
     failures = []

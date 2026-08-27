@@ -105,7 +105,7 @@ def main():
     drive = FakeDrive(jpeg)
     mod.drive.get_drive_service = lambda: drive
     mod.MediaIoBaseDownload = FakeDownloader
-    mod.trigger_tagging = lambda *a, **k: None
+    mod.tagging.trigger_tagging = lambda *a, **k: None
 
     failures = []
 

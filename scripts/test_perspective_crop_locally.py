@@ -249,7 +249,7 @@ def main():
     # Day 29: download_drive_file() moved to drive.py, so the crop worker's
     # download now resolves MediaIoBaseDownload in drive.py's namespace.
     mod.drive.MediaIoBaseDownload = FakeDownloader
-    mod.trigger_tagging = lambda *a, **k: None
+    mod.tagging.trigger_tagging = lambda *a, **k: None
     print("App imported OK (Drive faked).")
 
     failures = []

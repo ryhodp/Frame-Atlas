@@ -3063,3 +3063,99 @@ into `backend/tagging.py` (imports `core` + `gemini` + the `google.genai` client
 `_tag_progress` dict is shared mutable state and the tagging *routes* stay in `app.py` — they must
 read/write the same object the worker does (import the module, not the dict by value). Qualify call
 sites, repoint tests, suite green before and after.
+
+---
+
+## Day 32 — Tagging worker → `tagging.py` (Frame Atlas V74 complete)
+*Completed: August 27, 2026*
+*Status: DAY 32 COMPLETE — 42 Python + 3 `.mjs` green before and after; browser-check harness boots + syncs clean*
+
+### What We Built
+The Gemini auto-tag worker + its live-progress plumbing moved out of `app.py` into
+`backend/tagging.py` (346 lines).
+
+- **Moved (all 6 blocks diffed byte-for-byte against `HEAD`):** `_select_pending_for_tagging()`,
+  `_run_tagging_job_inner()`, `_run_tagging_job()`, `trigger_tagging()`, `_broadcast_progress()`,
+  the `_tag_progress` dict + `_tag_progress_lock` + `_sse_queues` + `_sse_lock`, and
+  `GEMINI_TAGGING_PROMPT` (the ~60-line tag-taxonomy prompt).
+- **Imports:** `get_db` / `GEMINI_MODEL` / `normalize_tag_value` / `clear_ai_tags` from `core`;
+  `import gemini`; `from google import genai as genai_client`; stdlib `io` / `json` / `time` /
+  `threading`; `from PIL import Image`. Nothing from `app.py`.
+- **`app.py`: 5,484 → 5,184 lines** (−300). `tagging.py` is 346.
+
+### The three decisions confirmed with Ryan (pre-coding)
+- **Qualified refs, not an accessor API.** The 6 tag-progress routes that stay in `app.py` read
+  `tagging._tag_progress` / `tagging._sse_queues` / the locks directly; the SSE streaming route
+  keeps its exact current body. ~20 one-token edits, matches Days 29–31.
+- **Just the tag loop.** `/api/interpret` (NL search) and `/api/models` (diagnostic) stay
+  untouched, so `genai_client` stays imported in `app.py` too — same both-files pattern as
+  `MediaIoBaseDownload` (Day 29). `NL_INTERPRET_PROMPT` also stays (search, not tagging).
+- **New `scripts/test_tagging_locally.py`** (36 checks) — the tag loop had zero direct coverage
+  before (8 scripts only ever *disabled* it).
+
+### Qualify + repoint (rule 2)
+`app.py` does `import tagging`. Call sites qualified: the 6 routes
+(`tag_progress_stream`, `tag_progress_snapshot`, `tag_start`, `tag_mine`, `tag_progress_mine`,
+`retry_failed`), `sync_folder_worker`'s finally block (the V48 sync→tag handoff), and the
+clip/upload routes — all now `tagging.trigger_tagging()` / `tagging._tag_progress` etc.
+The Day 28 "watch out" about a route keeping a stale *copy* of the dict reference didn't apply —
+nothing copied it; `_tag_progress` is only ever `.update()`'d, never rebound, so
+`tagging._tag_progress` in a route always resolves the live object.
+
+### Test scripts repointed — 8, one line each
+`mod.trigger_tagging = <noop>` → `mod.tagging.trigger_tagging = <noop>` in `test_bulk_delete`,
+`test_crop_queue`, `test_duplicate_color_check`, `test_personal_library`, `test_perspective_crop`,
+`test_select_all_and_tag_cleanup`, `test_sync_delete_parity`, `test_v25_clip`. Nothing patched the
+other moved names, so no other repointing needed. `test_personal_library`'s spy
+(`lambda user_id=None: tag_calls.append(user_id)`, which verifies the post-sync trigger passes the
+right owner id) still works because `mod.tagging` is the same module object `sync_folder_worker`
+calls into.
+
+### Testing
+- Baseline first on the pre-change tree: **41 Python + 3 `.mjs`, all green.**
+- After: **42 Python** (`test_tagging_locally.py` added, 36 checks) **+ 3 `.mjs`, all green.**
+  No mid-way failures.
+- **Paranoid diff:** extracted all 6 moved blocks from `HEAD:backend/app.py` and confirmed each
+  appears in `tagging.py` character-for-character (61 / 14 / 37 / 106 / 8 / 56 lines).
+- `app.py` `git diff` is exactly: +`import tagging`, +2 pointer-comment blocks, ~20 one-token
+  call-site qualifications, −300 lines of moved code. No other change.
+- `scripts/run_local_for_browser_check.py` boots clean: `[schema] OK`, `[selftest] OK`,
+  **"Sync complete. 10 new images added."**, `/api/health` 200. (That harness does NOT no-op
+  tagging, so the post-sync `tagging.trigger_tagging()` fired for real against the fake key and
+  logged per-image failures — expected, no crash.)
+- The new script exercises the real loop with a fake `genai_client`: valid JSON → normalized tags
+  (`'Cars'`→`'car'`), caption, filmography, `tagging_status='done'`, `_tag_progress` advanced,
+  `gemini_usage` row written; a bad response → image `'failed'` and the batch continues; the
+  `trigger_tagging` nothing-pending / no-key / already-running branches; `_broadcast_progress`
+  pushing a `pct`-bearing payload to a registered SSE queue.
+
+### Technical Debt / Notes
+- `genai_client` is now imported in both `app.py` and `tagging.py`. Both real (interpret + models
+  routes in app.py; the tag worker in tagging.py). When routes get blueprinted (Day 36+),
+  `/api/interpret` and `/api/models` may want their own small helper — not this session.
+- The `_run_tagging_job_inner` "complete" message still literally says *"Sync complete! Tagged N
+  images."* even for a friend's non-sync "Tag my photos" run. Pre-existing wording quirk, moved
+  verbatim, not touched.
+- One tagging run at a time app-wide (the `if _tag_progress['running']` guard is a single global).
+  Pre-existing design, moved verbatim.
+
+### Files Changed
+- `backend/tagging.py` — new, 346 lines
+- `backend/app.py` — `import tagging` added, state block + prompt + worker removed (pointer
+  comments left), ~20 call sites qualified (5,484 → 5,184 lines)
+- `scripts/test_tagging_locally.py` — new, 36 checks
+- 8 `scripts/test_*_locally.py` — `mod.trigger_tagging` → `mod.tagging.trigger_tagging`
+- `CLAUDE.md` — File Structure + new Phase 3 Day 32 subsection + CI count (41→42)
+- `docs/2_Frame_Atlas_Build_Timeline.md` — Day 32 marked complete, "How it actually shipped", summary table row
+
+### Commits
+_(pending — not yet committed or deployed)_
+
+### Starting Point for Next Session
+**Day 33 — Monthly backup → `backup.py`.** Move `run_db_backup()`, `_backup_due()`,
+`_backup_scheduler_loop()`, `start_backup_scheduler()`, `get_or_create_backups_folder()`,
+`BACKUP_FOLDER_NAME`, `KEEP_BACKUP_COUNT` (~115 lines) into `backend/backup.py` (imports
+`core` + `drive`). No dedicated test exists today — write a small `test_backup_locally.py` this
+session so the next person isn't flying blind. `app.py` calls `backup.start_backup_scheduler()` on
+boot. Done when: `backup.py` exists, suite green, and ideally one real backup confirmed in the
+Railway logs after deploy.

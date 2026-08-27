@@ -110,7 +110,7 @@ def main():
     drive = FakeDrive()
     mod.drive.get_drive_service = lambda: drive
     mod.drive.get_root_folder_id = lambda uid: "root-folder"
-    mod.trigger_tagging = lambda *a, **k: None
+    mod.tagging.trigger_tagging = lambda *a, **k: None
     print("App imported OK (Drive faked).")
 
     failures = []

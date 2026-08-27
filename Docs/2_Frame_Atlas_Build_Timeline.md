@@ -926,7 +926,7 @@ crop.
 
 ---
 
-## Day 32 — Tagging worker → `tagging.py` *(planned)*
+## Day 32 — Tagging worker → `tagging.py` *(V74 — COMPLETE)*
 
 **Goal:** The Gemini auto-tag loop and its live-progress plumbing in one file.
 
@@ -947,6 +947,24 @@ crop.
 
 **Done when:** `tagging.py` exists, routes read `tagging._tag_progress`, ~8 scripts repointed,
 suite green — including `test_personal_library_locally.py` which checks the sync-then-tag chain.
+
+**How it actually shipped (V74, August 27 2026):**
+- `backend/tagging.py` (346 lines) — the 4 worker functions + `_broadcast_progress` + the
+  `_tag_progress` / `_sse_queues` state (+ locks) + `GEMINI_TAGGING_PROMPT`. All 6 blocks diffed
+  byte-for-byte against `HEAD`. Imports `core` + `gemini` + `google.genai` + stdlib + PIL.
+- **`genai_client` stays imported in `app.py` too** — `/api/interpret` and `/api/models` are routes
+  (don't move in Phase 3) and still call it directly. `NL_INTERPRET_PROMPT` likewise stays.
+- Rule 2 (qualify + repoint). The 6 tag-progress routes + `sync_folder_worker`'s finally block +
+  the clip/upload routes read `tagging._tag_progress` / `tagging._sse_queues` / the locks and call
+  `tagging.trigger_tagging()`. `_tag_progress` is a dict that's only `.update()`'d, never rebound,
+  so the qualified reference always sees the live object — the Day 28 "watch out" about a stale
+  copy didn't apply (nothing copied it).
+- **8 test scripts repointed, one line each:** `mod.trigger_tagging` → `mod.tagging.trigger_tagging`.
+  Nothing patched the other moved names. `test_personal_library`'s sync→tag spy still works.
+- V48 handoff timing unchanged — the move only qualified the call.
+- New `scripts/test_tagging_locally.py` (36 checks, fake Gemini client). Full suite **42 Python +
+  3 `.mjs` green** (41→42); `run_local_for_browser_check.py` boots + syncs clean. `app.py`:
+  **5,484 → 5,184 lines** (−300).
 
 ---
 
@@ -1146,7 +1164,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 29 | Google Drive layer → `drive.py` | Drive connection/auth/listing in one file; 11 test scripts repointed (app.py −192 lines) ✅ *(V71)* |
 | 30 | Gemini keys & usage → `gemini.py` | Key encryption + spend tracking isolated; 2 test scripts hand-repointed (app.py −116 lines) ✅ *(V72)* |
 | 31 | Image hydration & palette → `images_common.py` | `build_image_dict`/hydrate/`_fetch` + 4 backfills out; `favorite_col`→`core.py`; 3 test scripts repointed (app.py −344 lines) ✅ *(V73)* |
-| 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + progress plumbing *(planned)* |
+| 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + SSE progress state + prompt out; 8 test scripts repointed (app.py −300 lines) ✅ *(V74)* |
 | 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job isolated *(planned)* |
 | 34 | Crop worker → `crop.py` | Background crop queue + worker thread *(planned)* |
 | 35 | Drive sync → `sync.py` | Folder-sync worker + ingest, last big worker domain *(planned)* |

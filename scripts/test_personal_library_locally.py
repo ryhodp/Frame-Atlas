@@ -180,7 +180,7 @@ def main():
 
     # 6. Friend sync runs through the SERVICE ACCOUNT (no OAuth needed at all).
     tag_calls = []
-    mod.trigger_tagging = lambda user_id=None: tag_calls.append(user_id)
+    mod.tagging.trigger_tagging = lambda user_id=None: tag_calls.append(user_id)
     mod.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)
     assert not mod.sync_state["errors"], mod.sync_state["errors"]
     s = friend.get("/api/account/setup-status").get_json()
