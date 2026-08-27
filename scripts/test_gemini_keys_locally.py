@@ -46,11 +46,11 @@ def main():
     assert r.status_code == 200, r.get_json()
 
     # 1. Admin (user 1) rides the shared env key with no key of their own saved.
-    assert mod.get_user_gemini_key(1) == "admin-shared-key"
+    assert mod.gemini.get_user_gemini_key(1) == "admin-shared-key"
     print("1. Admin resolves to the shared GEMINI_API_KEY env var.")
 
     # 2. A friend with no saved key resolves to None (optional by default).
-    assert mod.get_user_gemini_key(2) is None
+    assert mod.gemini.get_user_gemini_key(2) is None
     print("2. A friend with no saved key gets None back (Gemini key truly optional).")
 
     # 3. /api/account/gemini-key GET reflects "no key yet" before saving.
@@ -68,7 +68,7 @@ def main():
     print("4. Friend can save a Gemini key and read back has_key/last4 (never the full key).")
 
     # 5. get_user_gemini_key now resolves for that friend.
-    assert mod.get_user_gemini_key(2) == "AIzaSyTESTKEY1234"
+    assert mod.gemini.get_user_gemini_key(2) == "AIzaSyTESTKEY1234"
     print("5. get_user_gemini_key(2) now returns the friend's own saved key.")
 
     # 6. Posting an empty key is rejected.
@@ -97,7 +97,7 @@ def main():
     class FakeUsage:
         prompt_token_count = 1000
         candidates_token_count = 500
-    mod.record_gemini_usage(2, FakeUsage())
+    mod.gemini.record_gemini_usage(2, FakeUsage())
     r = friend.get("/api/billing/spend").get_json()
     expected_cost = round((1000 / 1_000_000) * 0.30 + (500 / 1_000_000) * 2.50, 4)
     assert abs(r["cost_usd"] - expected_cost) < 1e-6, (r, expected_cost)
@@ -105,7 +105,7 @@ def main():
     print("9. record_gemini_usage() tallies tokens/cost correctly and /api/billing/spend reflects them.")
 
     # 10. A second usage record in the same month ACCUMULATES rather than overwrites.
-    mod.record_gemini_usage(2, FakeUsage())
+    mod.gemini.record_gemini_usage(2, FakeUsage())
     r = friend.get("/api/billing/spend").get_json()
     assert r["input_tokens"] == 2000 and r["output_tokens"] == 1000, r
     print("10. A second call in the same month adds to the running total instead of resetting it.")

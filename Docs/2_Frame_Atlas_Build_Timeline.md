@@ -849,7 +849,7 @@ scripts are repointed, full suite green.
 
 ---
 
-## Day 30 — Gemini keys & usage → `gemini.py` *(planned)*
+## Day 30 — Gemini keys & usage → `gemini.py` *(V72 — COMPLETE)*
 
 **Goal:** The friend-API-key encryption and spend-tracking code, self-contained.
 
@@ -862,6 +862,25 @@ these directly. `test_security_hardening_locally.py` is also the one V45 part 2 
 handle its imports by hand, not just via the scripted transform.
 
 **Done when:** `gemini.py` exists, both test scripts repointed, suite green.
+
+**How it actually shipped (V72, August 27 2026):**
+- `backend/gemini.py` (148 lines) — the 6 functions + `ENCRYPTED_PREFIX`, every body
+  character-for-character the original (diffed against `HEAD` — 109 lines identical). Imports
+  `get_db`/`get_model_pricing`/`GEMINI_MODEL` from `core` + `from datetime import datetime`;
+  `Fernet` stays a lazy import *inside* `_fernet()`, so `app.py` has no top-level `cryptography`
+  import to drop.
+- **Qualify + repoint (rule 2), not re-export.** `app.py` does `import gemini`; 9 call sites
+  qualified. `record_gemini_usage`'s 2 call sites (tagging worker, `/api/interpret`) stay in
+  `app.py` until Day 32 but are qualified now anyway.
+- **Both test scripts hand-edited, no scripted transform** — only `test_gemini_keys_locally.py`
+  and `test_security_hardening_locally.py` reference the moved names (~6 + ~11 lines), and the
+  latter is the V45-part-2 near-miss file. `mod.gemini.<name>` reaches them via `app.py`'s
+  `import gemini`.
+- Module name `gemini.py` doesn't collide with the Google SDK (`from google import genai as
+  genai_client` → submodule `google.genai`, never top-level `gemini`).
+- New `scripts/test_gemini_locally.py` (25 checks). Full suite **40 Python + 3 `.mjs` green
+  before and after** (39→40 with the new file); `run_local_for_browser_check.py` boots clean and
+  syncs 10 fake images. `app.py`: **5,944 → 5,828 lines** (−116).
 
 ---
 
@@ -1104,7 +1123,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | **— PHASE 3: THE REFACTOR —** | *split app.py one module/session, tests green each side* | |
 | 28 | Foundation: `core.py` + `schema.py` + security fixes | Shared DB/constants + boot code out (app.py −824 lines); cookie flags, hand-rolled rate limiting ✅ *(V70)* |
 | 29 | Google Drive layer → `drive.py` | Drive connection/auth/listing in one file; 11 test scripts repointed (app.py −192 lines) ✅ *(V71)* |
-| 30 | Gemini keys & usage → `gemini.py` | Key encryption + spend tracking isolated *(planned)* |
+| 30 | Gemini keys & usage → `gemini.py` | Key encryption + spend tracking isolated; 2 test scripts hand-repointed (app.py −116 lines) ✅ *(V72)* |
 | 31 | Image hydration & palette → `images_common.py` | `build_image_dict` + backfills shared cleanly *(planned)* |
 | 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + progress plumbing *(planned)* |
 | 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job isolated *(planned)* |

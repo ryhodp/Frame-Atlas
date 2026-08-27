@@ -86,6 +86,11 @@ from schema import (
 # (drive.get_drive_service()); test scripts patch fakes onto this module.
 import drive
 
+# Day 30 (Phase 3): Gemini key encryption + per-user spend tracking. Call
+# sites are qualified (gemini.get_user_gemini_key()); test scripts patch
+# fakes onto this module.
+import gemini
+
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 # Railway's proxy terminates HTTPS in front of us; without this, Flask thinks
@@ -1035,133 +1040,12 @@ def _broadcast_progress():
 # ============================================================================
 # GEMINI KEYS & USAGE
 # ============================================================================
-
-# V44 (Day 26): friends' Gemini keys used to sit in users.gemini_api_key as
-# plain readable text. They're real credentials that bill to a friend's own
-# Google account, so a leaked copy of library.db (which travels: the monthly
-# Drive backup, any local copy) meant usable keys. Now encrypted at rest with
-# Fernet (AES-128-CBC + HMAC authentication, from `cryptography`).
-#
-# The encryption key lives in its own Railway env var, NOT derived from
-# FLASK_SECRET_KEY — one secret protecting two unrelated things means
-# rotating it for a session-security reason would silently destroy every
-# stored API key, and vice versa.
-#
-# Values are stored with an "enc:v1:" prefix so encrypted and legacy
-# plaintext rows are always distinguishable. There is no migration pass: a
-# plaintext key is read as-is and silently re-encrypted the next time it's
-# saved (see set_user_gemini_key), because we can't decrypt what was never
-# encrypted and forcing friends to re-paste their keys would break their
-# tagging with no warning.
-ENCRYPTED_PREFIX = 'enc:v1:'
-
-def _fernet():
-    """The app's Fernet cipher, or None if FA_ENCRYPTION_KEY isn't set.
-
-    Returning None rather than raising is deliberate: a missing key must not
-    take the whole app down at import time (it'd break every route, not just
-    Gemini features). Callers fall back to storing plaintext exactly as
-    before V44, and log loudly — so an unset env var degrades to the old
-    behaviour instead of silently losing keys."""
-    raw = os.environ.get('FA_ENCRYPTION_KEY', '').strip()
-    if not raw:
-        return None
-    try:
-        from cryptography.fernet import Fernet
-        return Fernet(raw.encode())
-    except Exception as e:
-        print(f"[crypto] FA_ENCRYPTION_KEY is set but unusable ({e}) — "
-              "falling back to plaintext storage. Generate a valid key with: "
-              "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"")
-        return None
-
-def encrypt_secret(plaintext):
-    """Encrypt a secret for storage. Returns plaintext unchanged (and warns)
-    if no encryption key is configured, so saving a key never hard-fails."""
-    if not plaintext:
-        return plaintext
-    f = _fernet()
-    if f is None:
-        print("[crypto] WARNING: storing a secret in PLAINTEXT — FA_ENCRYPTION_KEY is not set on this deploy.")
-        return plaintext
-    return ENCRYPTED_PREFIX + f.encrypt(plaintext.encode()).decode()
-
-def decrypt_secret(stored):
-    """Read a stored secret. Anything without the enc: prefix is a legacy
-    plaintext row and comes back as-is — that's what keeps keys saved before
-    V44 working without a migration."""
-    if not stored or not stored.startswith(ENCRYPTED_PREFIX):
-        return stored
-    f = _fernet()
-    if f is None:
-        print("[crypto] ERROR: found an encrypted secret but FA_ENCRYPTION_KEY is not set — cannot decrypt.")
-        return None
-    try:
-        return f.decrypt(stored[len(ENCRYPTED_PREFIX):].encode()).decode()
-    except Exception as e:
-        # Wrong key, or a corrupted/tampered value — Fernet authenticates, so
-        # this catches both. Never fall back to returning the ciphertext: it
-        # would be sent to Google as an API key and fail confusingly.
-        #
-        # Log the exception TYPE, not just str(e): Fernet's InvalidToken
-        # carries an empty message, so "({e})" alone printed literally
-        # "()" — a log line that says nothing is the exact problem the
-        # V44 except:pass audit exists to fix.
-        reason = str(e) or type(e).__name__
-        print(f"[crypto] ERROR: could not decrypt stored secret ({reason}) — "
-              "wrong FA_ENCRYPTION_KEY, or the value was corrupted. Treating as missing.")
-        return None
-
-def set_user_gemini_key(user_id, key):
-    """Save a user's Gemini key, encrypted. The single write path, so a key
-    can never be stored unencrypted by some other route later."""
-    conn = get_db()
-    conn.execute('UPDATE users SET gemini_api_key = ? WHERE id = ?', (encrypt_secret(key), user_id))
-    conn.commit()
-    conn.close()
-
-def get_user_gemini_key(user_id):
-    """Admin (user 1) rides the shared Railway env key. Everyone else must
-    have saved their own key in Account settings — a friend's AI tagging and
-    NL search run on their own key/budget, never the admin's.
-
-    V44: stored keys are encrypted at rest; decrypt_secret() transparently
-    passes through rows saved as plaintext before that change."""
-    if user_id == 1:
-        return os.environ.get('GEMINI_API_KEY')
-    conn = get_db()
-    c = conn.cursor()
-    row = c.execute('SELECT gemini_api_key FROM users WHERE id = ?', (user_id,)).fetchone()
-    conn.close()
-    if not row or not row['gemini_api_key']:
-        return None
-    return decrypt_secret(row['gemini_api_key'])
-
-def record_gemini_usage(user_id, usage_metadata, model_name=None):
-    """Adds one API response's token counts to this user's running total for
-    the current calendar month, so Settings can show an estimated spend."""
-    if not usage_metadata:
-        return
-    pricing = get_model_pricing(model_name or GEMINI_MODEL)
-    input_tokens = getattr(usage_metadata, 'prompt_token_count', 0) or 0
-    output_tokens = getattr(usage_metadata, 'candidates_token_count', None)
-    if output_tokens is None:
-        output_tokens = getattr(usage_metadata, 'response_token_count', 0) or 0
-    cost = (input_tokens / 1_000_000) * pricing['input'] + (output_tokens / 1_000_000) * pricing['output']
-
-    month = datetime.utcnow().strftime('%Y-%m')
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO gemini_usage (user_id, month, input_tokens, output_tokens, cost_usd)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(user_id, month) DO UPDATE SET
-            input_tokens = input_tokens + excluded.input_tokens,
-            output_tokens = output_tokens + excluded.output_tokens,
-            cost_usd = cost_usd + excluded.cost_usd
-    ''', (user_id, month, input_tokens, output_tokens, cost))
-    conn.commit()
-    conn.close()
+# Day 30 (V72): moved to backend/gemini.py character-for-character —
+# _fernet(), encrypt_secret(), decrypt_secret(), set_user_gemini_key(),
+# get_user_gemini_key(), record_gemini_usage(), ENCRYPTED_PREFIX. Call sites
+# here are qualified (gemini.get_user_gemini_key(), …). The actual Gemini API
+# client calls (tagging worker below, /api/interpret) stay in app.py until
+# Day 32 (tagging.py).
 
 # ============================================================================
 # TAGGING WORKER
@@ -1198,7 +1082,7 @@ def _select_pending_for_tagging(user_id=None):
     for row in rows:
         owner_id = row['user_id']
         if owner_id not in clients:
-            key = get_user_gemini_key(owner_id)
+            key = gemini.get_user_gemini_key(owner_id)
             clients[owner_id] = genai_client.Client(api_key=key) if key else None
         if clients[owner_id] is not None:
             images.append(row)
@@ -1232,7 +1116,7 @@ def _run_tagging_job_inner(images, clients, user_id=None):
                 model=GEMINI_MODEL,
                 contents=[GEMINI_TAGGING_PROMPT, pil_img]
             )
-            record_gemini_usage(owner_id, getattr(response, 'usage_metadata', None))
+            gemini.record_gemini_usage(owner_id, getattr(response, 'usage_metadata', None))
             raw = response.text.strip()
 
             if raw.startswith('```'):
@@ -1999,7 +1883,7 @@ def sync_folder_worker(folder_id, user_id):
         # without guessing via a timing delay.
         if user_id == 1:
             trigger_tagging()
-        elif get_user_gemini_key(user_id):
+        elif gemini.get_user_gemini_key(user_id):
             trigger_tagging(user_id=user_id)
         sync_state['in_progress'] = False
 
@@ -2305,12 +2189,12 @@ def account_gemini_key():
         # V44: goes through set_user_gemini_key so it's encrypted at rest.
         # key_last4 is computed from what the user just typed, never read
         # back out of the database.
-        set_user_gemini_key(uid, key)
+        gemini.set_user_gemini_key(uid, key)
         return jsonify({'success': True, 'has_key': True, 'key_last4': key[-4:]})
 
     row = c.execute('SELECT gemini_api_key FROM users WHERE id = ?', (uid,)).fetchone()
     conn.close()
-    key = decrypt_secret(row['gemini_api_key']) if row and row['gemini_api_key'] else None
+    key = gemini.decrypt_secret(row['gemini_api_key']) if row and row['gemini_api_key'] else None
     return jsonify({'has_key': bool(key), 'key_last4': key[-4:] if key else None})
 
 @app.route('/api/tag/mine', methods=['POST'])
@@ -2321,7 +2205,7 @@ def tag_mine():
     if uid == 1:
         return jsonify({'error': 'Admin tagging runs automatically after sync.'}), 400
 
-    if not get_user_gemini_key(uid):
+    if not gemini.get_user_gemini_key(uid):
         return jsonify({'error': 'Add your Gemini API key in Account settings first.'}), 400
 
     with _tag_progress_lock:
@@ -2357,7 +2241,7 @@ def billing_spend():
     meaningful for someone with a usable key (admin's shared key, or a
     friend's own saved key) — everyone else gets a clear next step instead."""
     uid = current_user_id()
-    if not get_user_gemini_key(uid):
+    if not gemini.get_user_gemini_key(uid):
         return jsonify({
             'error': 'no_key',
             'message': 'Add your Gemini API key in Account settings to track your spend.'
@@ -2386,7 +2270,7 @@ def interpret_nl():
         return jsonify({'error': 'No phrase provided'}), 400
 
     uid = current_user_id()
-    gemini_api_key = get_user_gemini_key(uid)
+    gemini_api_key = gemini.get_user_gemini_key(uid)
     if not gemini_api_key:
         return jsonify({'error': 'Add your Gemini API key in Account settings to use natural-language search.'}), 400
 
@@ -2396,7 +2280,7 @@ def interpret_nl():
             model=GEMINI_MODEL,
             contents=[NL_INTERPRET_PROMPT + phrase]
         )
-        record_gemini_usage(uid, getattr(response, 'usage_metadata', None))
+        gemini.record_gemini_usage(uid, getattr(response, 'usage_metadata', None))
         raw = response.text.strip()
         if raw.startswith('```'):
             raw = raw.split('\n', 1)[1].rsplit('```', 1)[0].strip()

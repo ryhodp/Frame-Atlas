@@ -183,7 +183,7 @@ def main():
 
     stored = c.execute("SELECT gemini_api_key FROM users WHERE id = ?", (friend_uid,)).fetchone()[0]
     check("stored value is NOT the plaintext key", stored != SECRET)
-    check("stored value carries the enc:v1: marker", stored.startswith(mod.ENCRYPTED_PREFIX), stored[:20])
+    check("stored value carries the enc:v1: marker", stored.startswith(mod.gemini.ENCRYPTED_PREFIX), stored[:20])
 
     # The whole point: the raw DB file must not contain the key as readable text.
     conn.commit()
@@ -193,8 +193,8 @@ def main():
           SECRET.encode() not in raw_db)
 
     check("get_user_gemini_key decrypts back to the original",
-          mod.get_user_gemini_key(friend_uid) == SECRET,
-          mod.get_user_gemini_key(friend_uid))
+          mod.gemini.get_user_gemini_key(friend_uid) == SECRET,
+          mod.gemini.get_user_gemini_key(friend_uid))
 
     r = friend.get('/api/account/gemini-key')
     check("GET reports has_key with the correct last4",
@@ -207,14 +207,14 @@ def main():
     c.execute("UPDATE users SET gemini_api_key = ? WHERE id = ?", (LEGACY, friend_uid))
     conn.commit()
     check("a pre-V44 plaintext key is still readable (no migration required)",
-          mod.get_user_gemini_key(friend_uid) == LEGACY,
-          mod.get_user_gemini_key(friend_uid))
+          mod.gemini.get_user_gemini_key(friend_uid) == LEGACY,
+          mod.gemini.get_user_gemini_key(friend_uid))
 
     # Re-saving it should encrypt it going forward.
     friend.post('/api/account/gemini-key', json={'key': LEGACY})
     stored = c.execute("SELECT gemini_api_key FROM users WHERE id = ?", (friend_uid,)).fetchone()[0]
     check("re-saving a legacy key upgrades it to encrypted storage",
-          stored.startswith(mod.ENCRYPTED_PREFIX))
+          stored.startswith(mod.gemini.ENCRYPTED_PREFIX))
 
     # ── 12. Wrong encryption key fails safe ─────────────────────────────────
     # Must return None, never the raw ciphertext — handing ciphertext to
@@ -223,20 +223,20 @@ def main():
     saved_env = os.environ.get("FA_ENCRYPTION_KEY")
     os.environ["FA_ENCRYPTION_KEY"] = other_key
     check("a value encrypted with a different key decrypts to None, not ciphertext",
-          mod.decrypt_secret(stored) is None, mod.decrypt_secret(stored))
+          mod.gemini.decrypt_secret(stored) is None, mod.gemini.decrypt_secret(stored))
     os.environ["FA_ENCRYPTION_KEY"] = saved_env
 
     # ── 13. Tampered ciphertext is rejected (Fernet authenticates) ──────────
-    tampered = mod.ENCRYPTED_PREFIX + "gAAAAABmZmZmZmZmZmZmZmZmZmZmtampered"
+    tampered = mod.gemini.ENCRYPTED_PREFIX + "gAAAAABmZmZmZmZmZmZmZmZmZmZmtampered"
     check("a tampered/corrupt encrypted value decrypts to None",
-          mod.decrypt_secret(tampered) is None)
+          mod.gemini.decrypt_secret(tampered) is None)
 
     # ── 14. No encryption key configured = graceful plaintext fallback ──────
     os.environ.pop("FA_ENCRYPTION_KEY", None)
     check("with no FA_ENCRYPTION_KEY, encrypt_secret falls back to plaintext (never crashes)",
-          mod.encrypt_secret("some-key") == "some-key")
+          mod.gemini.encrypt_secret("some-key") == "some-key")
     check("with no FA_ENCRYPTION_KEY, plaintext still reads back fine",
-          mod.decrypt_secret("some-key") == "some-key")
+          mod.gemini.decrypt_secret("some-key") == "some-key")
     os.environ["FA_ENCRYPTION_KEY"] = saved_env
 
     # ── 15. The except:pass audit helper ────────────────────────────────────

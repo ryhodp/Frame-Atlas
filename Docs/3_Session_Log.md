@@ -2871,3 +2871,81 @@ discipline: qualify call sites, repoint tests. `test_gemini_keys_locally.py` and
 `test_security_hardening_locally.py` exercise these directly — and per CLAUDE.md,
 `test_security_hardening_locally.py`'s imports get handled **by hand**, not the scripted
 transform (V45 part 2 nearly overwrote the real `app.py` through it). Suite green before and after.
+
+---
+
+## Day 30 — Gemini keys & usage → `gemini.py` (Frame Atlas V72 complete)
+*Completed: August 27, 2026*
+*Status: DAY 30 COMPLETE — 40 Python + 3 `.mjs` green before and after; browser-check harness boots + syncs clean*
+
+### What We Built
+The friend-Gemini-key layer moved out of `app.py` into `backend/gemini.py` (148 lines) — the
+smallest, lowest-blast-radius cut in Phase 3 so far.
+
+- **Moved (every body character-for-character the original, diffed against `HEAD` — 109 lines
+  byte-identical):** `_fernet()`, `encrypt_secret()`, `decrypt_secret()`, `set_user_gemini_key()`,
+  `get_user_gemini_key()`, `record_gemini_usage()` + `ENCRYPTED_PREFIX`.
+- **Imports:** `get_db`, `get_model_pricing`, `GEMINI_MODEL` from `core`; `from datetime import
+  datetime`. `Fernet` stays a lazy import *inside* `_fernet()` (unchanged) — so `app.py` never
+  had a top-level `cryptography` import to remove, and a missing package still can't break boot.
+- **`app.py`: 5,944 → 5,828 lines** (−116).
+
+### The four decisions confirmed with Ryan (pre-coding)
+- **Module name `gemini.py`** (per plan) over `gemini_keys.py`. No collision: the Google SDK is
+  `from google import genai as genai_client` — submodule `google.genai`, never top-level `gemini`.
+- **`record_gemini_usage()` moved now** (per plan), even though both its call sites
+  (`_run_tagging_job_inner`, `interpret_nl`) stay in `app.py` until Day 32. They're qualified now.
+- **Both test scripts hand-edited, no scripted transform** — only `test_gemini_keys_locally.py`
+  (2 names, 5 lines) and `test_security_hardening_locally.py` (4 names, ~11 lines) touch the
+  moved names. `test_security_hardening_locally.py` is the file V45 part 2's transform nearly
+  used to overwrite the real `app.py`; hand-editing it is the standing CLAUDE.md rule.
+- **Added `scripts/test_gemini_locally.py`** (25 checks) — `gemini.py` had no direct coverage,
+  same reasoning as Day 29's `test_drive_locally.py`.
+
+### Qualify + repoint (rule 2), not re-export
+`app.py` does `import gemini`; 9 call sites qualified (`gemini.get_user_gemini_key()`,
+`gemini.record_gemini_usage()`, `gemini.set_user_gemini_key()`, `gemini.decrypt_secret()`). The
+`git diff` on `app.py` is exactly: +`import gemini`, +a pointer comment where the block was, 9
+one-token call-site edits, −130 lines of moved code. Test scripts reach the module as
+`mod.gemini.<name>` — reachable with no new import line because `app.py` imports it.
+
+### Testing
+- Baseline first on the pre-change tree: 39 Python + 3 `.mjs`, all green.
+- After: 40 Python (`test_gemini_locally.py` added) + 3 `.mjs`, all green. No mid-way failures.
+- Paranoid diff: `ENCRYPTED_PREFIX` → the 3rd `conn.close()` extracted from `HEAD:backend/app.py`
+  and from `backend/gemini.py` — identical, 109 lines each.
+- `scripts/run_local_for_browser_check.py` boots clean: `[schema] OK`, `[selftest] OK`,
+  **"Sync complete. 10 new images added."**, `/api/health` 200, `[db-backup] Skipped`.
+- `test_gemini_locally.py` also confirms live: a friend's saved key is encrypted at rest in the
+  actual DB file (not plaintext), round-trips back out decrypted, and the qualified
+  `/api/account/gemini-key` route still returns has_key/last4 only.
+
+### Technical Debt / Notes
+- `core.py` line 33 has a stale prose mention of `get_user_gemini_key` in a comment (it predates
+  the move). Harmless — left alone rather than widen the diff.
+- Day 31 (`images_common.py`) is a "qualify many call sites" session — `build_image_dict()` has
+  lots of callers and carries the `public=` flag that keeps public share links working (V43);
+  moving it must not touch that logic. The three `backfill_*` functions (still in `app.py` since
+  V70) come along with it.
+
+### Files Changed
+- `backend/gemini.py` — new, 148 lines
+- `backend/app.py` — `import gemini` added, 9 call sites qualified, moved block replaced with a
+  pointer comment (5,944 → 5,828 lines)
+- `scripts/test_gemini_locally.py` — new, 25 checks
+- `scripts/test_gemini_keys_locally.py` — `mod.<name>` → `mod.gemini.<name>` (5 lines, by hand)
+- `scripts/test_security_hardening_locally.py` — `mod.<name>` → `mod.gemini.<name>` (~11 lines, by hand)
+- `CLAUDE.md` — File Structure + new Phase 3 Day 30 subsection + V44 key-encryption note + CI count (39→40)
+- `Docs/2_Frame_Atlas_Build_Timeline.md` — Day 30 marked complete, "How it actually shipped", summary table row
+
+### Commits
+_(pending — not yet committed or pushed)_
+
+### Starting Point for Next Session
+**Day 31 — Image hydration & palette → `images_common.py`.** Move `build_image_dict()`,
+`hydrate_image_rows()`, `_fetch_image_dict()`, `save_palette()`, `backfill_palettes()`,
+`backfill_phashes()`, `backfill_notes_fts()` (~300 lines) into `backend/images_common.py`
+(imports `core` + `colors` + `fingerprint` + `imaging`). This is a "qualify many call sites"
+session more than a "move much code" one. Watch: `build_image_dict()`'s `public=` flag (V43
+public-share-link behaviour) must survive the move untouched; and `schema.py`/`init_db()` must
+call the three `backfill_*` via `images_common.` now. Suite green before and after.
