@@ -3149,7 +3149,9 @@ calls into.
 - `docs/2_Frame_Atlas_Build_Timeline.md` — Day 32 marked complete, "How it actually shipped", summary table row
 
 ### Commits
-_(pending — not yet committed or deployed)_
+`82a93ee` (V74 (Day 32): Tagging worker -> backend/tagging.py) — pushed to `main`, Railway deploy
+`64c15cca` **SUCCESS**: boot log `[schema] OK` + `[selftest] OK — 3 live check(s) passed against
+the real database`, 221 embeddings loaded, live site `/api/health` 200 and bad login 401 (not 500).
 
 ### Starting Point for Next Session
 **Day 33 — Monthly backup → `backup.py`.** Move `run_db_backup()`, `_backup_due()`,
