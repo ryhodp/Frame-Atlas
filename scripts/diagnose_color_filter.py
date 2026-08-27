@@ -404,7 +404,7 @@ def main():
         " '16:9', datetime('now'))", (thumb,))
     conn.commit(); conn.close()
     entries = mod.extract_palette(thumb)
-    mod.save_palette(1, 1, entries)
+    mod.images_common.save_palette(1, 1, entries)
     got = mod.color_match_share(ORANGE, entries, tol_max)
     print(f"   Test image: mostly blue, one small orange patch. "
           f"Measured orange coverage: {got*100:.2f}% of frame.")

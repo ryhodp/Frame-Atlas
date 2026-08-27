@@ -85,10 +85,11 @@ When Ryan says **"End chat"**:
 frame-atlas/
 ├── backend/
 │   ├── app.py              # Endpoints, tagging, crop worker, sync (Phase 3 splits this)
-│   ├── core.py             # get_db/db_path, tag normalisation, taxonomy maps, Gemini constants (V70)
+│   ├── core.py             # get_db/db_path, favorite_col, tag normalisation, taxonomy maps, Gemini constants (V70; favorite_col V73)
 │   ├── schema.py           # init_db + all migrations + check_schema + load_embeddings_seed (V70)
 │   ├── drive.py            # Google Drive: service/OAuth clients, folder listing, _Removed, download (V71)
 │   ├── gemini.py           # Friend Gemini key encryption (Fernet) + per-user spend tracking (V72)
+│   ├── images_common.py    # build_image_dict / hydrate_image_rows / _fetch_image_dict / save_palette + boot backfills (V73)
 │   ├── colors.py           # Palette extraction + colour matching (V45)
 │   ├── fingerprint.py      # phash + signature, duplicate detection (V45)
 │   ├── imaging.py          # Thumbnails + aspect-ratio maths (V45)
@@ -148,8 +149,18 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - New `scripts/test_gemini_locally.py` (25 checks — split wiring, no leaked names on `app.py`, encrypt/decrypt round-trip with a key, wrong-key→None, no-key plaintext fallback, set/get through a real DB + admin env key, `record_gemini_usage` month accumulation).
 - `app.py`: **5,944 → 5,828 lines** (−116). `core.py` line 33 still has a stale prose mention of `get_user_gemini_key` in a comment — harmless, left alone.
 
+**Backend module split — Phase 3, Day 31 (V73): `images_common.py`**
+- The image-row hydration layer + the boot-time self-heal backfills moved out of `app.py` into `backend/images_common.py` (370 lines): `build_image_dict()`, `hydrate_image_rows()`, `_fetch_image_dict()`, `save_palette()`, `backfill_palettes()`, `backfill_phashes()`, `backfill_notes_fts()`, `merge_plural_tag_duplicates()`. Every function body character-for-character the original (all 8 diffed against `HEAD`, byte-identical). Imports `get_db`/`favorite_col`/`normalize_tag_value` from `core`, `PALETTE_VERSION`/`extract_palette` from `colors`, `PHASH_GRID`/`PHASH_HEX_LEN`/`compute_phash` from `fingerprint`, `normalize_ar_label`/`ar_float_from_str` from `imaging` + stdlib `base64`/`threading`.
+- **`merge_plural_tag_duplicates()` came along too** — Ryan's call over the written plan (which listed only the other 3 backfills). It's a boot-time self-heal sitting right next to them and only needs `get_db` + `normalize_tag_value`, so keeping all four together is cleaner. It's still *called* from `app.py`'s two boot blocks (module scope + `__main__`), now qualified `images_common.merge_plural_tag_duplicates()`.
+- **`favorite_col()` moved to `core.py`, not `images_common.py`.** `_fetch_image_dict()` builds its own favourite-aware `SELECT` via `favorite_col(owner_user_id)`, and `images_common` may not import `app.py`. `favorite_col` is a pure `int`-in/SQL-string-out helper used by ~6 SELECTs across search / similar / utility views / decks — exactly `core`'s "shared foundation" mandate. `app.py` re-imports it (`from core import (… favorite_col)`) so its other 5 call sites are byte-unchanged; only `_fetch_image_dict`'s copy moved.
+- **Followed rule 2 (qualify + repoint), same as Days 29–30.** `app.py` does `import images_common`; ~15 call sites qualified (`images_common.build_image_dict()`, `images_common.hydrate_image_rows()`, `images_common._fetch_image_dict()`, 7× `images_common.save_palette()`, the 4 backfills ×2 boot blocks). The `git diff` on `app.py` is exactly: +`import images_common`, +`favorite_col` in the core-import list, +3 pointer comments, ~15 one-token call-site edits, −344 lines net.
+- **3 test scripts repointed, all `mod.<name>(` → `mod.images_common.<name>(` calls (no monkeypatches of these names anywhere):** `test_v24_color_locally.py` + `test_v33_color_fix_locally.py` (`save_palette`, `backfill_palettes`), `test_dp_notes_search_locally.py` (`backfill_notes_fts`). `scripts/diagnose_color_filter.py` (a diagnostic, not in CI) got the same one-line repoint — it has a **pre-existing** DRIFT failure unrelated to this change (an instrumented `extract_palette` reimplementation that no longer matches `PALETTE_VERSION` 2).
+- **`build_image_dict()`'s `public=` flag (V43 public-share-link base64 exception) survived untouched** — pinned by `test_thumbnail_caching_locally.py` and a dedicated check in the new script.
+- New `scripts/test_images_common_locally.py` (41 checks — split wiring, no leaked names, module-import identity, `build_image_dict` private-URL vs public-base64, `hydrate_image_rows` bulk hydrate, `_fetch_image_dict` owner-favourite + missing-id, `save_palette` round-trip/version stamp/rewrite, `backfill_palettes` rebuild-then-self-disable, `backfill_notes_fts` seed + no-op, `merge_plural_tag_duplicates` same-category-only, end-to-end URL vs base64).
+- `app.py`: **5,828 → 5,484 lines** (−344). `images_common.py` is 370, `core.py` 141 → 162.
+
 **CI (V43/Day 25)**
-- `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **40 Python + 3 `.mjs` as of V72/Day 30** (`test_gemini_locally.py` added Day 30). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in
+- `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **41 Python + 3 `.mjs` as of V73/Day 31** (`test_images_common_locally.py` added Day 31). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in
 - `test_shuffle_locally.py` was skipped with an explained `::warning::` originally — the shuffle skip was removed before CI even shipped, per the workflow file's own comment (the "V45p2 flagged stale" note); the script currently passes and runs like the rest
 
 **Server**

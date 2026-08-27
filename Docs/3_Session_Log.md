@@ -2951,3 +2951,113 @@ deploy `772d558c` **SUCCESS**: boot log `[schema] OK` + `[selftest] OK — 3 liv
 session more than a "move much code" one. Watch: `build_image_dict()`'s `public=` flag (V43
 public-share-link behaviour) must survive the move untouched; and `schema.py`/`init_db()` must
 call the three `backfill_*` via `images_common.` now. Suite green before and after.
+
+---
+
+## Day 31 — Image hydration & palette → `images_common.py` (Frame Atlas V73 complete)
+*Completed: August 27, 2026*
+*Status: DAY 31 COMPLETE — 41 Python + 3 `.mjs` green before and after; browser-check harness boots + syncs clean*
+
+### What We Built
+The image-row hydration layer + the boot-time self-heal backfills moved out of `app.py` into
+`backend/images_common.py` (370 lines).
+
+- **Moved (every body character-for-character the original — all 8 diffed against `HEAD`, byte-identical):**
+  `build_image_dict()`, `hydrate_image_rows()`, `_fetch_image_dict()`, `save_palette()`,
+  `backfill_palettes()`, `backfill_phashes()`, `backfill_notes_fts()`, `merge_plural_tag_duplicates()`.
+- **Imports:** `get_db`/`favorite_col`/`normalize_tag_value` from `core`; `PALETTE_VERSION`/
+  `extract_palette` from `colors`; `PHASH_GRID`/`PHASH_HEX_LEN`/`compute_phash` from `fingerprint`;
+  `normalize_ar_label`/`ar_float_from_str` from `imaging`; stdlib `base64`/`threading`. Nothing
+  from `app.py`.
+- **`app.py`: 5,828 → 5,484 lines** (−344). `core.py`: 141 → 162.
+
+### The four decisions confirmed with Ryan (pre-coding)
+- **Qualify + repoint, not re-export** (Phase 3 rule 2, same as Days 29–30). `app.py` does
+  `import images_common`; ~15 call sites qualified.
+- **`merge_plural_tag_duplicates()` moved too**, though the written plan listed only the other 3
+  backfills. It's a boot self-heal right next to them, only needs `get_db` + `normalize_tag_value`,
+  so all four moved together.
+- **Individual qualified boot calls**, not a `run_boot_backfills()` aggregator — `app.py` keeps
+  calling each of the four explicitly in both boot blocks (module scope + `__main__`), ordering
+  stays visible.
+- **New `scripts/test_images_common_locally.py`** (41 checks) — the module had no direct coverage.
+
+### `favorite_col()` → `core.py` (an unplanned but clean side-move)
+`_fetch_image_dict()` builds its own favourite-aware `SELECT` via `favorite_col(owner_user_id)`,
+and `images_common` may not import `app.py`. `favorite_col` is a pure int-in / SQL-string-out
+helper (no DB, no Flask, no session) used by ~6 SELECTs across search / similar / utility views /
+decks — exactly `core.py`'s "shared foundation" mandate. Moved there verbatim (plus 3 doc lines);
+`app.py` re-imports it in the existing `from core import (...)` list, so its other 5 call sites are
+byte-unchanged. No test script references `favorite_col`.
+
+### The Day 28 "watch out" was moot
+The plan warned `schema.py`/`init_db()` might now need to call the `backfill_*` via
+`images_common.`. It doesn't — those functions were never called from inside `init_db()`; they run
+at `app.py` module scope right after it (and in the `__main__` block). Both call sites qualified,
+nothing in `schema.py` touched.
+
+### Test scripts repointed — 3 (+ 1 diagnostic)
+All plain `mod.<name>(` → `mod.images_common.<name>(` **calls** — grep confirmed nothing
+monkeypatches any of these names anywhere:
+- `test_v24_color_locally.py` — `save_palette`, `backfill_palettes`
+- `test_v33_color_fix_locally.py` — `save_palette`, `backfill_palettes`
+- `test_dp_notes_search_locally.py` — `backfill_notes_fts` ×2
+- `scripts/diagnose_color_filter.py` (a diagnostic, **not in CI**) — `save_palette`. It has a
+  **pre-existing DRIFT failure** (its instrumented `extract_palette` reimplementation no longer
+  matches `PALETTE_VERSION` 2) — confirmed identical failure on unmodified `main` via `git stash`,
+  so unrelated to this change. Flagged, not fixed here.
+
+`mod.images_common` is reachable in every script with no new import line, because `app.py` does
+`import images_common`.
+
+### Testing
+- Baseline first on the pre-change tree: **40 Python + 3 `.mjs`, all green.**
+- After: **41 Python** (`test_images_common_locally.py` added, 41 checks) **+ 3 `.mjs`, all green.**
+  No mid-way failures.
+- **Paranoid diff:** extracted all 8 moved function bodies from `HEAD:backend/app.py` and confirmed
+  each appears in `images_common.py` character-for-character (50/26/32/18/67/53/22/66 lines
+  respectively). `favorite_col`'s two code lines identical to `HEAD`.
+- `app.py` `git diff` is exactly: +`import images_common`, +`favorite_col` in the core-import list,
+  +3 pointer comments, ~15 one-token call-site edits, −344 lines of moved code. No other change.
+- `scripts/run_local_for_browser_check.py` boots clean: `[schema] OK`, `[selftest] OK`,
+  **"Sync complete. 10 new images added."** (exercises `images_common.save_palette` via
+  `_ingest_image`), `/api/health` 200, `[db-backup] Skipped`.
+- New script also confirms end-to-end: `/api/search` returns a cacheable `/thumb` URL while the
+  public `/api/share/<token>` view still embeds base64 — the V43 `public=` exception survived the
+  move.
+
+### Technical Debt / Notes
+- `scripts/diagnose_color_filter.py`'s DRIFT failure is pre-existing and still open (not a CI
+  script). Someone should reconcile its instrumented palette reimplementation with the real
+  `extract_palette` at `PALETTE_VERSION` 2, or delete the reimplementation and diff against the
+  real function directly.
+- `base64`, `PALETTE_VERSION`, `compute_phash` etc. may now be unused *within* `app.py` — left in
+  its import lists per the standing rule (they're the modules' API for the copy-app.py test
+  harnesses; a linter flag here is expected).
+- Day 32 (`tagging.py`) is next: the Gemini auto-tag loop + SSE progress plumbing +
+  `GEMINI_TAGGING_PROMPT` (~460 lines). `_tag_progress` is shared mutable state with the tagging
+  routes that stay in `app.py` — that's the thing to get right.
+
+### Files Changed
+- `backend/images_common.py` — new, 370 lines
+- `backend/app.py` — `import images_common` added, `favorite_col` removed (→ core, re-imported),
+  ~15 call sites qualified, moved blocks replaced with pointer comments (5,828 → 5,484 lines)
+- `backend/core.py` — `favorite_col()` added (verbatim + 3 doc lines), 141 → 162 lines
+- `scripts/test_images_common_locally.py` — new, 41 checks
+- `scripts/test_v24_color_locally.py`, `scripts/test_v33_color_fix_locally.py`,
+  `scripts/test_dp_notes_search_locally.py` — `mod.<name>` → `mod.images_common.<name>`
+- `scripts/diagnose_color_filter.py` — same one-line repoint (diagnostic, not CI)
+- `CLAUDE.md` — File Structure + new Phase 3 Day 31 subsection + CI count (40→41)
+- `docs/2_Frame_Atlas_Build_Timeline.md` — Day 31 marked complete, "How it actually shipped", summary table row
+
+### Commits
+_(pending — not yet committed or deployed)_
+
+### Starting Point for Next Session
+**Day 32 — Tagging worker → `tagging.py`.** Move `_select_pending_for_tagging()`,
+`_run_tagging_job()` / `_run_tagging_job_inner()`, `trigger_tagging()`, `_broadcast_progress()`,
+the `_tag_progress` / `_sse_queues` state + their locks, and `GEMINI_TAGGING_PROMPT` (~460 lines)
+into `backend/tagging.py` (imports `core` + `gemini` + the `google.genai` client). Watch: the
+`_tag_progress` dict is shared mutable state and the tagging *routes* stay in `app.py` — they must
+read/write the same object the worker does (import the module, not the dict by value). Qualify call
+sites, repoint tests, suite green before and after.

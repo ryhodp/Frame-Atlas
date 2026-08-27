@@ -203,11 +203,11 @@ def main():
     c.execute("DELETE FROM notes_fts WHERE rowid = ?", (ids[1],))
     conn.commit()
     assert not c.execute("SELECT 1 FROM notes_fts WHERE rowid = ?", (ids[1],)).fetchone()
-    mod.backfill_notes_fts()
+    mod.images_common.backfill_notes_fts()
     assert c.execute("SELECT 1 FROM notes_fts WHERE rowid = ?", (ids[1],)).fetchone()
     # Second call is a no-op (nothing left to seed) — the whole point of the
     # self-disabling design is that every later boot does zero work here.
-    mod.backfill_notes_fts()
+    mod.images_common.backfill_notes_fts()
     print("10. backfill_notes_fts() seeds a missing row and is a no-op on the next call — OK.")
 
     # ── 11. Search: notes param matches, AND-combines with a tag chip ───────

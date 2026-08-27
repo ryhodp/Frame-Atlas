@@ -123,7 +123,7 @@ def main():
               " VALUES (1, 'admin', 'x', 'admin')")
     conn.commit()
     for i in CASES:
-        mod.save_palette(i, 1, mod.extract_palette(blobs[i]))
+        mod.images_common.save_palette(i, 1, mod.extract_palette(blobs[i]))
     conn.commit()
 
     print("\n2. Shadow no longer donates its share to a colour family")
@@ -235,7 +235,7 @@ def main():
         return n
 
     assert stale() > 0
-    mod.backfill_palettes()
+    mod.images_common.backfill_palettes()
     for _ in range(100):
         time.sleep(0.05)
         if stale() == 0:
@@ -247,7 +247,7 @@ def main():
     before = cn.execute("SELECT id, image_id, hex, share, palette_version"
                         " FROM colors ORDER BY id").fetchall()
     cn.close()
-    mod.backfill_palettes()
+    mod.images_common.backfill_palettes()
     time.sleep(0.4)
     cn = sqlite3.connect(db_path)
     after = cn.execute("SELECT id, image_id, hex, share, palette_version"

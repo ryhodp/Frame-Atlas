@@ -884,7 +884,7 @@ handle its imports by hand, not just via the scripted transform.
 
 ---
 
-## Day 31 — Image hydration & palette → `images_common.py` *(planned)*
+## Day 31 — Image hydration & palette → `images_common.py` *(V73 — COMPLETE)*
 
 **Goal:** The helpers that turn a raw `images` row into the rich object the frontend gets, plus
 the boot-time backfills — shared today by search, decks, similar-images, utility views, sync, and
@@ -902,6 +902,27 @@ crop.
   territory — make sure `schema.py`/`init_db()` calls them via `images_common.` now.
 
 **Done when:** every hydration/backfill call site qualified, suite green.
+
+**How it actually shipped (V73, August 27 2026):**
+- `backend/images_common.py` (370 lines) — the 7 planned functions **plus `merge_plural_tag_duplicates()`**
+  (Ryan's call: it's a boot self-heal sitting right next to the other three backfills, only needs
+  `get_db` + `normalize_tag_value`, so all four moved together). Every body diffed
+  character-for-character against `HEAD` — all 8 byte-identical.
+- **`favorite_col()` moved to `core.py`, not `images_common.py`.** `_fetch_image_dict()` builds its
+  own favourite-aware SELECT with it, and `images_common` can't import `app.py`. It's a pure
+  int-in/SQL-string-out helper used by ~6 SELECTs across the app — a clean fit for `core`'s
+  "shared foundation" role. `app.py` re-imports it, so its other 5 call sites are byte-unchanged.
+- **The Day 28 "watch out" was moot:** the three `backfill_*` were never called from inside
+  `schema.py`/`init_db()` — they run at `app.py` module scope right after `init_db()`. They still
+  do, now qualified `images_common.backfill_*()`.
+- Rule 2 (qualify + repoint), same as Days 29–30. `import images_common`; ~15 call sites qualified.
+  3 test scripts repointed (`test_v24_color`, `test_v33_color_fix`, `test_dp_notes_search`) — all
+  plain `mod.<name>(` → `mod.images_common.<name>(` calls, no monkeypatches of these names exist
+  anywhere. `scripts/diagnose_color_filter.py` (not in CI) got the same repoint; it has a
+  pre-existing, unrelated DRIFT failure.
+- New `scripts/test_images_common_locally.py` (41 checks). Full suite **41 Python + 3 `.mjs` green
+  before and after** (40→41 with the new file); `run_local_for_browser_check.py` boots clean and
+  syncs 10 fake images through the qualified `save_palette` path. `app.py`: **5,828 → 5,484 lines** (−344).
 
 ---
 
@@ -1124,7 +1145,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 28 | Foundation: `core.py` + `schema.py` + security fixes | Shared DB/constants + boot code out (app.py −824 lines); cookie flags, hand-rolled rate limiting ✅ *(V70)* |
 | 29 | Google Drive layer → `drive.py` | Drive connection/auth/listing in one file; 11 test scripts repointed (app.py −192 lines) ✅ *(V71)* |
 | 30 | Gemini keys & usage → `gemini.py` | Key encryption + spend tracking isolated; 2 test scripts hand-repointed (app.py −116 lines) ✅ *(V72)* |
-| 31 | Image hydration & palette → `images_common.py` | `build_image_dict` + backfills shared cleanly *(planned)* |
+| 31 | Image hydration & palette → `images_common.py` | `build_image_dict`/hydrate/`_fetch` + 4 backfills out; `favorite_col`→`core.py`; 3 test scripts repointed (app.py −344 lines) ✅ *(V73)* |
 | 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + progress plumbing *(planned)* |
 | 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job isolated *(planned)* |
 | 34 | Crop worker → `crop.py` | Background crop queue + worker thread *(planned)* |

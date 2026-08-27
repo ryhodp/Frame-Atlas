@@ -123,6 +123,27 @@ def clear_ai_tags(cursor, image_id):
         (image_id, *MANUAL_TAG_CATEGORIES))
 
 
+def favorite_col(user_id, alias='images'):
+    """SQL fragment computing is_favorite for one user against the per-user
+    user_favorites table — slots into any `images` SELECT in place of the old
+    boolean column. user_id is always an int pulled from the session (never
+    request input), so inlining it directly is safe and avoids threading an
+    extra positional param through call sites that already build dynamic
+    WHERE clauses.
+
+    (V55: used to also compute is_flagged against user_flags for the since-
+    removed Flagged feature. That table and the legacy is_flagged column on
+    `images` deliberately still exist — see the removal note above
+    get_utility_view() — but nothing queries or serves is_flagged anymore, so
+    this function only computes the one column it's now named for.)
+
+    Day 31 (Phase 3): moved here from app.py so images_common._fetch_image_dict
+    can build its own favourite-aware SELECT without importing app.py. app.py's
+    other call sites are unchanged — it re-imports this name from core."""
+    uid = int(user_id)
+    return f"EXISTS(SELECT 1 FROM user_favorites uf WHERE uf.user_id = {uid} AND uf.image_id = {alias}.id) AS is_favorite"
+
+
 def _shuffle_key(seed, image_id):
     # Deterministic pseudo-random sort key: the same (seed, image) pair always
     # produces the same number, so page 2 of a shuffled feed continues exactly
