@@ -2654,3 +2654,107 @@ Day 27 is fully complete. Two things are sitting on the roadmap, both waiting on
 1. **Extraction itself** — now unblocked. Drive, sync, tagging, and the crop worker can start moving out of `app.py` into their own files whenever Ryan wants to spend a session on it, one domain at a time, same discipline as Part 1 (test suite green before and after, diffed character-for-character against the original before each cut).
 2. **Day 18 — NAS Migration** — the only other open roadmap item, parked until Ryan's Ugreen NAS hardware is ready. Not code-blocked; just say when.
 No other work is queued. Ask Ryan which of the two (or something new) he wants to tackle next.
+
+---
+
+## Day 28 — Foundation: `core.py` + `schema.py` + Security Hardening (Frame Atlas V70 complete)
+*Completed: August 26, 2026*
+*Status: DAY 28 COMPLETE — full suite 41/41 green before and after, verified live in a browser*
+
+### What We Built
+
+**The split (zero behaviour change):**
+- **`backend/core.py`** (141 lines) — `get_db()`, a new `db_path()`, `_shuffle_key()`,
+  `chunked()`/`SQL_PARAM_CHUNK`, `normalize_tag_value()`/`clear_ai_tags()`/`TAG_PLURAL_STRIP_EXCEPTIONS`/
+  `MANUAL_TAG_CATEGORIES`, `CAT_COLORS`/`CAT_LABELS`, `GEMINI_MODEL`/`GEMINI_PRICING`/`get_model_pricing()`.
+  Standard-library imports only — nothing from the project.
+- **`backend/schema.py`** (849 lines) — `_is_duplicate_column_error()`, `EXPECTED_COLUMNS`,
+  `missing_columns()`, `check_schema()`, `init_db()`, `load_embeddings_seed()`. Imports `get_db` from
+  `core`. This was the single biggest line-count win in the phase — a near-straight lift of one
+  contiguous ~640-line region.
+- **`backend/app.py`: 6,960 → 6,136 lines** (−824 net; ~904 moved out, ~80 lines of security code
+  added). Every moved name is imported straight back (`from core import …` / `from schema import …`),
+  so app.py's public surface is identical and `mod.<name>` still resolves in every test script.
+
+**Two deliberate structural decisions (both surfaced in the pre-coding questions):**
+- **`db_path()` replaced the `DB_PATH` string constant.** `core.db_path()` reads `FA_DB_PATH` live on
+  every call rather than snapshotting it at import. Reason: `core`/`schema` are cached in `sys.modules`
+  across the multiple in-process app-boots that `test_schema_guard`/`test_self_test`/
+  `test_security_hardening` each do — a snapshot would freeze the first boot's path and send the other
+  boots at the wrong database. `app.py` keeps `DB_PATH = db_path()` at module scope (re-evaluated on
+  every app.py load, which the harness does do) for the 5 scripts that read `mod.DB_PATH` directly.
+- **`run_self_test()` stayed in `app.py`** (Ryan's pick over parameterising it or moving deck helpers
+  to core). It calls `_deck_access()`/`touch_deck()`, which are deck code staying in app.py, and
+  schema.py may not import app.py. So `init_db()` gained one optional parameter —
+  `init_db(run_self_test=None)` — and app.py passes it at both boot sites. `test_self_test_locally.py`
+  still monkeypatches `mod._deck_access` and it still works: `run_self_test` resolves that name in
+  app.py's own globals.
+
+**Security hardening:**
+- **Session cookies:** `SESSION_COOKIE_HTTPONLY = True` always; `SESSION_COOKIE_SECURE = not RUNNING_LOCALLY`
+  where `RUNNING_LOCALLY = bool(os.environ.get('FA_DB_PATH'))`. Secure is off locally because the Flask
+  test client and `http://localhost` dev drop a Secure cookie silently, which would red every
+  login-gated test. `SESSION_COOKIE_SAMESITE` unchanged (`'Lax'`).
+- **Rate limiting** on `/api/auth/register` and `/api/auth/forgot-password` — hand-rolled (Ryan's pick
+  over Flask-Limiter: no new dependency, no +3 min deploys), same spirit as the V44 login lockout.
+  `rate_limit_hits(scope, client_ip, hit_at)` table in `schema.py`; `_rate_limited(scope)` in `app.py`;
+  5 hits / 60 s per IP → `429`. IP from the LAST `X-Forwarded-For` entry (Railway's proxy appends it;
+  earlier entries are spoofable). Fails **open** on any DB error, and **no-ops entirely when
+  `RUNNING_LOCALLY`** so the suite and local dev aren't throttled. Prunes stale rows on each check.
+- **Password reset:** followed the plan — left the code returning the token in JSON, documented in
+  CLAUDE.md that this is an **admin-only** path until email delivery is wired. Not touched otherwise.
+
+### Testing
+- Captured a 40/40 baseline on unmodified `main` first. After the split + security: still 40/40, then
+  41/41 with the new `scripts/test_day28_hardening_locally.py` (22 checks — the split wiring, cookie
+  flags, and the limiter in both local-disabled and simulated-production modes including fail-open).
+- **Paranoid diff:** extracted the full `init_db()` body from pre-change `main` and confirmed it
+  appears in `schema.py` character-for-character except the two intended `run_self_test` lines and the
+  new `rate_limit_hits` table. Same verbatim check for every core.py block.
+- `test_schema_guard_locally.py` was the ONE test edit the move forced: it greps source text for
+  `ALTER TABLE`, so its `open(...)` moved from `app.py` to `schema.py`. One line + a comment.
+- Live: booted the local browser-check server, logged in as admin, loaded the grid (10 images), ran a
+  search, opened image detail — every `/api/*` request 200, `[schema] OK` + `[selftest] OK` in the
+  boot log.
+
+### Also Fixed In Passing (not Day 28 scope, but blocking honest verification)
+- `scripts/run_local_for_browser_check.py` and `scripts/diagnose_color_filter.py` had been broken
+  since V45 part 2 (Aug 26, earlier the same day): both string-patched a `DB_PATH = '/app/data/library.db'`
+  line that V45p2 had already replaced with an `os.environ.get(...)` call, so their
+  `assert patched != src` would have failed on first run. Neither is in CI, so nobody hit it. Both now
+  load `backend/app.py` directly via `FA_DB_PATH`, same as the 36 CI scripts. `diagnose_color_filter.py`
+  additionally never put `backend/` on `sys.path`, so it couldn't have imported `colors` either —
+  fixed too.
+
+### Decisions Made (Confirmed with Ryan, pre-coding)
+- ✅ Rate limiting: hand-rolled in SQLite, not Flask-Limiter.
+- ✅ `SESSION_COOKIE_SECURE`: gated behind the `FA_DB_PATH` "am I local" signal, not unconditional.
+- ✅ `run_self_test()`: stays in `app.py`, handed to `init_db()` as a parameter.
+- ✅ Password reset token: document as admin-only, defer email.
+
+### Technical Debt / Notes
+- Version number: called this **V70**. The V-numbering has two diverged tracks — the day-based
+  feature track topped out at V45 (Day 27) / V50 (Day 48), and a separate colour-migration track ran
+  V56–V69. V70 is just the next unused number. If that's wrong for Ryan's mental model, the label is
+  cheap to change.
+- Backfills (`backfill_palettes`/`backfill_phashes`/`backfill_notes_fts`) and `merge_plural_tag_duplicates`
+  deliberately stayed in `app.py` — they're called at boot right after `init_db()`, not from inside it,
+  so the schema cut stayed clean. They move in Day 31 (`images_common.py`).
+- `zlib` is now an unused import in `app.py` (its only use, `_shuffle_key`, moved to `core.py`). Left
+  in place — same reasoning as the re-exported names — but it's genuinely dead there now.
+- Day 29's `drive.py` cut is the highest-blast-radius one in the phase (~10 test scripts monkeypatch
+  Drive functions and all need repointing). CLAUDE.md's "Backend module split — Phase 3" section has
+  the standing rules.
+
+### Commits
+`<this commit>` (V70: core.py + schema.py split + session cookie flags + rate limiting)
+
+### Starting Point for Next Session
+**Day 29 — Google Drive layer → `drive.py`.** Move `get_drive_service()`, `get_user_drive_service()`,
+`get_user_credentials()`, `get_oauth_flow()`, `get_service_account_email()`, `parse_drive_folder_id()`,
+`list_images_in_folder()`, `get_root_folder_id()`, `get_or_create_removed_folder()`,
+`download_drive_file()`, `drive_error_reason()` + `REMOVED_FOLDER_NAME`/`PERSONAL_LIBRARY_CAP`/
+`UPLOAD_SCOPES` into `backend/drive.py` (imports `core` only). ~10 test scripts swap these for fakes
+and every one needs `mod.get_drive_service = fake` → `drive.get_drive_service = fake`; apply as a
+scripted transform, eyeball the diff first. `MediaIoBase*` stay imported wherever the code that uses
+them lives (still `app.py` for now) — do NOT fold them into `drive.py`. Suite green before and after.

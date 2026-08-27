@@ -77,16 +77,18 @@ def why_not(mod, picked_hex, candidate_hex, hue_tol):
 def load_app():
     workdir = tempfile.mkdtemp(prefix="frame_atlas_colordiag_")
     db_path = os.path.join(workdir, "library.db")
-    src = open(os.path.join(REPO, "backend", "app.py")).read()
-    patched = src.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-    assert patched != src, "Could not find the DB_PATH line to patch"
-    open(os.path.join(workdir, "app.py"), "w").write(patched)
 
+    # V45 part 2: app.py reads FA_DB_PATH instead of a hardcoded path, so this
+    # loads backend/app.py directly (no source patching). backend/ on sys.path
+    # so its sibling modules — core.py, schema.py, colors.py, ... — resolve.
+    import sys
+    sys.path.insert(0, os.path.join(REPO, "backend"))
+    os.environ["FA_DB_PATH"] = db_path
     for key in ("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GEMINI_API_KEY"):
         os.environ.setdefault(key, "dummy")
 
     spec = importlib.util.spec_from_file_location(
-        "colordiag_app", os.path.join(workdir, "app.py")
+        "colordiag_app", os.path.join(REPO, "backend", "app.py")
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

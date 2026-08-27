@@ -43,10 +43,13 @@ from test_personal_library_locally import FakeDrive, FakeDownloader, ROBOT_EMAIL
 workdir = tempfile.mkdtemp(prefix="frame_atlas_browser_check_")
 db_path = os.path.join(workdir, "library.db")
 
-src = open(os.path.join(REPO, "backend", "app.py")).read()
-patched = src.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-assert patched != src
-open(os.path.join(workdir, "app.py"), "w").write(patched)
+# app.py reads its DB location from FA_DB_PATH (V45 part 2), so no source
+# patching any more. It still runs from a copy in workdir purely so its
+# `static/` folder resolves to the built frontend we drop in below, not the
+# repo's; backend/ is on sys.path (above) so core.py / schema.py / colors.py
+# and the rest resolve normally.
+os.environ["FA_DB_PATH"] = db_path
+shutil.copy(os.path.join(REPO, "backend", "app.py"), os.path.join(workdir, "app.py"))
 
 # Serve the real built frontend (frontend/dist, built via `npm run build`) so
 # the browser can hit ONE origin (port 5000) for both the app and /api — no

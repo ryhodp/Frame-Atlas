@@ -96,7 +96,9 @@ def columns_of(db_path, table):
 # ---------------------------------------------------------------------------
 def test_no_non_constant_defaults():
     print("\n--- no ALTER TABLE uses a non-constant DEFAULT ---")
-    src = open(os.path.join(REPO, "backend", "app.py")).read()
+    # Day 28 (Phase 3): init_db() and every ALTER TABLE migration moved from
+    # app.py into schema.py. The guard is otherwise unchanged.
+    src = open(os.path.join(REPO, "backend", "schema.py")).read()
 
     alters = re.findall(r'ALTER TABLE[^"\']*', src)
     check("found the ALTER TABLE migrations to inspect", len(alters) > 5)

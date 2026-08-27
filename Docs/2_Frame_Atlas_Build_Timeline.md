@@ -669,6 +669,380 @@ not started this session, per plan. `Home.jsx` remains untouched.
 
 ---
 
+# ═══ PHASE 3 — THE REFACTOR ═══
+*Planned August 26, 2026. Day 27 got the **pure maths** out of `app.py` (colour, fingerprint,
+imaging, perspective — bytes and numbers in, numbers out) and then reworked the test harness so
+database-touching code is allowed to live outside `app.py` too. That second part was the whole
+point: it unblocked everything below. Nothing here is a new feature. `backend/app.py` is still
+**~6,960 lines** — every endpoint, plus AI tagging, Drive sync, the crop worker, backups, image
+hydration, search — and every small change to it keeps having side effects in unrelated places
+because it's all one file sharing one set of globals.*
+
+*This phase splits it apart **one module per session**, in dependency order (leaf pieces first,
+the things everything else leans on), with the full test suite green before and after each cut
+and every moved function diffed character-for-character against the original — the exact
+discipline V45 used. No session tries to do two modules. If a cut turns out bigger than a
+session, it stops half-done only at a point where the suite is green, and finishes next time.*
+
+### The two rules every session in this phase follows
+
+1. **`app.py` is the only file allowed to `import` the others.** Each new module imports from
+   `core.py` (the shared foundation, built Day 28) and from the already-pure V45 modules —
+   never from `app.py`. This is what keeps Python from tying itself in a knot (a "circular
+   import" — two files each waiting on the other to finish loading).
+2. **Call sites get qualified, tests get updated.** Once `get_drive_service` lives in `drive.py`,
+   code in `app.py` that used to call it by its bare name now calls `drive.get_drive_service()`,
+   and the ~10 test scripts that swap in a fake Drive change from `mod.get_drive_service = fake`
+   to `drive.get_drive_service = fake`. Ryan chose this (updating the tests) over the alternative
+   of having `app.py` quietly re-export every moved name to keep the tests untouched — fewer
+   hidden trapdoors, even though it's more files touched per session. The mechanical test-script
+   edits are applied as one scripted transform and **eyeballed in the diff before anything runs**
+   — V45 part 2's near-miss (a transform that would have overwritten the real `app.py`) is the
+   standing reminder of why.
+
+### Endpoints stay put — for now
+
+Flask routes (`@app.route(...)` functions) are **not** moved in this phase. Moving them means
+Flask "blueprints," which is a real conceptual step and a separate risk. Instead, each session
+moves the *worker and helper functions* a route calls, and leaves the route itself in `app.py`
+as a thin wrapper. Whether to blueprint the routes afterwards is a decision for the end of the
+phase, once `app.py` is down to mostly-just-routes and we can see how big that actually is.
+
+---
+
+## Day 28 — Foundation: `core.py` + `schema.py` + Security Hardening *(V70 — COMPLETE)*
+
+**Goal:** Create the shared base every later module imports from, secure session handling, and
+add rate limiting on sensitive endpoints.
+
+### Code Changes
+
+- **`core.py`** — the genuinely shared, dependency-free pieces:
+  - `get_db()` and `DB_PATH` (the database connection and where the file lives)
+  - `_shuffle_key()`, `chunked()` / `SQL_PARAM_CHUNK`
+  - `normalize_tag_value()`, `clear_ai_tags()`, `TAG_PLURAL_STRIP_EXCEPTIONS`,
+    `MANUAL_TAG_CATEGORIES`
+  - `CAT_COLORS`, `CAT_LABELS` (the 15-category tag taxonomy display maps)
+  - `GEMINI_MODEL`, `GEMINI_PRICING`, `get_model_pricing()`
+- **`schema.py`** — the ~920-line block that builds and migrates the database on boot:
+  `init_db()`, `check_schema()`, `run_self_test()`, `missing_columns()`,
+  `_is_duplicate_column_error()`, `load_embeddings_seed()`. This is close to a straight
+  lift-and-shift of one contiguous region, and it's the single biggest line-count win in the
+  whole phase.
+- `app.py` imports both at the top and calls `schema.init_db()` etc. on startup exactly as now.
+
+### Security Fixes (from spot-check, risk-level noted)
+
+**Finding 1 (⚠️ Medium risk):** Session cookies missing secure flags.
+- Add `app.config['SESSION_COOKIE_SECURE'] = True` and `app.config['SESSION_COOKIE_HTTPONLY'] = True` after the `SESSION_COOKIE_SAMESITE` line.
+- Ensures cookies only ride on HTTPS and are inaccessible to JavaScript.
+
+**Finding 2 (🔴 Medium-High risk, defer implementation):** Password reset tokens sent in JSON response instead of via email.
+- **Current state:** `/api/auth/forgot-password` returns the token in JSON; no email is sent.
+- **Fix deferred:** Integrate email sending (Flask-Mail or Mailgun) so tokens travel via email, not HTTP responses.
+- **Why defer:** This is a feature enhancement (actually sending emails), not an immediate blocker. Tokens expire in 1 hour, are 256 bits of entropy, and one-time use only. Wire it up before shipping to friends; for now, document in CLAUDE.md that this path is for admin use only.
+
+**Finding 3 (⚠️ Medium risk):** No rate limiting on sensitive non-login endpoints.
+- Add Flask-Limiter to rate-limit `/api/auth/register` and `/api/auth/forgot-password` (e.g., 5 per minute per IP).
+- Login already has account-based throttling (V44); this caps the public endpoints.
+- ~10 lines of config in app.py.
+
+**Watch out:**
+- `init_db()` and the backfill functions (`backfill_palettes`, `backfill_phashes`,
+  `backfill_notes_fts`) are intertwined — decide whether the backfills come with `schema.py` on
+  Day 28 or wait for Day 31 (`images_common.py`) with the other palette code. Leaning: backfills
+  wait, so Day 28 stays a clean schema-only cut.
+- `test_schema_guard_locally.py` and `test_self_test_locally.py` both load the app fresh multiple
+  times per run and will need their imports repointed.
+
+**Done when:** `core.py` and `schema.py` exist, security fixes applied, `app.py` imports from them, the full suite is
+green, and `app.py` has dropped ~1,000 lines with zero behaviour change.
+
+**How it actually shipped (V70, August 26 2026):**
+- `backend/core.py` (141 lines) — `get_db()` + a new `db_path()` (reads `FA_DB_PATH` live rather
+  than snapshotting at import, so a multi-boot test harness gets the right file), `_shuffle_key()`,
+  `chunked()`/`SQL_PARAM_CHUNK`, `normalize_tag_value()`/`clear_ai_tags()`/`TAG_PLURAL_STRIP_EXCEPTIONS`/
+  `MANUAL_TAG_CATEGORIES`, `CAT_COLORS`/`CAT_LABELS`, `GEMINI_MODEL`/`GEMINI_PRICING`/`get_model_pricing()`.
+  Imports nothing from the project — stdlib only.
+- `backend/schema.py` (849 lines) — `_is_duplicate_column_error()`, `EXPECTED_COLUMNS`,
+  `missing_columns()`, `check_schema()`, `init_db()`, `load_embeddings_seed()`. `init_db()` gained one
+  parameter — `init_db(run_self_test=None)` — because `run_self_test()` **stayed in `app.py`** (it
+  calls `_deck_access()`/`touch_deck()`, which live there, and schema.py may not import app.py). app.py
+  passes it in at both boot sites. Every migration is byte-for-byte the original, verified by diffing
+  the whole `init_db` body against pre-change `main`; the only additions are the two `run_self_test`
+  lines and the new `rate_limit_hits` table.
+- app.py imports every moved name straight back (`from core import …` / `from schema import …`), so its
+  public surface is unchanged and **no `test_*_locally.py` needed repointing for the move** — verified
+  that none of them monkey-patch a moved name. `test_schema_guard_locally.py` was the one edit: it greps
+  source for `ALTER TABLE`, so its `open(...)` path moved from `app.py` to `schema.py`.
+- **6,960 → 6,136 lines in `app.py`** (−824 net; ~904 moved out, ~80 of security code added back).
+- Security: `SESSION_COOKIE_HTTPONLY=True` always; `SESSION_COOKIE_SECURE=True` except when
+  `RUNNING_LOCALLY` (`FA_DB_PATH` set) — otherwise the Flask test client and localhost dev drop the
+  cookie and every login-gated test breaks. Rate limiting is **hand-rolled** (Ryan's call over
+  Flask-Limiter — no new dependency, no +3 min deploys): a `rate_limit_hits` table, `_rate_limited()`
+  in app.py, 5 hits/60 s per IP on `/api/auth/register` + `/api/auth/forgot-password`, keyed on the
+  last `X-Forwarded-For` entry, fails **open** on any DB error, and no-ops entirely when local. Reset
+  token stays in the JSON response — documented admin-only in CLAUDE.md, email delivery still deferred.
+- New test: `scripts/test_day28_hardening_locally.py` (22 checks — the split wiring, cookie flags, and
+  the limiter in both local and simulated-production modes). Full suite 41/41 green before and after;
+  verified live in a browser (login, grid, search, image detail, all endpoints 200).
+- Also fixed in passing: `run_local_for_browser_check.py` and `diagnose_color_filter.py` had been
+  broken since V45 part 2 (they string-patched a `DB_PATH = '...'` line that no longer exists) — both
+  now load `backend/app.py` directly via `FA_DB_PATH`.
+
+---
+
+## Day 29 — Google Drive layer → `drive.py` *(planned)*
+
+**Goal:** All Google Drive connection, auth, and folder-listing code in one file. This is the
+layer sync, backup, crop, and upload all sit on top of, so it comes out early — and it's the one
+Ryan named first.
+
+- Moves: `get_drive_service()`, `get_user_drive_service()`, `get_user_credentials()`,
+  `get_oauth_flow()`, `get_service_account_email()`, `parse_drive_folder_id()`,
+  `list_images_in_folder()`, `get_root_folder_id()`, `get_or_create_removed_folder()`,
+  `download_drive_file()`, `drive_error_reason()`
+- Constants: `REMOVED_FOLDER_NAME`, `PERSONAL_LIBRARY_CAP`, `UPLOAD_SCOPES`
+- Depends only on `core.py` + the Google client libraries.
+
+**Watch out — this is the highest-blast-radius cut in the phase:**
+- Roughly **10 test scripts** swap these functions for fakes:
+  `run_local_for_browser_check.py`, `test_bulk_delete_locally.py`,
+  `test_duplicate_color_check_locally.py`, `test_crop_queue_locally.py`,
+  `test_personal_drive_connect_locally.py`, `test_oauth_token_refresh_locally.py`,
+  `test_perspective_crop_locally.py`, `test_personal_library_locally.py`,
+  `test_sync_delete_parity_locally.py`, `test_v25_clip_locally.py`. Every one needs repointing.
+- `MediaIoBaseDownload` / `MediaIoBaseUpload` are patched on the app module by some of those
+  tests, but they're Google library names *used by* sync / backup / crop code that hasn't moved
+  yet. They should stay imported in whichever module actually uses them and be patched there —
+  do **not** fold them into `drive.py` just because Drive tests touch them.
+- `sync_folder_worker()` (still in `app.py` until Day 34) will now call
+  `drive.get_drive_service()`, `drive.PERSONAL_LIBRARY_CAP`, etc. — qualified.
+
+**Done when:** `drive.py` exists, every Drive call site in `app.py` is qualified, all ~10 test
+scripts are repointed, full suite green.
+
+---
+
+## Day 30 — Gemini keys & usage → `gemini.py` *(planned)*
+
+**Goal:** The friend-API-key encryption and spend-tracking code, self-contained.
+
+- Moves: `_fernet()`, `encrypt_secret()`, `decrypt_secret()`, `set_user_gemini_key()`,
+  `get_user_gemini_key()`, `record_gemini_usage()` (~110 lines)
+- Depends on `core.py` + the `cryptography` package.
+
+**Watch out:** `test_gemini_keys_locally.py` and `test_security_hardening_locally.py` exercise
+these directly. `test_security_hardening_locally.py` is also the one V45 part 2 nearly broke —
+handle its imports by hand, not just via the scripted transform.
+
+**Done when:** `gemini.py` exists, both test scripts repointed, suite green.
+
+---
+
+## Day 31 — Image hydration & palette → `images_common.py` *(planned)*
+
+**Goal:** The helpers that turn a raw `images` row into the rich object the frontend gets, plus
+the boot-time backfills — shared today by search, decks, similar-images, utility views, sync, and
+crop.
+
+- Moves: `build_image_dict()`, `hydrate_image_rows()`, `_fetch_image_dict()`, `save_palette()`,
+  `backfill_palettes()`, `backfill_phashes()`, `backfill_notes_fts()` (~300 lines)
+- Depends on `core.py` + `colors.py` + `fingerprint.py` + `imaging.py` (all already modules).
+
+**Watch out:**
+- `build_image_dict()` has the `public=` flag that keeps public share links working (V43) —
+  moving it must not touch that logic.
+- Lots of callers. This is a "qualify many call sites" session more than a "move much code" one.
+- If the Day 28 note held, the three `backfill_*` functions arrive here from `schema.py`'s
+  territory — make sure `schema.py`/`init_db()` calls them via `images_common.` now.
+
+**Done when:** every hydration/backfill call site qualified, suite green.
+
+---
+
+## Day 32 — Tagging worker → `tagging.py` *(planned)*
+
+**Goal:** The Gemini auto-tag loop and its live-progress plumbing in one file.
+
+- Moves: `_select_pending_for_tagging()`, `_run_tagging_job()` / `_run_tagging_job_inner()`,
+  `trigger_tagging()`, `_broadcast_progress()`, the `_tag_progress` / `_sse_queues` state and
+  their locks, and `GEMINI_TAGGING_PROMPT` (~460 lines including the prompt)
+- Depends on `core.py` + `gemini.py` + the `google.genai` client.
+
+**Watch out:**
+- The `_tag_progress` dict is shared mutable state. The tagging routes staying in `app.py`
+  (`tag_progress_stream`, `tag_progress_snapshot`, `tag_start`, `tag_mine`, `tag_progress_mine`,
+  `retry_failed`) will read it as `tagging._tag_progress`. Confirm nothing keeps a *copy* of the
+  dict reference at import time.
+- ~8 test scripts set `trigger_tagging` to a no-op so tests don't call Gemini. All repointed to
+  `tagging.trigger_tagging = ...`.
+- The sync→tag handoff timing (V48) is delicate and documented in CLAUDE.md — the move must not
+  change *when* `trigger_tagging()` resolves relative to the sync-complete flag.
+
+**Done when:** `tagging.py` exists, routes read `tagging._tag_progress`, ~8 scripts repointed,
+suite green — including `test_personal_library_locally.py` which checks the sync-then-tag chain.
+
+---
+
+## Day 33 — Monthly backup → `backup.py` *(planned)*
+
+**Goal:** The once-a-month database-snapshot-to-Drive job, isolated.
+
+- Moves: `run_db_backup()`, `_backup_due()`, `_backup_scheduler_loop()`,
+  `start_backup_scheduler()`, `get_or_create_backups_folder()`, `BACKUP_FOLDER_NAME`,
+  `KEEP_BACKUP_COUNT` (~115 lines)
+- Depends on `core.py` + `drive.py`.
+
+**Watch out:** no dedicated test exists for this today — verification is the full suite staying
+green plus a manual read-through and, ideally, one real backup run confirmed in the Railway logs
+after deploy. Consider writing a small `test_backup_locally.py` as part of this session so the
+next person isn't flying blind.
+
+**Done when:** `backup.py` exists, `app.py` calls `backup.start_backup_scheduler()` on boot,
+suite green, one live backup confirmed.
+
+---
+
+## Day 34 — Crop worker → `crop.py` *(planned)*
+
+**Goal:** The background crop-job queue and its worker thread — including the 190-line
+`_process_crop_jobs()` that currently sits near the *top* of `app.py` for no reason.
+
+- Moves: `_process_crop_jobs()`, the `_crop_queue` / `_crop_progress` state and lock,
+  `_crop_job_counter`, `get_crop_progress()`, `reset_crop_progress()`, and the crop-apply logic
+  lifted out of the `crop_image()` route (route stays as a wrapper) (~300 lines)
+- Depends on `core.py` + `drive.py` + `perspective.py` + `imaging.py` + `images_common.py`.
+
+**Watch out:**
+- `test_crop_queue_locally.py` and `test_perspective_crop_locally.py` are the coverage here —
+  both patch Drive fakes and `trigger_tagging`, and `test_perspective_crop_locally.py` patches
+  `mod.ImageDraw` (a fixture helper, not app code). Repoint carefully.
+- The destructive-write tail (back up original to `_Removed` *first*, then overwrite) must move
+  as one piece — CLAUDE.md flags that this exact path is what broke in V27.
+
+**Done when:** `crop.py` exists, both crop test scripts repointed, suite green, and one real crop
+run confirmed on the live site (the standing "Day 27 crop" item — a real crop that explains
+itself in the toast if it fails).
+
+---
+
+## Day 35 — Drive sync → `sync.py` *(planned)*
+
+**Goal:** The folder-sync worker and everything it calls — the last big worker domain in
+`app.py`.
+
+- Moves: `sync_folder_worker()`, `_ingest_image()`, `_load_existing_phashes()`,
+  `reconcile_drive_changes()`, `_users_with_synced_folders()`, the `sync_state` dict,
+  `merge_plural_tag_duplicates()` (~360 lines)
+- Depends on `core.py` + `drive.py` + `tagging.py` + `images_common.py` + `fingerprint.py` +
+  `colors.py` + `imaging.py`. (It comes last precisely because it depends on nearly everything
+  else that moved.)
+
+**Watch out:**
+- `test_personal_library_locally.py`, `test_sync_delete_parity_locally.py`,
+  `test_v25_clip_locally.py`, `test_duplicate_color_check_locally.py` all call
+  `mod.sync_folder_worker(...)` and/or `_ingest_image` directly — repoint to `sync.`.
+- The half-the-library-vanished guard (V30) and the sync-delete cascade table list must move
+  verbatim.
+- `reconcile_drive_changes()` runs at boot on a background thread — confirm `app.py` still
+  starts that thread, now pointing at `sync.reconcile_drive_changes`.
+
+**Done when:** `sync.py` exists, 4 test scripts repointed, suite green, and one real sync run
+confirmed on the live site.
+
+---
+
+## Days 36–42 — Route Blueprints (backend) *(planned, granular)*
+
+With the workers out (Day 35), `app.py` should be roughly **routes + startup wiring**, likely in
+the 3,500–4,000-line range (down from ~6,960). Now the routes themselves come out, grouped by
+domain into Flask "blueprints" (a blueprint = a bundle of related routes registered onto the app
+as a unit). This is a distinct risk class from the worker extractions — blueprint registration,
+`url_for` endpoint names, and decorator availability all change — so each blueprint gets its own
+session.
+
+**The pattern every blueprint session follows:**
+1. Create `routes_<domain>.py` with a `Blueprint` object.
+2. Move the domain's `@app.route(...)` functions into it, changing `@app.route` →
+   `@bp.route` and keeping the URL paths byte-identical.
+3. Register the blueprint in `app.py` with `app.register_blueprint(bp)`.
+4. `admin_required` / `require_login` decorators move to `core.py` (or an `auth_helpers.py`) so
+   blueprints can import them without touching `app.py`.
+5. Full suite green before and after; every route's URL unchanged so the frontend needs zero
+   changes.
+
+### Day 36 — `routes_auth.py`
+Login, logout, register, setup, forgot/reset password, invite codes, `/api/auth/me`. ~250 lines.
+The `require_login` / `admin_required` / `_adopt_session_from_header` helpers move to `core.py`
+here. Highest care: the `@app.before_request` login gate must keep working across all blueprints.
+
+### Day 37 — `routes_search.py`
+`/api/search`, `/api/search/ids`, `/api/autocomplete`, `/api/interpret`, `/api/bookmarks`,
+`build_search_filters()`, `_fts5_match_query()`, `get_similar_images()`, `_cosine_similarity()`.
+~500 lines. Self-contained — search reads the DB, writes nothing except bookmarks.
+
+### Day 38 — `routes_tags.py`
+`/api/tags/*` (bulk apply/remove/preview/summary/suggestions), `/api/tag-categories`,
+`edit_tags`, `count_tags_for_images`, `_parse_bulk_tag_request`. ~350 lines. Pairs naturally with
+the `tagging.py` worker from Day 32 but stays a separate cut.
+
+### Day 39 — `routes_images.py`
+Favorite toggle, filmography edit, on-set notes, download, delete, bulk delete, thumbnail serve,
+full-res proxy, `regenerate_thumbnails`, `extract_colors`. ~600 lines. Touches Drive (delete →
+`_Removed`) so depends on `drive.py` being done.
+
+### Day 40 — `routes_decks.py`
+The whole decks/scenes/storyboard/share/feedback block — `list_decks` through
+`get_shared_deck` and the V42 client-feedback endpoints. ~900 lines, the single biggest route
+group. Self-contained domain (its own tables, its own `_deck_payload` / `_deck_access` helpers).
+The PDF export endpoint (`export_deck_pdf`) comes here too — the `pdf_export.py` module it calls
+is already split.
+
+### Day 41 — `routes_sync.py`
+`/api/sync/*`, `/api/sync-settings`, `/api/account/*` (folder connect, setup status, Gemini key),
+`/api/backups/*`, `/api/folders`, `/api/models`, `/api/config`. ~400 lines. Thin wrappers over
+the `sync.py` / `drive.py` / `backup.py` workers already extracted.
+
+### Day 42 — `routes_analytics.py` + final cleanup
+`/api/analytics`, `/api/analytics/users`, `/api/views/*`, `/api/views/log`,
+`get_utility_view()`, `log_image_views()`. ~200 lines. Plus: whatever's left in `app.py` should
+now be just the Flask app object, config, blueprint registration, `before_request` gate, the
+`serve()` catch-all for the React shell, and the `__main__` startup block — target **under 400
+lines**. Update CLAUDE.md's file-structure section to reflect the final module layout.
+
+---
+
+## Days 43+ — `Home.jsx` breakup (frontend) *(planned, separate track)*
+
+`frontend/src/pages/Home.jsx` is **1,855 lines with 36 separate pieces of state**. The V35
+stale-selection bug and the Day 20 crop-selection bug both lived here. Different language,
+different risks — there is no `.jsx` test suite the way there's a `test_*_locally.py` suite for
+the backend, so verification leans harder on live browser checks.
+
+**Rough cut plan (to be scoped properly in its own planning session before starting):**
+- **Day 43** — Extract search/filter state into a `useSearch()` custom hook (chips, NL chips,
+  note chips, colour, aspect ratio, film filter, the `buildFilterParams()` assembler). ~400
+  lines of state logic out.
+- **Day 44** — Extract Select Mode / Tag Mode into a `useSelection()` hook (the selection Set,
+  drag-select, shift-click range, the bulk-action handlers). ~350 lines. This is where the two
+  historical bugs lived.
+- **Day 45** — Extract the masonry grid + infinite scroll + view-logging into a `<ImageGrid>`
+  component. ~300 lines.
+- **Day 46** — Whatever's left: the page becomes composition — `<Home>` wires the hooks and
+  components together and owns very little state directly. Target **under 500 lines**.
+
+---
+
+## After Day 46 — stop, or reassess
+
+A ~400-line `app.py` split into ~15 focused modules, and a ~500-line `Home.jsx` composed from
+hooks and components, is a genuinely different codebase to work in. At that point the refactor
+phase is done. Anything further (splitting `ImageDetail.jsx`, `DeckDetail.jsx`, further backend
+helper consolidation) is case-by-case, driven by actual friction, not a plan.
+
+---
+
 ## Summary
 
 | Day | Focus | Key Output |
@@ -702,3 +1076,23 @@ not started this session, per plan. `Home.jsx` remains untouched.
 | 25 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run ✅ *(V43)* |
 | 26 | Security + reliability hardening | Login throttling, key encryption ✅ *(V44)* |
 | 27 | Structural refactor | Pure maths out of app.py: 7,337 → 6,626 lines; test harness unblocked ✅ *(V45)* |
+| **— PHASE 3: THE REFACTOR —** | *split app.py one module/session, tests green each side* | |
+| 28 | Foundation: `core.py` + `schema.py` + security fixes | Shared DB/constants + boot code out (app.py −824 lines); cookie flags, hand-rolled rate limiting ✅ *(V70)* |
+| 29 | Google Drive layer → `drive.py` | All Drive connection/auth/listing in one file *(planned)* |
+| 30 | Gemini keys & usage → `gemini.py` | Key encryption + spend tracking isolated *(planned)* |
+| 31 | Image hydration & palette → `images_common.py` | `build_image_dict` + backfills shared cleanly *(planned)* |
+| 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + progress plumbing *(planned)* |
+| 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job isolated *(planned)* |
+| 34 | Crop worker → `crop.py` | Background crop queue + worker thread *(planned)* |
+| 35 | Drive sync → `sync.py` | Folder-sync worker + ingest, last big worker domain *(planned)* |
+| 36 | Routes → `routes_auth.py` | Login/register/invite routes as a blueprint *(planned)* |
+| 37 | Routes → `routes_search.py` | Search/autocomplete/bookmarks/similar as a blueprint *(planned)* |
+| 38 | Routes → `routes_tags.py` | Bulk tag ops + tag editing as a blueprint *(planned)* |
+| 39 | Routes → `routes_images.py` | Favorite/filmography/notes/download/delete/thumb *(planned)* |
+| 40 | Routes → `routes_decks.py` | Decks/scenes/storyboard/share/feedback/PDF, biggest group *(planned)* |
+| 41 | Routes → `routes_sync.py` | Sync/account/backups/config route wrappers *(planned)* |
+| 42 | Routes → `routes_analytics.py` + cleanup | Analytics/views + app.py down to <400 lines *(planned)* |
+| 43 | `Home.jsx` → `useSearch()` hook | Search/filter state extracted from the 1,855-line page *(planned)* |
+| 44 | `Home.jsx` → `useSelection()` hook | Select/Tag Mode logic out (where 2 historical bugs lived) *(planned)* |
+| 45 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |
+| 46 | `Home.jsx` final composition | Page becomes wiring; target <500 lines *(planned)* |
