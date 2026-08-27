@@ -2849,6 +2849,20 @@ was lost before committing.**
 - `CLAUDE.md` — File Structure + Phase 3 section + CI count
 - `Docs/2_Frame_Atlas_Build_Timeline.md` — Day 29 marked complete, summary table row updated
 
+### Post-commit verification (added at end of session)
+Diffed the moved code against `HEAD` (V70) before committing: both blocks byte-identical
+including whitespace, no moved def left behind or duplicated in `app.py`, zero non-comment
+additions to `app.py` that aren't a `drive.`-qualified call, and `sync_folder_worker` /
+`run_db_backup` / `reconcile_drive_changes` / `_process_crop_jobs` identical to HEAD except the
+`drive.` qualification. On the pre-existing uncommitted state: the final `git diff HEAD` is 100%
+this session's work, so whatever the old `M backend/app.py` was, it left no trace and nothing of
+this session's is built on top of it.
+
+### Commits
+`8d1ee5e` (V71 (Day 29): Google Drive layer → backend/drive.py) — pushed to `main`, Railway
+deploy `cedf122c` **SUCCESS**: boot log `[schema] OK` + `[selftest] OK — 3 live check(s) passed`,
+221 embeddings loaded, live site `/api/health` 200 and bad login 401 (not 500).
+
 ### Starting Point for Next Session
 **Day 30 — Gemini keys & usage → `gemini.py`.** Move `_fernet()`, `encrypt_secret()`,
 `decrypt_secret()`, `set_user_gemini_key()`, `get_user_gemini_key()`, `record_gemini_usage()`
