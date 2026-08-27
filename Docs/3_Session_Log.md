@@ -2747,7 +2747,9 @@ No other work is queued. Ask Ryan which of the two (or something new) he wants t
   the standing rules.
 
 ### Commits
-`<this commit>` (V70: core.py + schema.py split + session cookie flags + rate limiting)
+`0e83455` (V70: core.py + schema.py split + session cookie flags + rate limiting) — deployed
+to Railway clean: boot log shows `[schema] OK` + `[selftest] OK — 3 live check(s) passed against
+the real database`, 221 embeddings loaded, site serving (health 200, bad login 401 not 500).
 
 ### Starting Point for Next Session
 **Day 29 — Google Drive layer → `drive.py`.** Move `get_drive_service()`, `get_user_drive_service()`,
