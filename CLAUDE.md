@@ -84,9 +84,10 @@ When Ryan says **"End chat"**:
 ```
 frame-atlas/
 ├── backend/
-│   ├── app.py              # Endpoints, Drive, tagging, crop worker, sync (Phase 3 splits this)
+│   ├── app.py              # Endpoints, tagging, crop worker, sync (Phase 3 splits this)
 │   ├── core.py             # get_db/db_path, tag normalisation, taxonomy maps, Gemini constants (V70)
 │   ├── schema.py           # init_db + all migrations + check_schema + load_embeddings_seed (V70)
+│   ├── drive.py            # Google Drive: service/OAuth clients, folder listing, _Removed, download (V71)
 │   ├── colors.py           # Palette extraction + colour matching (V45)
 │   ├── fingerprint.py      # phash + signature, duplicate detection (V45)
 │   ├── imaging.py          # Thumbnails + aspect-ratio maths (V45)
@@ -131,9 +132,15 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - **`run_self_test()` stayed in `app.py`.** It calls `_deck_access()`/`touch_deck()`, which are deck code that stays in `app.py`, and `schema.py` may not import `app.py`. So `init_db()` took one parameter — `init_db(run_self_test=None)` — and `app.py` passes it at both boot sites. `test_self_test_locally.py` still monkeypatches `mod._deck_access` and it still works, because `run_self_test` resolves that name in `app.py`'s own globals.
 - `app.py` imports every moved name straight back (`from core import …` / `from schema import …`), same as V45 — so `mod.<name>` keeps resolving and **no test script needed repointing for the move itself**. The one edit was `test_schema_guard_locally.py`, which greps source text for `ALTER TABLE` (now in `schema.py` not `app.py`).
 - Every migration in `init_db()` is byte-for-byte the original — verified by diffing the whole function body against pre-change `main`. Only additions: the two `run_self_test` lines and the `rate_limit_hits` table (below).
+- **Day 29 (V71): `drive.py`.** The whole Google Drive layer: `get_drive_service()`, `get_user_drive_service()`, `get_user_credentials()`, `get_oauth_flow()`, `get_service_account_email()`, `parse_drive_folder_id()`, `list_images_in_folder()`, `get_root_folder_id()`, `get_or_create_removed_folder()`, `download_drive_file()`, `drive_error_reason()` + constants `REMOVED_FOLDER_NAME`, `PERSONAL_LIBRARY_CAP`, `UPLOAD_SCOPES`. Every function body character-for-character the original. Imports `get_db` from `core` + the Google client libs (`Credentials`, `UserCredentials`, `Flow`, `Request`, `RefreshError`, `build`, `HttpError`, `MediaIoBaseDownload`) — those import lines left `app.py`.
+- **This cut followed rule 2 (qualify + repoint), NOT Day 28's re-export.** `app.py` does `import drive` and every call site is qualified (`drive.get_drive_service()`, `drive.PERSONAL_LIBRARY_CAP`, …). The 11 test scripts that monkeypatch a moved name were repointed `mod.<name>` → `mod.drive.<name>` as a scripted transform. `mod.drive` works because `app.py` does `import drive`, so the module object is reachable — tests need no extra import.
+- **`MediaIoBaseDownload` is imported in BOTH `app.py` and `drive.py`.** `download_drive_file()` moved (so `drive.py` imports it), but `sync_folder_worker()`, `get_full_image()`, `regenerate_thumbnails()`, `download_image()` still use it directly in `app.py`. `MediaIoBaseUpload` did not move at all. The 3 test scripts that fake the crop/reconcile download path (`test_crop_queue`, `test_perspective_crop`, `run_local_for_browser_check`) now patch **`mod.drive.MediaIoBaseDownload`** in addition to `mod.MediaIoBaseDownload` — the crop worker's download resolves the name in `drive.py`'s namespace now. `test_sync_delete_parity` / `test_personal_library` only exercise `sync_folder_worker` (app.py's own `MediaIoBaseDownload`), so they were not touched on that point.
+- **`test_oauth_token_refresh_locally.py` also patched `mod.UserCredentials.refresh`** (the Google class, not a project function) — repointed to `mod.drive.UserCredentials.refresh`. It was the only script referencing a moved *Google library* name.
+- `run_db_backup()` / `get_or_create_backups_folder()` / `BACKUP_FOLDER_NAME` / `KEEP_BACKUP_COUNT` deliberately stayed in `app.py` for Day 33 (`backup.py`) — their Drive calls are qualified now (`drive.get_user_drive_service(1)` etc.). `DRIVE_RATE_LIMIT_REASONS` also stayed (it's `bulk_delete_images`'s retry policy, not Drive plumbing).
+- `app.py`: **6,136 → 5,944 lines** (−192). `drive.py` is 239 lines.
 
 **CI (V43/Day 25)**
-- `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **38 Python + 3 `.mjs` as of V70/Day 28**. Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in
+- `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **39 Python + 3 `.mjs` as of V71/Day 29** (`test_drive_locally.py` added Day 29). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in
 - `test_shuffle_locally.py` was skipped with an explained `::warning::` originally — the shuffle skip was removed before CI even shipped, per the workflow file's own comment (the "V45p2 flagged stale" note); the script currently passes and runs like the rest
 
 **Server**

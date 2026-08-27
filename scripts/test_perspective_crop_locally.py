@@ -243,9 +243,12 @@ def main():
 
     drive = FakeDrive(make_flat_jpeg(mod))
     user_drive = FakeUserDrive()
-    mod.get_drive_service = lambda: drive
-    mod.get_user_drive_service = lambda uid: user_drive
+    mod.drive.get_drive_service = lambda: drive
+    mod.drive.get_user_drive_service = lambda uid: user_drive
     mod.MediaIoBaseDownload = FakeDownloader
+    # Day 29: download_drive_file() moved to drive.py, so the crop worker's
+    # download now resolves MediaIoBaseDownload in drive.py's namespace.
+    mod.drive.MediaIoBaseDownload = FakeDownloader
     mod.trigger_tagging = lambda *a, **k: None
     print("App imported OK (Drive faked).")
 
@@ -499,8 +502,8 @@ def main():
     # ── No connected Google account: same abort ──────────────────────────────
     admin.post("/api/crop-progress/reset")
     drive.update_calls.clear()
-    saved_get_user_drive = mod.get_user_drive_service
-    mod.get_user_drive_service = lambda uid: None
+    saved_get_user_drive = mod.drive.get_user_drive_service
+    mod.drive.get_user_drive_service = lambda uid: None
 
     drive.files_bytes["drive-file-3"] = source_jpeg
     conn = sqlite3.connect(db_path)
@@ -518,7 +521,7 @@ def main():
           bool(progress and progress["failed"]), progress)
     check("No connected Google account prevents the Drive overwrite",
           "drive-file-3" not in drive.update_calls, drive.update_calls)
-    mod.get_user_drive_service = saved_get_user_drive
+    mod.drive.get_user_drive_service = saved_get_user_drive
 
     # ══ PART 4: the rectangle path is untouched ═══════════════════════════════
     print("\n── Rectangle path (must behave exactly as before V32) ──")

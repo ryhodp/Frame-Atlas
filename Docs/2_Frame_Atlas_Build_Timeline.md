@@ -792,7 +792,7 @@ green, and `app.py` has dropped ~1,000 lines with zero behaviour change.
 
 ---
 
-## Day 29 — Google Drive layer → `drive.py` *(planned)*
+## Day 29 — Google Drive layer → `drive.py` *(V71 — COMPLETE)*
 
 **Goal:** All Google Drive connection, auth, and folder-listing code in one file. This is the
 layer sync, backup, crop, and upload all sit on top of, so it comes out early — and it's the one
@@ -821,6 +821,31 @@ Ryan named first.
 
 **Done when:** `drive.py` exists, every Drive call site in `app.py` is qualified, all ~10 test
 scripts are repointed, full suite green.
+
+**How it actually shipped (V71, August 27 2026):**
+- `backend/drive.py` (239 lines) — the 11 functions + 3 constants above, every body
+  character-for-character the original. Imports `get_db` from `core` and the Google client libs
+  that left `app.py` (`Credentials`, `UserCredentials`, `Flow`, `Request`, `RefreshError`,
+  `build`, `HttpError`, `MediaIoBaseDownload`).
+- **11 test scripts repointed, not 10** — the estimate missed `test_admin_analytics_locally.py`,
+  which reads `mod.PERSONAL_LIBRARY_CAP`. Transform was `mod.<name>` → `mod.drive.<name>` across
+  the moved set; `mod.drive` is reachable because `app.py` does `import drive`, so no script
+  needed a new import.
+- **`MediaIoBaseDownload` ended up imported in BOTH files.** `download_drive_file()` moved (so
+  `drive.py` imports it) but four other `app.py` functions still use it directly. The 3 scripts
+  that fake the crop/reconcile download path (`test_crop_queue`, `test_perspective_crop`,
+  `run_local_for_browser_check`) now also patch `mod.drive.MediaIoBaseDownload`. `MediaIoBaseUpload`
+  did not move.
+- `test_oauth_token_refresh_locally.py` was the one script patching a moved *Google class*
+  (`mod.UserCredentials.refresh`) rather than a project function — repointed to
+  `mod.drive.UserCredentials.refresh`.
+- `run_db_backup()` + its folder helper + constants stayed in `app.py` for Day 33; their Drive
+  calls are qualified now. `app.py`: **6,136 → 5,944 lines**.
+- New `scripts/test_drive_locally.py` (32 checks — split wiring, `parse_drive_folder_id` string
+  cases, `get_root_folder_id` per-user + fallback, `drive_error_reason` HttpError parsing,
+  `get_service_account_email`). Full suite 39 Python + 3 `.mjs` green before and after; the
+  browser-check harness boots clean and syncs its 10 fake images end-to-end through the qualified
+  call paths.
 
 ---
 
@@ -1078,7 +1103,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 27 | Structural refactor | Pure maths out of app.py: 7,337 → 6,626 lines; test harness unblocked ✅ *(V45)* |
 | **— PHASE 3: THE REFACTOR —** | *split app.py one module/session, tests green each side* | |
 | 28 | Foundation: `core.py` + `schema.py` + security fixes | Shared DB/constants + boot code out (app.py −824 lines); cookie flags, hand-rolled rate limiting ✅ *(V70)* |
-| 29 | Google Drive layer → `drive.py` | All Drive connection/auth/listing in one file *(planned)* |
+| 29 | Google Drive layer → `drive.py` | Drive connection/auth/listing in one file; 11 test scripts repointed (app.py −192 lines) ✅ *(V71)* |
 | 30 | Gemini keys & usage → `gemini.py` | Key encryption + spend tracking isolated *(planned)* |
 | 31 | Image hydration & palette → `images_common.py` | `build_image_dict` + backfills shared cleanly *(planned)* |
 | 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + progress plumbing *(planned)* |

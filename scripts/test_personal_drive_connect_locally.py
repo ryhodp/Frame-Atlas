@@ -85,8 +85,8 @@ def main():
 
     # 5. get_root_folder_id(user_id) returns the RIGHT user's folder, not
     # just whichever sync_settings row is newest overall (the old bug).
-    assert mod.get_root_folder_id(1) == "1LHPVyo3QjOEcizc1Io2UVjxzX4FQ7yDG", mod.get_root_folder_id(1)
-    assert mod.get_root_folder_id(2) == "friend-folder-id", mod.get_root_folder_id(2)
+    assert mod.drive.get_root_folder_id(1) == "1LHPVyo3QjOEcizc1Io2UVjxzX4FQ7yDG", mod.drive.get_root_folder_id(1)
+    assert mod.drive.get_root_folder_id(2) == "friend-folder-id", mod.drive.get_root_folder_id(2)
     print("5. get_root_folder_id() is correctly scoped per user (admin's row is older, still returns correctly).")
 
     # 6. A friend can start a sync WITHOUT any personal Google connection.

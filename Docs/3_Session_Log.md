@@ -2760,3 +2760,100 @@ the real database`, 221 embeddings loaded, site serving (health 200, bad login 4
 and every one needs `mod.get_drive_service = fake` → `drive.get_drive_service = fake`; apply as a
 scripted transform, eyeball the diff first. `MediaIoBase*` stay imported wherever the code that uses
 them lives (still `app.py` for now) — do NOT fold them into `drive.py`. Suite green before and after.
+
+---
+
+## Day 29 — Google Drive layer → `drive.py` (Frame Atlas V71 complete)
+*Completed: August 27, 2026*
+*Status: DAY 29 COMPLETE — 39 Python + 3 `.mjs` green before and after; browser-check harness boots + syncs clean*
+
+### What We Built
+The whole Google Drive layer moved out of `app.py` into `backend/drive.py` (239 lines) — the
+highest-blast-radius cut in Phase 3, per the plan.
+
+- **Moved (every function body character-for-character the original):** `get_drive_service()`,
+  `get_user_drive_service()`, `get_user_credentials()`, `get_oauth_flow()`,
+  `get_service_account_email()`, `parse_drive_folder_id()`, `list_images_in_folder()`,
+  `get_root_folder_id()`, `get_or_create_removed_folder()`, `download_drive_file()`,
+  `drive_error_reason()` + constants `REMOVED_FOLDER_NAME`, `PERSONAL_LIBRARY_CAP`, `UPLOAD_SCOPES`.
+- **Imports that left `app.py` with the code:** `Credentials` (service_account),
+  `UserCredentials`, `Flow`, `Request`, `RefreshError`, `build`, `HttpError`. `drive.py`'s only
+  project import is `from core import get_db`.
+- **`app.py`: 6,136 → 5,944 lines** (−192).
+
+### The two decisions confirmed with Ryan (pre-coding)
+- **Qualify + repoint, NOT re-export.** `app.py` does `import drive` and every call site is
+  qualified (`drive.get_drive_service()`, `drive.PERSONAL_LIBRARY_CAP`, …). This follows the
+  Phase 3 stated rule rather than Day 28's re-export shortcut — Ryan's call for fewer hidden
+  trapdoors, even though it means touching the test scripts. 38 call sites qualified in `app.py`.
+- **`PERSONAL_LIBRARY_CAP` → `drive.py`** (per the written plan), not `core.py`. It lives next to
+  the Drive code and its call sites read `drive.PERSONAL_LIBRARY_CAP` now.
+- **`get_or_create_backups_folder()` + backup constants stay in `app.py`** for Day 33 (`backup.py`);
+  their Drive calls are qualified now (`drive.get_user_drive_service(1)` etc.).
+- **Added `scripts/test_drive_locally.py`** (32 checks) — drive.py had no direct coverage before.
+
+### Test scripts repointed — 11, not the ~10 estimated
+The plan's list missed `test_admin_analytics_locally.py` (it reads `mod.PERSONAL_LIBRARY_CAP`).
+Transform was `mod.<name>` → `mod.drive.<name>` across the moved set, applied as a scripted
+regex pass and eyeballed in the diff. `mod.drive` is reachable in every script because `app.py`
+does `import drive` — no script needed a new import line.
+
+Full list: `run_local_for_browser_check`, `test_bulk_delete`, `test_crop_queue`,
+`test_duplicate_color_check`, `test_personal_drive_connect`, `test_oauth_token_refresh`,
+`test_personal_library`, `test_perspective_crop`, `test_sync_delete_parity`, `test_v25_clip`,
+`test_admin_analytics`.
+
+### Two migration details that weren't obvious from the plan
+- **`MediaIoBaseDownload` is now imported in BOTH `app.py` and `drive.py`.** `download_drive_file()`
+  moved (drive.py imports it), but `sync_folder_worker()`, `get_full_image()`,
+  `regenerate_thumbnails()`, and `download_image()` still use it directly in `app.py`. The 3 test
+  scripts that fake the crop/reconcile download path (`test_crop_queue`, `test_perspective_crop`,
+  `run_local_for_browser_check`) had to *also* patch `mod.drive.MediaIoBaseDownload` — the crop
+  worker's download now resolves that name in drive.py's namespace, so patching only the app.py
+  copy would silently stop intercepting it. `test_sync_delete_parity` / `test_personal_library`
+  only exercise `sync_folder_worker` (app.py's own copy), so they were correctly left alone.
+  `MediaIoBaseUpload` did not move at all.
+- **`test_oauth_token_refresh_locally.py` also patched a moved Google *class*** —
+  `mod.UserCredentials.refresh` — not just project functions. Repointed to
+  `mod.drive.UserCredentials.refresh` (a plain `sed`, done by hand since the scripted transform
+  only targeted the function/constant names). It was the only script referencing a moved library name.
+
+### Testing
+- Baseline captured first on the pre-change tree: 38 Python + 3 `.mjs`, all green.
+- After: 39 Python (`test_drive_locally.py` added) + 3 `.mjs`, all green. One failure mid-way
+  (`test_oauth_token_refresh` — the `UserCredentials` patch above) was found and fixed before
+  moving on.
+- `scripts/run_local_for_browser_check.py` boots clean: `[schema] OK`, `[selftest] OK`,
+  **"Sync complete. 10 new images added."** — proving `sync_folder_worker` →
+  `drive.list_images_in_folder` → the fake Drive and the per-image download all work through the
+  qualified call paths. `health` 200, admin login 200, `[db-backup] Skipped` (backup reached
+  `drive.get_user_drive_service`), `[reconcile]` reached the Drive layer.
+
+### Heads-up for Ryan — pre-existing uncommitted state at session start
+`git status` at the start of this session showed `M backend/app.py` and an **untracked
+`backend/drive.py`** — work that predates this session, with no reflog entry, no stash, and
+`drive.py` never tracked. It looked like an earlier aborted start on Day 29. I overwrote
+`backend/drive.py` with a fresh cut and my `app.py` edits matched the *committed* V70 text
+exactly (so the final `git diff` against HEAD is 100% this session's work). If there was
+meaningful code in that old `drive.py`, it's gone and there's no trace to recover it from — but
+given the plan said Day 29 wasn't started, it was most likely a stub. **Confirm nothing of value
+was lost before committing.**
+
+### Files Changed
+- `backend/drive.py` — new, 239 lines
+- `backend/app.py` — Drive imports removed, `import drive` added, 38 call sites qualified,
+  moved defs replaced with pointer comments (6,136 → 5,944 lines)
+- `scripts/test_drive_locally.py` — new, 32 checks
+- 11 `scripts/test_*_locally.py` — `mod.<name>` → `mod.drive.<name>`; 3 also patch
+  `mod.drive.MediaIoBaseDownload`; `test_oauth_token_refresh` also `mod.drive.UserCredentials`
+- `CLAUDE.md` — File Structure + Phase 3 section + CI count
+- `Docs/2_Frame_Atlas_Build_Timeline.md` — Day 29 marked complete, summary table row updated
+
+### Starting Point for Next Session
+**Day 30 — Gemini keys & usage → `gemini.py`.** Move `_fernet()`, `encrypt_secret()`,
+`decrypt_secret()`, `set_user_gemini_key()`, `get_user_gemini_key()`, `record_gemini_usage()`
+(~110 lines) into `backend/gemini.py` (imports `core` + the `cryptography` package). Same
+discipline: qualify call sites, repoint tests. `test_gemini_keys_locally.py` and
+`test_security_hardening_locally.py` exercise these directly — and per CLAUDE.md,
+`test_security_hardening_locally.py`'s imports get handled **by hand**, not the scripted
+transform (V45 part 2 nearly overwrote the real `app.py` through it). Suite green before and after.

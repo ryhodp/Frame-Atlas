@@ -115,7 +115,7 @@ def main():
 
     jpeg = make_jpeg(mod)
     drive = FakeDrive(jpeg)
-    mod.get_drive_service = lambda: drive
+    mod.drive.get_drive_service = lambda: drive
     mod.MediaIoBaseDownload = FakeDownloader
 
     FRIEND_FOLDER = "FriendFolderId_ABC123xyz"
@@ -140,7 +140,7 @@ def main():
     FRIEND_ID = 2
 
     # 1. Folder-link parsing: every paste format friends will realistically use.
-    p = mod.parse_drive_folder_id
+    p = mod.drive.parse_drive_folder_id
     assert p("https://drive.google.com/drive/folders/ABC123_-xyz?usp=sharing") == "ABC123_-xyz"
     assert p("https://drive.google.com/drive/u/0/folders/ABC123_-xyz") == "ABC123_-xyz"
     assert p("https://drive.google.com/open?id=ABC123_-xyz") == "ABC123_-xyz"
@@ -202,7 +202,7 @@ def main():
     print("8. Post-sync auto-tag: skipped while keyless, fires (scoped) once a key exists.")
 
     # 9. Soft cap: shrink the cap, add more files, sync stops politely.
-    mod.PERSONAL_LIBRARY_CAP = 7
+    mod.drive.PERSONAL_LIBRARY_CAP = 7
     drive.folders[FRIEND_FOLDER]["files"] += [
         {"id": f"file_extra_{i}", "name": f"extra_{i}.jpg", "mimeType": "image/jpeg",
          "size": "1000", "md5Checksum": f"md5x_{i}"}

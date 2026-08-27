@@ -288,16 +288,19 @@ class FakeMediaUpload:
         self.mimetype = mimetype
 
 
-mod.get_drive_service = lambda: drive
+mod.drive.get_drive_service = lambda: drive
 mod.MediaIoBaseDownload = FakeDownloader
+# Day 29: download_drive_file() (used by the crop worker and reconcile) moved
+# to drive.py — patch its MediaIoBaseDownload reference there too.
+mod.drive.MediaIoBaseDownload = FakeDownloader
 mod.MediaIoBaseUpload = FakeMediaUpload
 
 # Upload (V7) and web clipping (V25) write through the admin's *user* Google
 # connection rather than the service account, so they need their own stand-in —
 # otherwise both dead-end at "Connect Google Drive in Settings" locally, since
 # there's no real OAuth token here.
-mod.get_user_drive_service = lambda uid: drive
-mod.get_root_folder_id = lambda uid: "SharedDemoFolder_ABC123"
+mod.drive.get_user_drive_service = lambda uid: drive
+mod.drive.get_root_folder_id = lambda uid: "SharedDemoFolder_ABC123"
 
 print("Fake Drive active:")
 print("  shareable folder ID:  SharedDemoFolder_ABC123  (connects + syncs 8 images)")

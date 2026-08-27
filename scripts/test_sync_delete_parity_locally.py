@@ -103,7 +103,7 @@ def main():
 
     jpeg = make_jpeg(mod)
     drive = FakeDrive(jpeg)
-    mod.get_drive_service = lambda: drive
+    mod.drive.get_drive_service = lambda: drive
     mod.MediaIoBaseDownload = FakeDownloader
     mod.trigger_tagging = lambda *a, **k: None
 

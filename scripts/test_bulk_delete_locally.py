@@ -108,8 +108,8 @@ def main():
     mod.app.config["TESTING"] = True
 
     drive = FakeDrive()
-    mod.get_drive_service = lambda: drive
-    mod.get_root_folder_id = lambda uid: "root-folder"
+    mod.drive.get_drive_service = lambda: drive
+    mod.drive.get_root_folder_id = lambda uid: "root-folder"
     mod.trigger_tagging = lambda *a, **k: None
     print("App imported OK (Drive faked).")
 

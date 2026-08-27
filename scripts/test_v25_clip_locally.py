@@ -103,8 +103,8 @@ def main():
     mod.app.config["TESTING"] = True
 
     drive = FakeDrive()
-    mod.get_user_drive_service = lambda uid: drive
-    mod.get_root_folder_id = lambda uid: "folder-root"
+    mod.drive.get_user_drive_service = lambda uid: drive
+    mod.drive.get_root_folder_id = lambda uid: "folder-root"
     mod.trigger_tagging = lambda *a, **k: None      # no Gemini calls in tests
     print("App imported OK (Drive faked).")
 

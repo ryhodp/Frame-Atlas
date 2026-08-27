@@ -56,7 +56,7 @@ print("2. Admin sees aggregate totals + per-user list. ✅", data["aggregate"])
 casey = next(u for u in data["users"] if u["name"] == "casey")
 assert casey["last_login_at"] is not None, casey
 assert casey["role"] == "user"
-assert casey["image_cap"] == mod.PERSONAL_LIBRARY_CAP
+assert casey["image_cap"] == mod.drive.PERSONAL_LIBRARY_CAP
 print("3. Casey's row: last_login_at set, role=user, image_cap enforced. ✅")
 
 # 4. Admin (id 1) has no image cap

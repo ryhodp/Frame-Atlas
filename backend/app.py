@@ -20,14 +20,10 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image, ImageOps
-from google.oauth2.service_account import Credentials
-from google.oauth2.credentials import Credentials as UserCredentials
-from google_auth_oauthlib.flow import Flow
-from google.auth.transport.requests import Request
-from google.auth.exceptions import RefreshError
-from googleapiclient.discovery import build
+# Day 29 (Phase 3): all Google Drive connection/auth/folder code moved to
+# drive.py. MediaIoBaseDownload/Upload stay here — the sync worker, backup,
+# crop worker and upload route use them directly and did not move.
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
-from googleapiclient.errors import HttpError
 from google import genai as genai_client
 
 from pdf_export import build_deck_pdf, pdf_download_name, LAYOUTS as PDF_LAYOUTS
@@ -85,6 +81,10 @@ from schema import (
     _is_duplicate_column_error, EXPECTED_COLUMNS, missing_columns,
     check_schema, init_db, load_embeddings_seed,
 )
+
+# Day 29 (Phase 3): Google Drive layer. Call sites are qualified
+# (drive.get_drive_service()); test scripts patch fakes onto this module.
+import drive
 
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -224,10 +224,10 @@ def _process_crop_jobs():
                 old_file_id = row['drive_file_id']
                 owner_id = row['user_id']
 
-                service = get_drive_service()
+                service = drive.get_drive_service()
 
                 # Download original
-                original_bytes = download_drive_file(service, old_file_id)
+                original_bytes = drive.download_drive_file(service, old_file_id)
                 meta = service.files().get(fileId=old_file_id, fields='mimeType').execute()
 
                 # Crop in memory
@@ -264,11 +264,11 @@ def _process_crop_jobs():
                 cropped_bytes = out.getvalue()
 
                 # Back up original to _Removed
-                backup_service = get_user_drive_service(owner_id) or get_user_drive_service(1)
+                backup_service = drive.get_user_drive_service(owner_id) or drive.get_user_drive_service(1)
                 if backup_service is None:
                     raise ValueError('No connected Google account for backup')
 
-                removed_id = get_or_create_removed_folder(service, get_root_folder_id(owner_id))
+                removed_id = drive.get_or_create_removed_folder(service, drive.get_root_folder_id(owner_id))
                 stem, dot, ext = (row['filename'] or 'image').rpartition('.')
                 if not dot:
                     stem, ext = (row['filename'] or 'image'), 'jpg'
@@ -1384,182 +1384,13 @@ def trigger_tagging(user_id=None):
 # ============================================================================
 # GOOGLE DRIVE & SYNC FUNCTIONS
 # ============================================================================
-
-def get_drive_service():
-    creds_json = os.environ.get('GOOGLE_DRIVE_CREDENTIALS')
-    if not creds_json:
-        raise ValueError("GOOGLE_DRIVE_CREDENTIALS environment variable not set")
-
-    creds_dict = json.loads(creds_json)
-    credentials = Credentials.from_service_account_info(
-        creds_dict,
-        # Full drive scope so delete can move files to _Removed. Actual power is
-        # still capped by what the folder share grants the service account
-        # (Viewer = read-only, Editor = can move files).
-        scopes=['https://www.googleapis.com/auth/drive']
-    )
-    return build('drive', 'v3', credentials=credentials)
-
-REMOVED_FOLDER_NAME = '_Removed'
-
-# V17: personal libraries. Friends share their Drive folder with the service
-# account's email and paste the folder link — no extra Google permissions,
-# no unverified-app warning screens, no 7-day token expiry.
-PERSONAL_LIBRARY_CAP = 1000  # max images per non-admin library (soft cap)
-
-def get_service_account_email():
-    """The service account's email — what friends paste into Drive's Share
-    box so Frame Atlas can read their folder."""
-    creds_json = os.environ.get('GOOGLE_DRIVE_CREDENTIALS')
-    if not creds_json:
-        return None
-    try:
-        return json.loads(creds_json).get('client_email')
-    except Exception:
-        return None
-
-def parse_drive_folder_id(text):
-    """Pull a folder ID out of whatever the user pasted — a full Drive URL
-    (https://drive.google.com/drive/folders/<id>?usp=sharing, /drive/u/0/
-    variants, ?id= form) or the bare ID itself. Returns None if nothing
-    ID-shaped is found."""
-    text = (text or '').strip()
-    if not text:
-        return None
-    m = re.search(r'/folders/([A-Za-z0-9_-]+)', text)
-    if m:
-        return m.group(1)
-    m = re.search(r'[?&]id=([A-Za-z0-9_-]+)', text)
-    if m:
-        return m.group(1)
-    # Bare ID: Drive IDs are long unbroken strings of URL-safe characters
-    if re.fullmatch(r'[A-Za-z0-9_-]{15,}', text):
-        return text
-    return None
-
-# Upload uses a separate OAuth sign-in (acting as Ryan) rather than the
-# read-only service account, since the account needs write access to create
-# files. drive.file is the narrowest scope that allows creating new files —
-# it only ever sees files this app itself created, not the whole Drive.
-UPLOAD_SCOPES = ['https://www.googleapis.com/auth/drive.file']
-
-def get_oauth_flow(redirect_uri):
-    client_config = {
-        "web": {
-            "client_id": os.environ.get('GOOGLE_OAUTH_CLIENT_ID'),
-            "client_secret": os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET'),
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-    }
-    return Flow.from_client_config(client_config, scopes=UPLOAD_SCOPES, redirect_uri=redirect_uri)
-
-def get_user_credentials(user_id):
-    """Refreshed google-auth Credentials for this user's own Google sign-in
-    (Day 8, generalized Day 14 Stage 2 — used to be admin-only/hardcoded to
-    user 1). Returns None if that user hasn't connected Google yet, OR
-    (V46) if their connection has died and needs reconnecting — see below."""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT google_oauth_token FROM users WHERE id = ?', (user_id,))
-    row = c.fetchone()
-    conn.close()
-    if not row or not row['google_oauth_token']:
-        return None
-
-    creds = UserCredentials.from_authorized_user_info(json.loads(row['google_oauth_token']), UPLOAD_SCOPES)
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-        except RefreshError as e:
-            # invalid_grant: Token has been expired or revoked. This is
-            # Google's doing, not a bug here — the most common cause is the
-            # OAuth consent screen still sitting in "Testing" publishing
-            # status in Google Cloud Console, which caps every refresh token
-            # at 7 days no matter how often the app is used (fix: Console ->
-            # OAuth consent screen -> Publishing status -> In production).
-            # Before this, every caller kept retrying against the same dead
-            # token forever and surfacing Google's raw JSON blob wherever it
-            # happened to be caught (a crop's error toast, the monthly DB
-            # backup log) — and /api/account/google-status kept reporting
-            # "signed_in" since it only ever checked the column for NULL, so
-            # there was no visible signal telling anyone to reconnect.
-            # Clearing the token here makes every caller treat this exactly
-            # like "never connected", which already degrades correctly
-            # everywhere (each call site already null-checks the result) —
-            # reconnecting in Settings is the fix either way.
-            print(f"[auth] Google token for user {user_id} expired or was revoked — "
-                  f"cleared, reconnect required: {e}")
-            conn = get_db()
-            c = conn.cursor()
-            c.execute('UPDATE users SET google_oauth_token = NULL WHERE id = ?', (user_id,))
-            conn.commit()
-            conn.close()
-            return None
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('UPDATE users SET google_oauth_token = ? WHERE id = ?', (creds.to_json(), user_id))
-        conn.commit()
-        conn.close()
-    return creds
-
-def get_user_drive_service(user_id):
-    """Drive client acting as the given signed-in user. Returns None if that
-    user hasn't connected Google yet."""
-    creds = get_user_credentials(user_id)
-    return build('drive', 'v3', credentials=creds) if creds else None
-
-def list_images_in_folder(service, folder_id, page_token=None):
-    images = []
-    query = f"'{folder_id}' in parents and trashed=false"
-    results = service.files().list(
-        q=query,
-        spaces='drive',
-        fields='files(id, name, mimeType, size, md5Checksum), nextPageToken',
-        pageSize=100,
-        pageToken=page_token
-    ).execute()
-
-    items = results.get('files', [])
-    for item in items:
-        if item['mimeType'] == 'application/vnd.google-apps.folder':
-            # Deleted images live in _Removed — never re-import them
-            if item['name'] == REMOVED_FOLDER_NAME:
-                continue
-            images.extend(list_images_in_folder(service, item['id']))
-        elif item['mimeType'] in ['image/jpeg', 'image/png', 'image/webp', 'image/gif']:
-            images.append(item)
-
-    if 'nextPageToken' in results:
-        images.extend(list_images_in_folder(service, folder_id, results['nextPageToken']))
-
-    return images
-
-def get_root_folder_id(user_id):
-    """The Drive folder being synced for this user — where their _Removed
-    lives. MUST be scoped by user_id: with more than one person syncing,
-    picking "whichever sync_settings row is newest" (the old behavior) could
-    silently return a different user's folder."""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT folder_id FROM sync_settings WHERE user_id = ? ORDER BY id DESC LIMIT 1', (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return row['folder_id'] if row else '1LHPVyo3QjOEcizc1Io2UVjxzX4FQ7yDG'
-
-def get_or_create_removed_folder(service, root_id):
-    q = (f"'{root_id}' in parents and name = '{REMOVED_FOLDER_NAME}' "
-         "and mimeType = 'application/vnd.google-apps.folder' and trashed = false")
-    res = service.files().list(q=q, fields='files(id)').execute()
-    found = res.get('files', [])
-    if found:
-        return found[0]['id']
-    meta = {
-        'name': REMOVED_FOLDER_NAME,
-        'mimeType': 'application/vnd.google-apps.folder',
-        'parents': [root_id],
-    }
-    return service.files().create(body=meta, fields='id').execute()['id']
+# Day 29 (Phase 3): get_drive_service, get_user_drive_service,
+# get_user_credentials, get_oauth_flow, get_service_account_email,
+# parse_drive_folder_id, list_images_in_folder, get_root_folder_id,
+# get_or_create_removed_folder, download_drive_file, drive_error_reason —
+# plus REMOVED_FOLDER_NAME, PERSONAL_LIBRARY_CAP, UPLOAD_SCOPES — all moved to
+# drive.py. Call them qualified: drive.get_drive_service(), etc.
+# sync_folder_worker() and reconcile_drive_changes() still live below.
 
 # ============================================================================
 # V27: MONTHLY DATABASE BACKUP TO DRIVE
@@ -1599,7 +1430,7 @@ def run_db_backup():
     files().create() it makes fails with storageQuotaExceeded.
     """
     try:
-        backup_service = get_user_drive_service(1)
+        backup_service = drive.get_user_drive_service(1)
         if backup_service is None:
             print("[db-backup] Skipped — admin hasn't connected Google.")
             return False
@@ -1626,7 +1457,7 @@ def run_db_backup():
         stamp = datetime.now().strftime('%Y-%m-%d')
         filename = f'library-backup-{stamp}.db.gz'
 
-        root_id = get_root_folder_id(1)
+        root_id = drive.get_root_folder_id(1)
         folder_id = get_or_create_backups_folder(backup_service, root_id)
 
         uploaded = backup_service.files().create(
@@ -2018,16 +1849,16 @@ def sync_folder_worker(folder_id, user_id):
         # read a pre-existing folder. Verified against Google's docs before
         # abandoning the OAuth read path: picking a folder in the Google
         # Picker grants access to the folder itself, NOT the files inside it.
-        service = get_drive_service()
+        service = drive.get_drive_service()
         print(f"Listing images in folder {folder_id}...")
         try:
-            all_images = list_images_in_folder(service, folder_id)
+            all_images = drive.list_images_in_folder(service, folder_id)
         except Exception as e:
             msg = str(e)
             if '404' in msg or 'notFound' in msg or '403' in msg or 'insufficient' in msg.lower():
                 sync_state['errors'].append(
                     'Frame Atlas can\'t see that folder — make sure it\'s shared with '
-                    f'{get_service_account_email() or "the Frame Atlas robot email"} (Share → Viewer), then try again.')
+                    f'{drive.get_service_account_email() or "the Frame Atlas robot email"} (Share → Viewer), then try again.')
                 return
             raise
         sync_state['total'] = len(all_images)
@@ -2046,9 +1877,9 @@ def sync_folder_worker(folder_id, user_id):
         for image in all_images:
             # Soft cap (V17): friends' thumbnails live in the shared database,
             # so one giant folder can't balloon storage. Admin is exempt.
-            if user_id != 1 and library_count + new_count >= PERSONAL_LIBRARY_CAP:
+            if user_id != 1 and library_count + new_count >= drive.PERSONAL_LIBRARY_CAP:
                 sync_state['errors'].append(
-                    f'Stopped at the {PERSONAL_LIBRARY_CAP}-image limit — the rest of the '
+                    f'Stopped at the {drive.PERSONAL_LIBRARY_CAP}-image limit — the rest of the '
                     'folder wasn\'t synced. Ask Ryan if you need more room.')
                 break
             try:
@@ -2269,15 +2100,15 @@ def connect_folder():
     waiting inside."""
     user_id = session['user_id']
     data = request.get_json(silent=True) or {}
-    folder_id = parse_drive_folder_id(data.get('folder', ''))
-    robot = get_service_account_email() or 'the Frame Atlas robot email'
+    folder_id = drive.parse_drive_folder_id(data.get('folder', ''))
+    robot = drive.get_service_account_email() or 'the Frame Atlas robot email'
 
     if not folder_id:
         return jsonify({'error': "That doesn't look like a Drive folder link — open the folder "
                                  'in Google Drive and copy the address from the browser bar.'}), 400
 
     try:
-        service = get_drive_service()
+        service = drive.get_drive_service()
         meta = service.files().get(fileId=folder_id, fields='id, name, mimeType').execute()
     except Exception as e:
         msg = str(e)
@@ -2292,7 +2123,7 @@ def connect_folder():
                                  'to the folder that holds your images.'}), 400
 
     try:
-        image_count = len(list_images_in_folder(service, folder_id))
+        image_count = len(drive.list_images_in_folder(service, folder_id))
     except Exception:
         image_count = None  # folder itself is visible; count is best-effort
 
@@ -2324,12 +2155,12 @@ def account_setup_status():
     key_row = c.execute('SELECT gemini_api_key FROM users WHERE id = ?', (user_id,)).fetchone()
     conn.close()
     return jsonify({
-        'service_account_email': get_service_account_email(),
+        'service_account_email': drive.get_service_account_email(),
         'folder_connected': bool(folder and folder['folder_id']),
         'folder_name': folder['folder_name'] if folder else None,
         'last_sync': folder['last_sync'] if folder else None,
         'image_count': image_count,
-        'image_cap': None if user_id == 1 else PERSONAL_LIBRARY_CAP,
+        'image_cap': None if user_id == 1 else drive.PERSONAL_LIBRARY_CAP,
         'has_gemini_key': user_id == 1 or bool(key_row and key_row['gemini_api_key']),
     })
 
@@ -3067,7 +2898,7 @@ def get_full_image(image_id):
 
     file_id = row['drive_file_id']
     try:
-        service = get_drive_service()
+        service = drive.get_drive_service()
         req = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, req)
@@ -3257,7 +3088,7 @@ def regenerate_thumbnails():
             sync_state['total'] = len(images)
             sync_state['processed'] = 0
 
-            service = get_drive_service()
+            service = drive.get_drive_service()
             for img in images:
                 try:
                     sync_state['current_file'] = f"regenerating #{img['id']}"
@@ -3344,7 +3175,7 @@ def auth_status():
 @app.route('/api/auth/google/login')
 def google_login():
     redirect_uri = request.url_root.rstrip('/') + '/api/auth/google/callback'
-    flow = get_oauth_flow(redirect_uri)
+    flow = drive.get_oauth_flow(redirect_uri)
     auth_url, state = flow.authorization_url(
         access_type='offline', prompt='consent', include_granted_scopes='true')
     session['oauth_state'] = state
@@ -3357,7 +3188,7 @@ def drive_picker_token():
     own Drive. Same drive.file scope as everything else here — the Picker is
     what lets that narrow scope reach an arbitrary folder the user chooses,
     without ever requesting broader Drive access."""
-    creds = get_user_credentials(session['user_id'])
+    creds = drive.get_user_credentials(session['user_id'])
     if not creds:
         return jsonify({'error': 'not_signed_in'}), 401
     return jsonify({'access_token': creds.token})
@@ -3365,7 +3196,7 @@ def drive_picker_token():
 @app.route('/api/auth/google/callback')
 def google_callback():
     redirect_uri = request.url_root.rstrip('/') + '/api/auth/google/callback'
-    flow = get_oauth_flow(redirect_uri)
+    flow = drive.get_oauth_flow(redirect_uri)
     try:
         flow.fetch_token(authorization_response=request.url)
     except Exception as e:
@@ -3484,7 +3315,7 @@ def upload_images():
     # unchanged by Stage 2) — always user 1's own Google connection/folder,
     # regardless of who's calling (only admin can reach this route anyway).
     try:
-        service = get_user_drive_service(1)
+        service = drive.get_user_drive_service(1)
     except Exception as e:
         print(f"[auth] Upload's get_user_drive_service(1) failed: {e}")
         return jsonify({
@@ -3503,7 +3334,7 @@ def upload_images():
     if not files:
         return jsonify({'error': 'No files provided'}), 400
 
-    folder_id = get_root_folder_id(1)
+    folder_id = drive.get_root_folder_id(1)
     existing = _load_existing_phashes()
 
     results = [
@@ -3606,7 +3437,7 @@ def clip_image():
         return jsonify({'error': 'bad_image', 'message': "That file isn't a readable image."}), 400
 
     try:
-        service = get_user_drive_service(user_id)
+        service = drive.get_user_drive_service(user_id)
     except Exception:
         return jsonify({
             'error': 'google_auth_failed',
@@ -3620,7 +3451,7 @@ def clip_image():
 
     existing = _load_existing_phashes()
     result = _ingest_image(
-        service, get_root_folder_id(user_id), image_data,
+        service, drive.get_root_folder_id(user_id), image_data,
         _clip_filename(source_url, mimetype), mimetype,
         existing, force=force, source_url=source_url,
     )
@@ -4156,7 +3987,7 @@ def download_image(image_id):
     if not row:
         return jsonify({'error': 'Image not found'}), 404
     try:
-        service = get_drive_service()
+        service = drive.get_drive_service()
         req = service.files().get_media(fileId=row['drive_file_id'])
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, req)
@@ -4186,11 +4017,11 @@ def delete_image(image_id):
 
     if user_id == 1:
         try:
-            service = get_drive_service()
+            service = drive.get_drive_service()
             file_id = row['drive_file_id']
             f = service.files().get(fileId=file_id, fields='parents').execute()
             prev_parents = ','.join(f.get('parents', []))
-            removed_id = get_or_create_removed_folder(service, get_root_folder_id(1))
+            removed_id = drive.get_or_create_removed_folder(service, drive.get_root_folder_id(1))
             service.files().update(
                 fileId=file_id,
                 addParents=removed_id,
@@ -4220,7 +4051,7 @@ def delete_image(image_id):
     conn.commit()
     conn.close()
     return jsonify({'success': True,
-                    'moved_to': REMOVED_FOLDER_NAME if user_id == 1 else None,
+                    'moved_to': drive.REMOVED_FOLDER_NAME if user_id == 1 else None,
                     'filename': row['filename']})
 
 # V36: bulk delete moves each admin photo on its own Drive API round trip
@@ -4286,8 +4117,8 @@ def bulk_delete_images():
             deleted.append((image_id, row['drive_file_id']))
 
     if to_move:
-        root_id = get_root_folder_id(1)
-        removed_folder_id = get_or_create_removed_folder(get_drive_service(), root_id)
+        root_id = drive.get_root_folder_id(1)
+        removed_folder_id = drive.get_or_create_removed_folder(drive.get_drive_service(), root_id)
 
         # One Drive service per worker thread, not one shared across all of
         # them or one built fresh per photo — building it is cheap (no
@@ -4297,7 +4128,7 @@ def bulk_delete_images():
         thread_local = threading.local()
         def _thread_service():
             if not hasattr(thread_local, 'service'):
-                thread_local.service = get_drive_service()
+                thread_local.service = drive.get_drive_service()
             return thread_local.service
 
         def move_one(row):
@@ -4317,7 +4148,7 @@ def bulk_delete_images():
                     ).execute()
                     return row, None
                 except Exception as e:
-                    if attempt <= 2 and drive_error_reason(e) in DRIVE_RATE_LIMIT_REASONS:
+                    if attempt <= 2 and drive.drive_error_reason(e) in DRIVE_RATE_LIMIT_REASONS:
                         time.sleep(attempt)  # brief backoff, then retry this photo only
                         continue
                     return row, e
@@ -4354,32 +4185,9 @@ def bulk_delete_images():
 # V18: CROP — replace an image with a cropped version of itself
 # ============================================================================
 
-def download_drive_file(service, file_id):
-    """Download a Drive file's raw bytes through the service account."""
-    req = service.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, req)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    return fh.getvalue()
-
-def drive_error_reason(e):
-    """Google's machine-readable error reason (e.g. 'storageQuotaExceeded',
-    'insufficientFilePermissions') from an HttpError, so callers don't have
-    to guess what went wrong from the message text."""
-    if isinstance(e, HttpError):
-        try:
-            errors = json.loads(e.content).get('error', {}).get('errors') or []
-            if errors:
-                return errors[0].get('reason')
-        except Exception as parse_err:
-            # Returning None is correct — callers already handle "reason
-            # unknown" — but a Drive error whose body we couldn't even parse
-            # is worth seeing, since every caller's error handling gets less
-            # specific from here (V44/Day 26).
-            print(f"[drive] Could not parse error reason from HttpError body: {parse_err}")
-    return None
+# Day 29 (Phase 3): download_drive_file() and drive_error_reason() moved to
+# drive.py — call them qualified (drive.download_drive_file(...),
+# drive.drive_error_reason(e)).
 
 # How each format gets re-saved after cropping. Pillow can't reuse the source
 # file's exact compression settings on a cropped copy, so JPEG quality 95 with
@@ -4542,7 +4350,7 @@ def reconcile_drive_changes():
     explicit decision that lives in sync_folder_worker() instead, tied to
     the moment Ryan (or a friend) actually triggers a sync of their folder."""
     try:
-        service = get_drive_service()
+        service = drive.get_drive_service()
     except Exception as e:
         print(f"[reconcile] Drive reconciliation skipped: {e}")
         return
@@ -4550,7 +4358,7 @@ def reconcile_drive_changes():
     backfilled = repaired = 0
     for user_id in _users_with_synced_folders():
         try:
-            files = list_images_in_folder(service, get_root_folder_id(user_id))
+            files = drive.list_images_in_folder(service, drive.get_root_folder_id(user_id))
             md5_map = {f['id']: f.get('md5Checksum') for f in files}
         except Exception as e:
             print(f"[reconcile] Could not list Drive folder for user {user_id}: {e}")
@@ -4581,7 +4389,7 @@ def reconcile_drive_changes():
 
             # The file in Drive changed under us (a crop). Rebuild from it.
             try:
-                current_bytes = download_drive_file(service, r['drive_file_id'])
+                current_bytes = drive.download_drive_file(service, r['drive_file_id'])
                 thumbnail = generate_thumbnail(current_bytes)
                 if not thumbnail:
                     raise ValueError('thumbnail could not be generated')
@@ -6078,7 +5886,7 @@ def analytics_users():
             'created_at': u['created_at'],
             'last_login_at': u['last_login_at'],
             'image_count': image_count,
-            'image_cap': None if uid == 1 else PERSONAL_LIBRARY_CAP,
+            'image_cap': None if uid == 1 else drive.PERSONAL_LIBRARY_CAP,
             'tag_count': tag_count,
             'deck_count': deck_count,
             'storage_bytes': storage_bytes,

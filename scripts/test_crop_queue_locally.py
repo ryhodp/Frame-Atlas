@@ -157,9 +157,12 @@ def main():
     jpeg = make_jpeg(mod)
     drive = FakeDrive(jpeg)
     user_drive = FakeUserDrive()
-    mod.get_drive_service = lambda: drive
-    mod.get_user_drive_service = lambda uid: user_drive
+    mod.drive.get_drive_service = lambda: drive
+    mod.drive.get_user_drive_service = lambda uid: user_drive
     mod.MediaIoBaseDownload = FakeDownloader
+    # Day 29: download_drive_file() moved to drive.py, so the crop worker's
+    # download now resolves MediaIoBaseDownload in drive.py's namespace.
+    mod.drive.MediaIoBaseDownload = FakeDownloader
     mod.trigger_tagging = lambda *a, **k: None
     print("App imported OK (Drive faked).")
 
@@ -365,8 +368,8 @@ def main():
     conn.close()
 
     # Simulate no OAuth client by returning None
-    saved_get_user_drive = mod.get_user_drive_service
-    mod.get_user_drive_service = lambda uid: None
+    saved_get_user_drive = mod.drive.get_user_drive_service
+    mod.drive.get_user_drive_service = lambda uid: None
 
     admin.post("/api/images/6/crop", json={"box": {"x": 5, "y": 5, "w": 50, "h": 50}})
     progress = wait_for_crop_to_finish(admin)
@@ -385,7 +388,7 @@ def main():
         check("No OAuth client prevents Drive overwrite", False, "no error in failed list")
 
     # Restore the mock
-    mod.get_user_drive_service = saved_get_user_drive
+    mod.drive.get_user_drive_service = saved_get_user_drive
 
     print()
     if failures:

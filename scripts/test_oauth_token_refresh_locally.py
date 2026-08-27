@@ -116,18 +116,18 @@ def main():
             "invalid_grant: Token has been expired or revoked.",
             {"error": "invalid_grant", "error_description": "Token has been expired or revoked."},
         )
-    mod.UserCredentials.refresh = refresh_invalid_grant
+    mod.drive.UserCredentials.refresh = refresh_invalid_grant
 
-    result = mod.get_user_credentials(dead_uid)
+    result = mod.drive.get_user_credentials(dead_uid)
     check("Dead refresh token: get_user_credentials returns None (not a raised exception)", result is None, result)
     check("Dead refresh token: DB column cleared to NULL", token_in_db(dead_uid) is None, token_in_db(dead_uid))
 
-    service = mod.get_user_drive_service(dead_uid)
+    service = mod.drive.get_user_drive_service(dead_uid)
     check("Dead refresh token: get_user_drive_service also degrades to None", service is None, service)
 
     # ── 2. never connected: unchanged baseline behaviour ─────────────────────
     never_uid = make_user("never", None)
-    result = mod.get_user_credentials(never_uid)
+    result = mod.drive.get_user_credentials(never_uid)
     check("Never connected: get_user_credentials returns None (baseline unchanged)", result is None, result)
 
     # ── 3. already-valid token: must NOT call refresh() or touch the DB ──────
@@ -135,10 +135,10 @@ def main():
 
     def refresh_should_not_be_called(self, request):
         raise AssertionError("refresh() must not be called on a non-expired token")
-    mod.UserCredentials.refresh = refresh_should_not_be_called
+    mod.drive.UserCredentials.refresh = refresh_should_not_be_called
 
     before = token_in_db(valid_uid)
-    result = mod.get_user_credentials(valid_uid)
+    result = mod.drive.get_user_credentials(valid_uid)
     check("Already-valid token: returned without calling refresh()", result is not None, result)
     check("Already-valid token: DB left untouched", token_in_db(valid_uid) == before)
 
@@ -147,9 +147,9 @@ def main():
 
     def refresh_success(self, request):
         self.token = "new-access-token"
-    mod.UserCredentials.refresh = refresh_success
+    mod.drive.UserCredentials.refresh = refresh_success
 
-    result = mod.get_user_credentials(refreshable_uid)
+    result = mod.drive.get_user_credentials(refreshable_uid)
     check("Refreshable token: get_user_credentials returns real creds, not None", result is not None, result)
     new_token_row = token_in_db(refreshable_uid)
     check(
@@ -166,11 +166,11 @@ def main():
 
     def refresh_network_error(self, request):
         raise ConnectionError("temporary network failure")
-    mod.UserCredentials.refresh = refresh_network_error
+    mod.drive.UserCredentials.refresh = refresh_network_error
 
     raised = False
     try:
-        mod.get_user_credentials(other_uid)
+        mod.drive.get_user_credentials(other_uid)
     except ConnectionError:
         raised = True
     check("Non-RefreshError exceptions still propagate (not silently swallowed)", raised)
