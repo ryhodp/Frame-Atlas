@@ -3051,7 +3051,9 @@ monkeypatches any of these names anywhere:
 - `docs/2_Frame_Atlas_Build_Timeline.md` — Day 31 marked complete, "How it actually shipped", summary table row
 
 ### Commits
-_(pending — not yet committed or deployed)_
+`3e72f2a` (V73 (Day 31): Image hydration & palette -> backend/images_common.py) — pushed to `main`,
+Railway deploy `ca317c5a` **SUCCESS**: boot log `[schema] OK` + `[selftest] OK — 3 live check(s)
+passed against the real database`, 221 embeddings loaded, container serving on :8080.
 
 ### Starting Point for Next Session
 **Day 32 — Tagging worker → `tagging.py`.** Move `_select_pending_for_tagging()`,
