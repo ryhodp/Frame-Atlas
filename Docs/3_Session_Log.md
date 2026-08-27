@@ -2604,3 +2604,53 @@ A real styling bug was exposed by the consolidation: CropModal's "× Delete" but
 
 ### Starting Point for Next Session
 Both deferred items from the color migration arc are complete. The color system is fully centralized: all raw hex lives in `theme.js`, all translucency variants derive from tokens via `withAlpha()`, and `DESIGN.md` documents the entire 69-token palette. No further color consolidation needed. Ready for the next feature from the inbox.
+
+---
+
+## Day 27 (Part 2) — Test Harness Env Var (Frame Atlas V45 part 2 complete)
+*Completed: August 26, 2026*
+*Status: DAY 27 FULLY COMPLETE (both parts) — verified live in GitHub CI and on Railway*
+
+### What We Built
+Finished the structural refactor's Part 2, the piece Part 1 (V45, Aug 12) left as a named blocker: reworked the test harness so more of `app.py` can eventually be split into its own files.
+
+- `backend/app.py`: `DB_PATH` changed from a hardcoded string to `os.environ.get('FA_DB_PATH', '/app/data/library.db')` — one line. `FA_DB_PATH` is unset on Railway, so production behavior is byte-for-byte unchanged; zero config change needed there.
+- All 36 of `scripts/test_*_locally.py` that touch the database (one more, `test_pdf_export_locally.py`, never did — it tests `pdf_export.py` directly) dropped the old trick of copying `app.py` into a temp directory, string-patching the `DB_PATH` line inside the copy, and importing that copy. Each script now just sets `FA_DB_PATH` to its own throwaway path and imports `backend/app.py` directly via `importlib.util.spec_from_file_location`.
+- The three scripts that boot more than one independent app instance per run (`test_schema_guard_locally.py`, `test_self_test_locally.py`, `test_security_hardening_locally.py`) already used a unique module name per load for exactly this reason, so repeated loads of the same real file with a fresh env var each time work identically to their old repeated loads of distinct temp copies.
+- Applied as a scripted regex transform across all 36 files rather than 36 manual edits (the actual risk was a bad edit hiding in one file among many, not the mechanical pattern itself).
+
+### Bug Found + Fixed This Session (before any test ran)
+The transform initially left `test_security_hardening_locally.py` in a state that would have **overwritten the real `backend/app.py`** the first time it ran. That script built its patched-file path from a variable (`app_path = os.path.join(workdir, "app.py")`) instead of inline like every other script; the mechanical find-and-replace rewrote the variable's *target* to the real `backend/app.py` while leaving the very next line — `open(app_path, "w").write(patched)` — intact. Caught by re-reading the diff before running anything, not by a failed test. Fixed by hand; confirmed no other script has the same shape.
+
+### Testing
+- Captured a full pass/fail baseline (all 36 Python scripts + `test_pdf_export_locally.py` + all 3 `.mjs` pure-logic tests) on unmodified `main` before touching anything.
+- Ran the identical 40-script suite again after the change: same result, all passing, zero regressions.
+- Pushed to GitHub: Actions CI (Python 3.11, matching Railway's deploy image) ran clean on a machine that had never seen this code before.
+- Confirmed the Railway auto-deploy for this push booted clean: schema check OK, self-test OK, embeddings loaded, serving real requests within seconds.
+
+### Decisions Made (Confirmed with Ryan, pre-coding)
+- ✅ `FA_DB_PATH` falls back to the real production path when unset, rather than requiring it be explicitly set — zero risk to Railway, no new env var needed there.
+- ✅ Full cleanup of the 36 test scripts (drop the copy-to-tempdir step entirely) over a minimal one-line touch per file — simpler going forward, fewer moving parts to break later.
+- ✅ Full before/after test suite run rather than spot-checking a handful, given the change touched all 36 files via one mechanical pattern.
+- ✅ Stop after fixing the harness — do not start extracting Drive/sync/tagging/crop code out of `app.py` in the same session, per the original Day 27 plan.
+
+### Technical Debt / Notes
+- Drive, sync, tagging, and the crop worker are all still in `app.py`. This session only removed the blocker (the harness can now tolerate DB-touching code living outside `backend/app.py`); the actual extraction is separate future work, not started here.
+- `frontend/src/pages/Home.jsx` (1,855 lines / 36 pieces of state, also named in the original Day 27 goal) remains untouched — Part 1 and Part 2 were both backend-only.
+- Flagged in passing, not fixed this session: `CLAUDE.md`'s "CI (V43/Day 25)" section says "36 scripts total" and describes `test_shuffle_locally.py` as skipped in CI — both are stale (there are now 37 Python scripts + 3 `.mjs`, and the workflow file's own comment says the shuffle skip was removed before CI even shipped). Spun off as a background suggestion rather than bundled into this session's diff.
+- Repo's tracked docs folder is actually `Docs/` (capital D) — worth remembering if a future session's file-path argument silently no-ops against a lowercase `docs/` guess on this case-insensitive filesystem.
+
+### Files Changed
+- `backend/app.py` — `DB_PATH` now reads `FA_DB_PATH` env var
+- 36 `scripts/test_*_locally.py` files — dropped the copy-and-patch trick, import `backend/app.py` directly
+- `CLAUDE.md` — "Backend module split" section updated with Part 2 detail
+- `Docs/2_Frame_Atlas_Build_Timeline.md` — Day 27 marked complete (both parts), Part 2 detail added, summary table updated
+
+### Commits
+`8f8a0c2` (V45 part 2: test harness reads DB path from env var, not a file patch)
+
+### Starting Point for Next Session
+Day 27 is fully complete. Two things are sitting on the roadmap, both waiting on a decision rather than blocked on code:
+1. **Extraction itself** — now unblocked. Drive, sync, tagging, and the crop worker can start moving out of `app.py` into their own files whenever Ryan wants to spend a session on it, one domain at a time, same discipline as Part 1 (test suite green before and after, diffed character-for-character against the original before each cut).
+2. **Day 18 — NAS Migration** — the only other open roadmap item, parked until Ryan's Ugreen NAS hardware is ready. Not code-blocked; just say when.
+No other work is queued. Ask Ryan which of the two (or something new) he wants to tackle next.
