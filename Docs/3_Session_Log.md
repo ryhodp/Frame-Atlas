@@ -2939,7 +2939,9 @@ one-token call-site edits, −130 lines of moved code. Test scripts reach the mo
 - `Docs/2_Frame_Atlas_Build_Timeline.md` — Day 30 marked complete, "How it actually shipped", summary table row
 
 ### Commits
-_(pending — not yet committed or pushed)_
+`e38a999` (V72 (Day 30): Gemini keys & usage -> backend/gemini.py) — pushed to `main`, Railway
+deploy `772d558c` **SUCCESS**: boot log `[schema] OK` + `[selftest] OK — 3 live check(s) passed`,
+221 embeddings loaded, live site `/api/health` 200 and bad login 401 (not 500).
 
 ### Starting Point for Next Session
 **Day 31 — Image hydration & palette → `images_common.py`.** Move `build_image_dict()`,
