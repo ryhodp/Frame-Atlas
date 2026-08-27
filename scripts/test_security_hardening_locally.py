@@ -13,8 +13,7 @@ Covers:
   - The except:pass audit: unexpected migration errors now log instead of
     vanishing, while the routine "column already exists" case stays quiet.
 
-Same trick as the other test_*_locally.py scripts: boots a patched copy of the
-server against a throwaway database and drives it through Flask's test client.
+Same trick as the other test_*_locally.py scripts: boots the server against a throwaway database and drives it through Flask's test client.
 
 Usage (from the frame-atlas folder):
     scripts/.venv/bin/python3 scripts/test_security_hardening_locally.py
@@ -46,13 +45,10 @@ def check(label, condition, detail=""):
 
 
 def boot_app(workdir, encryption_key=None):
-    """Import a fresh patched copy of app.py against its own DB."""
+    """Import app.py against its own DB."""
     db_path = os.path.join(workdir, "library.db")
-    src = open(os.path.join(REPO, "backend", "app.py")).read()
-    patched = src.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-    assert patched != src, "Could not find DB_PATH line to patch"
-    app_path = os.path.join(workdir, "app.py")
-    open(app_path, "w").write(patched)
+    os.environ["FA_DB_PATH"] = db_path
+    app_path = os.path.join(REPO, "backend", "app.py")
 
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "dummy")
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", "dummy")

@@ -23,10 +23,7 @@ def main():
     workdir = tempfile.mkdtemp(prefix="frame_atlas_gemini_keys_test_")
     db_path = os.path.join(workdir, "library.db")
 
-    src = open(os.path.join(REPO, "backend", "app.py")).read()
-    patched = src.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-    assert patched != src, "Could not find DB_PATH line to patch"
-    open(os.path.join(workdir, "app.py"), "w").write(patched)
+    os.environ["FA_DB_PATH"] = db_path
 
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "dummy-client-id")
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", "dummy")
@@ -34,7 +31,7 @@ def main():
     os.environ["GOOGLE_PICKER_API_KEY"] = "dummy-picker-key"
     os.environ["FLASK_SECRET_KEY"] = "test-secret-key-not-for-prod"
 
-    spec = importlib.util.spec_from_file_location("test_app", os.path.join(workdir, "app.py"))
+    spec = importlib.util.spec_from_file_location("test_app", os.path.join(REPO, "backend", "app.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     print("App imported OK.")

@@ -225,16 +225,13 @@ def main():
     workdir = tempfile.mkdtemp(prefix="frame_atlas_perspective_test_")
     db_path = os.path.join(workdir, "library.db")
 
-    src_code = open(os.path.join(REPO, "backend", "app.py")).read()
-    patched = src_code.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-    assert patched != src_code, "Could not find DB_PATH line to patch"
-    open(os.path.join(workdir, "app.py"), "w").write(patched)
+    os.environ["FA_DB_PATH"] = db_path
 
     os.environ["FLASK_SECRET_KEY"] = "test-secret-key-not-for-prod"
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "dummy-client-id")
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", "dummy")
 
-    spec = importlib.util.spec_from_file_location("fa_perspective_app", os.path.join(workdir, "app.py"))
+    spec = importlib.util.spec_from_file_location("fa_perspective_app", os.path.join(REPO, "backend", "app.py"))
     mod = importlib.util.module_from_spec(spec)
     sys.modules["fa_perspective_app"] = mod
     spec.loader.exec_module(mod)

@@ -1,7 +1,7 @@
 """
 Frame Atlas — local test for bulk filmography set/clear (Day 14 follow-up).
 
-Same pattern as the other test_*_locally.py scripts (patched DB_PATH, admin
+Same pattern as the other test_*_locally.py scripts (a throwaway database, admin
 logged in via the real /api/setup flow, then exercises the new endpoints
 through Flask's test client) EXCEPT for one thing: now that Day 14's auth
 gate is live in production, the old trick of pulling sample images from the
@@ -38,17 +38,14 @@ def main():
     workdir = tempfile.mkdtemp(prefix="frame_atlas_bulkfilm_test_")
     db_path = os.path.join(workdir, "library.db")
 
-    src = open(os.path.join(REPO, "backend", "app.py")).read()
-    patched = src.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-    assert patched != src, "Could not find DB_PATH line to patch"
-    open(os.path.join(workdir, "app.py"), "w").write(patched)
+    os.environ["FA_DB_PATH"] = db_path
 
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "dummy")
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", "dummy")
     os.environ.setdefault("GEMINI_API_KEY", "dummy")
     os.environ["FLASK_SECRET_KEY"] = "test-secret-key-not-for-prod"
 
-    spec = importlib.util.spec_from_file_location("test_app", os.path.join(workdir, "app.py"))
+    spec = importlib.util.spec_from_file_location("test_app", os.path.join(REPO, "backend", "app.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     print("App imported OK.")

@@ -2,7 +2,7 @@
 """Day 24 (V42): local checks for the client-feedback backend — anonymous
 picks + comments on a deck's public /share/<token> link.
 
-Boots a patched copy of the server against a throwaway database (same trick
+Boots the server against a throwaway database (same trick
 as the other test_*_locally.py scripts), seeds synthetic images/decks, and
 drives everything through Flask's test client: no real browser, no real
 Drive, no real Gemini.
@@ -60,16 +60,13 @@ def main():
     workdir = tempfile.mkdtemp(prefix='frame_atlas_feedback_test_')
     db_path = os.path.join(workdir, 'library.db')
 
-    src = open(os.path.join(REPO, 'backend', 'app.py')).read()
-    patched = src.replace("DB_PATH = '/app/data/library.db'", f'DB_PATH = {db_path!r}')
-    assert patched != src, 'Could not find DB_PATH line to patch'
-    open(os.path.join(workdir, 'app.py'), 'w').write(patched)
+    os.environ["FA_DB_PATH"] = db_path
 
     os.environ.setdefault('GOOGLE_OAUTH_CLIENT_ID', 'dummy')
     os.environ.setdefault('GOOGLE_OAUTH_CLIENT_SECRET', 'dummy')
     os.environ.setdefault('GEMINI_API_KEY', 'dummy')
 
-    spec = importlib.util.spec_from_file_location('test_app_feedback', os.path.join(workdir, 'app.py'))
+    spec = importlib.util.spec_from_file_location('test_app_feedback', os.path.join(REPO, "backend", "app.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     print('App imported OK.\n')

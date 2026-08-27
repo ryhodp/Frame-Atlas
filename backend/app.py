@@ -85,7 +85,10 @@ CORS(app)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(24)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-DB_PATH = '/app/data/library.db'
+# FA_DB_PATH lets test scripts point the app at a throwaway database without
+# editing this file (V45 part 2) — unset in production, so Railway keeps
+# using the real path below with zero config change.
+DB_PATH = os.environ.get('FA_DB_PATH', '/app/data/library.db')
 
 # Gemini model — overridable via Railway env var if Google retires this one
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')

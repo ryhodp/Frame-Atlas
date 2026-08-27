@@ -1,7 +1,7 @@
 """
 Frame Atlas — local test for the new "Find Similar" backend (Day 9).
 
-Boots a patched copy of the server on this Mac (pointed at a throwaway
+Boots the server on this Mac (pointed at a throwaway
 database instead of Railway's), seeds images carrying REAL CLIP fingerprints
 taken from embeddings_seed.json.gz, and calls the /similar endpoint to prove
 the whole path works before we deploy.
@@ -34,11 +34,8 @@ def main():
     workdir = tempfile.mkdtemp(prefix="frame_atlas_test_")
     db_path = os.path.join(workdir, "library.db")
 
-    # 1. Patched copy of the app: only the DB path changes.
-    src = open(os.path.join(REPO, "backend", "app.py")).read()
-    patched = src.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-    assert patched != src, "Could not find DB_PATH line to patch"
-    open(os.path.join(workdir, "app.py"), "w").write(patched)
+    # 1. Point the app at a throwaway DB via the env var, nothing else changes.
+    os.environ["FA_DB_PATH"] = db_path
     shutil.copy(os.path.join(REPO, "backend", "embeddings_seed.json.gz"), workdir)
 
     # Dummy env vars in case the app reads them at import time.
@@ -46,8 +43,8 @@ def main():
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", "dummy")
     os.environ.setdefault("GEMINI_API_KEY", "dummy")
 
-    # 2. Import the patched app (this runs init_db + the seed loader on an empty DB).
-    spec = importlib.util.spec_from_file_location("test_app", os.path.join(workdir, "app.py"))
+    # 2. Import the app (this runs init_db + the seed loader on an empty DB).
+    spec = importlib.util.spec_from_file_location("test_app", os.path.join(REPO, "backend", "app.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     print("App imported OK — routes registered, empty-DB seed load didn't crash.")

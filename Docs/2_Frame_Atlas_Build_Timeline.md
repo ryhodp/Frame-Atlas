@@ -607,7 +607,7 @@ on the list and turned out to matter more than anything that was:
 
 ---
 
-## Day 27 — Structural Refactor *(V45 — ongoing, no visible payoff)*
+## Day 27 — Structural Refactor *(V45 — COMPLETE, both parts; no visible payoff)*
 
 **Goal:** Lower the cost of every future feature. Nothing here is broken; this is about why
 small changes keep having surprising side effects.
@@ -637,9 +637,35 @@ Names are imported back into `app.py` rather than left as module references, kee
 surface identical — the test scripts read `mod.color_matches`, `mod.PALETTE_DARK_V`, `mod._hsv`
 directly. Confirmed first that none of them *reassign* anything in the moved set.
 
-**Part 2 (next):** rework the 34 test scripts to set the database path via an environment
-variable instead of find-and-replacing the file. That is the single blocker on extracting Drive,
-sync, tagging and the crop worker. `Home.jsx` remains untouched.
+**Part 2 shipped August 26, 2026 (V45 part 2).** `DB_PATH` in `app.py` now reads
+`DB_PATH = os.environ.get('FA_DB_PATH', '/app/data/library.db')` — one line, one word changed
+from a plain assignment. `FA_DB_PATH` is unset in production, so Railway needed no config change
+and the real path is untouched.
+
+The actual count was **36 scripts, not 34** (a 37th, `test_pdf_export_locally.py`, tests
+`pdf_export.py` directly and never touched `DB_PATH` at all). Every one of the 36 dropped the
+copy-into-a-tempdir-and-string-patch dance entirely — not just swapped one line for
+`os.environ.setdefault`, per the fuller cleanup Ryan chose over a minimal-touch edit. Each script
+now sets `FA_DB_PATH` to its own throwaway path and loads `backend/app.py` directly via
+`importlib.util.spec_from_file_location` with a unique module name per load — the three scripts
+that boot more than one independent app instance in a single run (`test_schema_guard_locally.py`,
+`test_self_test_locally.py`, `test_security_hardening_locally.py`) already gave each load a
+unique spec name for exactly this reason, so loading the same real file repeatedly with a fresh
+env var each time works identically to loading distinct temp copies.
+
+Applied as a scripted regex transform across all 36 (hand-editing each would have been the real
+risk), verified against an identical pass/fail baseline captured on unmodified `main` first, and
+confirmed no regressions after. **The transform itself introduced one bug, caught before any test
+ran:** `test_security_hardening_locally.py` builds its patched-file path from a variable
+(`app_path = os.path.join(workdir, "app.py")`) rather than inline, so the mechanical
+find-and-replace rewrote that variable's target to `backend/app.py` itself while leaving the very
+next line — `open(app_path, "w").write(patched)` — intact, which would have **overwritten the
+real `backend/app.py`** the first time that script ran. Fixed by hand in that one file before
+running anything. Every other script builds the path inline and wasn't affected. All 36 Python
+scripts plus the 3 `.mjs` pure-logic tests pass clean, before and after.
+
+This unblocks extracting Drive, sync, tagging and the crop worker out of `app.py` — deliberately
+not started this session, per plan. `Home.jsx` remains untouched.
 
 ---
 
@@ -675,4 +701,4 @@ sync, tagging and the crop worker. `Home.jsx` remains untouched.
 | 24 | Client feedback loop | Picks + comments on share links *(V42)* |
 | 25 | Performance: caching + indexes + CI | 6.5 MB/page → cached; tests self-run ✅ *(V43)* |
 | 26 | Security + reliability hardening | Login throttling, key encryption ✅ *(V44)* |
-| 27 | Structural refactor | Pure maths out of app.py: 7,337 → 6,626 lines ✅ *(V45 part 1)* |
+| 27 | Structural refactor | Pure maths out of app.py: 7,337 → 6,626 lines; test harness unblocked ✅ *(V45)* |

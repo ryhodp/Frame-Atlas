@@ -1,7 +1,7 @@
 """
 Frame Atlas — local test for V24: color search by coverage + hue exactness.
 
-Boots a patched copy of the server against a throwaway database (same trick as
+Boots the server against a throwaway database (same trick as
 test_v15_locally.py) and exercises the two new knobs on /api/search:
 
   prom  — how much of the frame the picked color must cover (summed share)
@@ -81,16 +81,13 @@ def main():
     workdir = tempfile.mkdtemp(prefix="frame_atlas_v24_test_")
     db_path = os.path.join(workdir, "library.db")
 
-    src = open(os.path.join(REPO, "backend", "app.py")).read()
-    patched = src.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-    assert patched != src, "Could not find DB_PATH line to patch"
-    open(os.path.join(workdir, "app.py"), "w").write(patched)
+    os.environ["FA_DB_PATH"] = db_path
 
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "dummy")
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", "dummy")
     os.environ.setdefault("GEMINI_API_KEY", "dummy")
 
-    spec = importlib.util.spec_from_file_location("test_app", os.path.join(workdir, "app.py"))
+    spec = importlib.util.spec_from_file_location("test_app", os.path.join(REPO, "backend", "app.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     from PIL import ImageDraw

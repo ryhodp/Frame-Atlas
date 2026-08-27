@@ -1,8 +1,7 @@
 """
 Frame Atlas — local test for the Day 20 scene-reorder backend (V38).
 
-Same trick as test_decks_locally.py / test_storyboard_locally.py: boots a
-patched copy of the server against a throwaway database, seeds it with a
+Same trick as test_decks_locally.py / test_storyboard_locally.py: boots the server against a throwaway database, seeds it with a
 handful of SYNTHETIC images and scenes, then exercises
 POST /api/decks/<id>/scenes/reorder.
 
@@ -34,16 +33,13 @@ def main():
     workdir = tempfile.mkdtemp(prefix="frame_atlas_scene_reorder_test_")
     db_path = os.path.join(workdir, "library.db")
 
-    src = open(os.path.join(REPO, "backend", "app.py")).read()
-    patched = src.replace("DB_PATH = '/app/data/library.db'", f"DB_PATH = {db_path!r}")
-    assert patched != src, "Could not find DB_PATH line to patch"
-    open(os.path.join(workdir, "app.py"), "w").write(patched)
+    os.environ["FA_DB_PATH"] = db_path
 
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_ID", "dummy")
     os.environ.setdefault("GOOGLE_OAUTH_CLIENT_SECRET", "dummy")
     os.environ.setdefault("GEMINI_API_KEY", "dummy")
 
-    spec = importlib.util.spec_from_file_location("test_app", os.path.join(workdir, "app.py"))
+    spec = importlib.util.spec_from_file_location("test_app", os.path.join(REPO, "backend", "app.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     print("App imported OK.")
