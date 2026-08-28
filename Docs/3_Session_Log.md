@@ -3283,7 +3283,11 @@ owner-or-admin, one stays admin-only:**
 - `Docs/2_Frame_Atlas_Build_Timeline.md` — V75 interrupt noted before Day 33
 
 ### Commits
-_(to be filled in after commit/push)_
+`256b571` (V75: Friends edit tags & filmography on their own photos) — pushed to `main`, Railway
+deploy `6be8148b` **SUCCESS** (Aug 28 2026): boot log `[schema] OK — all expected columns
+present.` + `[selftest] OK — 3 live check(s) passed against the real database.`, 221 embeddings
+loaded; live site `/api/health` 200 and bad login 401 (not 500). No migration ran (V75 added no
+columns). Friend still needs to confirm hands-on that tag editing works for him.
 
 ### Starting Point for Next Session
 **Day 33 — Monthly backup → `backup.py`** (unchanged from before this interrupt). Move
