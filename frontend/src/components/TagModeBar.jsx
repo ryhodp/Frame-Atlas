@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { SIDEBAR_WIDTH } from './Sidebar';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { accentViolet, accentVioletLight, black, error, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineVariant, primary, primaryDim, surfaceBright, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, warning, white, withAlpha } from '../theme';
-import { useAuth } from '../AuthContext';
 import { useToast } from '../ToastContext';
 import { addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
 
@@ -79,10 +78,10 @@ export default function TagModeBar({
   isOpen,        // NEW: drawer open/closed state
   onClose,       // NEW: callback to close the drawer
 }) {
-  // V18: Select Mode is open to everyone now (friends crop their own images
-  // and add to their decks); the tag/filmography panels stay admin-only
-  // because their backend endpoints are.
-  const { isAdmin } = useAuth();
+  // V18: Select Mode is open to everyone. V75: the tag + filmography panels
+  // are too — a friend edits those on their OWN photos, and the backend
+  // (bulk-apply / bulk-remove / bulk-set / bulk-clear) scopes every write to
+  // the caller's own library, so there's nothing left to gate here.
   const { showToast, dismissToast } = useToast();
   const [categories, setCategories] = useState([]);
   const [summary, setSummary] = useState({ total: 0, tags: [] });
@@ -409,17 +408,28 @@ export default function TagModeBar({
 
   const openFilmClearConfirm = () => setConfirm({ kind: 'filmography-clear' });
 
+  // POST a bulk write and fail loudly. The backend scopes every one of these
+  // to the caller's own photos (V75), so a friend's normal selection always
+  // goes through — but a real failure (permission, network, server) must not
+  // be swallowed the way it was before friends could reach this panel.
+  const postBulk = async (url, body) => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'That change didn’t save.');
+    return data;
+  };
+
   const runConfirm = async () => {
     if (!confirm) return;
     setBusy(true);
     const ids = Array.from(selectedIds);
     try {
       if (confirm.kind === 'filmography-set') {
-        await fetch('/api/filmography/bulk-set', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_ids: ids, ...confirm.touched })
-        });
+        await postBulk('/api/filmography/bulk-set', { image_ids: ids, ...confirm.touched });
         // Only overlay the touched fields onto each image's own existing
         // filmography — mirrors the backend's per-field merge exactly.
         onBulkChanged?.(ids, (img) => {
@@ -429,18 +439,10 @@ export default function TagModeBar({
           return { ...img, filmography: hasAny ? merged : null };
         });
       } else if (confirm.kind === 'filmography-clear') {
-        await fetch('/api/filmography/bulk-clear', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_ids: ids })
-        });
+        await postBulk('/api/filmography/bulk-clear', { image_ids: ids });
         onBulkChanged?.(ids, (img) => ids.includes(img.id) ? { ...img, filmography: null } : img);
       } else if (confirm.kind === 'apply') {
-        await fetch('/api/tags/bulk-apply', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_ids: ids, category: confirm.category, value: confirm.value })
-        });
+        await postBulk('/api/tags/bulk-apply', { image_ids: ids, category: confirm.category, value: confirm.value });
         // Update local image state so grid/detail reflect the new tag without a full reload
         onBulkChanged?.(ids, (img) => {
           if (!ids.includes(img.id)) return img;
@@ -451,11 +453,7 @@ export default function TagModeBar({
         setTagName('');
         setTagCategory('');
       } else {
-        await fetch('/api/tags/bulk-remove', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_ids: ids, category: confirm.category, value: confirm.value })
-        });
+        await postBulk('/api/tags/bulk-remove', { image_ids: ids, category: confirm.category, value: confirm.value });
         onBulkChanged?.(ids, (img) => {
           if (!ids.includes(img.id)) return img;
           return { ...img, tags: (img.tags || []).filter(t => !(t.category === confirm.category && t.value === confirm.value)) };
@@ -471,6 +469,7 @@ export default function TagModeBar({
       refetchSelectionData();
     } catch (e) {
       console.error('Bulk tag operation failed', e);
+      showToast(e.message || 'That change didn’t save — try again.', 'error');
     }
     setBusy(false);
     setConfirm(null);
@@ -559,7 +558,6 @@ export default function TagModeBar({
             gap: '20px',
             padding: '16px'
           }}>
-            {isAdmin && <>
             {/* Apply tag panel */}
             <div style={{ }} data-tagmode-area>
               <div style={sectionLabel()}>APPLY TAG</div>
@@ -798,7 +796,6 @@ export default function TagModeBar({
                 </div>
               </div>
             )}
-            </>}
 
             {/* Add to Deck panel */}
             <div style={{ position: 'relative' }} data-tagmode-area>

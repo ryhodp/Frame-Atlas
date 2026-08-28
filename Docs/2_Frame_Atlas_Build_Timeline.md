@@ -968,6 +968,36 @@ suite green — including `test_personal_library_locally.py` which checks the sy
 
 ---
 
+## Interrupt — Friends edit tags & filmography on their own photos *(V75, August 27 2026)*
+
+Not a Phase-3 split. A friend Ryan invited connected his Drive folder, opened one of his own
+synced photos, tried to add a tag by hand — and nothing saved, with no error shown.
+
+**Cause:** every tag and filmography edit endpoint was `@admin_required`, so a friend (role
+`user`) got a silent `403`. The frontend's `addTag`/`saveFilm` checked only for the happy-path
+payload (`if (data.tags)`) inside a bare `catch {}`, so the failure produced no message
+anywhere. The friend's missing Gemini key was unrelated (that only gates the AI auto-tagger).
+
+**Fix (V75):**
+- 8 endpoints go admin-only → owner-or-admin: `POST/DELETE /api/images/<id>/tags`,
+  `POST /api/images/<id>/filmography`, `/api/tags/bulk-apply`, `/api/tags/bulk-remove`,
+  `/api/tags/selection-summary`, `/api/tags/suggestions`, `/api/filmography/bulk-set`,
+  `/api/filmography/bulk-clear`. `GET /api/tags/removal-preview` (the library-wide "remove this
+  tag everywhere" cleanup, V32) **stays admin-only.**
+- New `_scope_ids_to_user(c, image_ids)` in `app.py`: admin → list returned untouched (no query);
+  friend → only ids they own, chunked. Every bulk endpoint runs its list through it, so a
+  tampered request body can't touch another library. Single-image endpoints copy the
+  `update_notes()` (V39) owner-or-admin pattern and 404 (not 403) a non-owner.
+- Frontend: `ImageDetail.jsx` surfaces failures as an inline red message **and** a toast;
+  `TagModeBar.jsx` drops the `{isAdmin && …}` wrapper around the tag/filmography panels and adds
+  a `postBulk()` helper that throws on `!res.ok`; `SelectModeHeader.jsx` ungates "Edit tags".
+- Suite **42 → 43 Python** (`test_friend_tag_edit_locally.py`, 15 checks) **+ 3 `.mjs`, green.**
+  Two tests updated to expect the new scoped behaviour instead of 403.
+
+Day 33 (backup split) slips one session.
+
+---
+
 ## Day 33 — Monthly backup → `backup.py` *(planned)*
 
 **Goal:** The once-a-month database-snapshot-to-Drive job, isolated.
@@ -1165,6 +1195,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 30 | Gemini keys & usage → `gemini.py` | Key encryption + spend tracking isolated; 2 test scripts hand-repointed (app.py −116 lines) ✅ *(V72)* |
 | 31 | Image hydration & palette → `images_common.py` | `build_image_dict`/hydrate/`_fetch` + 4 backfills out; `favorite_col`→`core.py`; 3 test scripts repointed (app.py −344 lines) ✅ *(V73)* |
 | 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + SSE progress state + prompt out; 8 test scripts repointed (app.py −300 lines) ✅ *(V74)* |
+| — | *Interrupt:* friends edit tags & filmography on their own photos | 8 endpoints admin-only → owner-or-admin + `_scope_ids_to_user`; silent-failure fixed; 43 Python tests ✅ *(V75)* |
 | 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job isolated *(planned)* |
 | 34 | Crop worker → `crop.py` | Background crop queue + worker thread *(planned)* |
 | 35 | Drive sync → `sync.py` | Folder-sync worker + ingest, last big worker domain *(planned)* |

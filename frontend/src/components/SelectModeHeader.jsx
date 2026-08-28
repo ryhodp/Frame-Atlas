@@ -1,5 +1,4 @@
 import { useIsMobile } from '../hooks/useIsMobile';
-import { useAuth } from '../AuthContext';
 import { error, onSurfaceVariant, primary, primaryDim, surfaceContainerLow, tertiary, white, withAlpha } from '../theme';
 
 export default function SelectModeHeader({
@@ -18,7 +17,6 @@ export default function SelectModeHeader({
   allLoadedAndSelected,
 }) {
   const isMobile = useIsMobile();
-  const { isAdmin } = useAuth();
   const count = selectedIds.size;
 
   return (
@@ -146,8 +144,10 @@ export default function SelectModeHeader({
 
       <div style={{ flex: 1 }} />
 
-      {/* Edit tags button (opens drawer) */}
-      {count > 0 && isAdmin && (
+      {/* Edit tags button (opens drawer). V75: for everyone — friends edit
+          tags and filmography on their own photos; the drawer's panels
+          enforce the same owner scoping server-side. */}
+      {count > 0 && (
         <button
           onClick={onEditTags}
           title="Edit tags and filmography for the selected images"

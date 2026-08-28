@@ -122,13 +122,26 @@ def main():
     print("2d. One image disagreeing on year breaks consensus for that field only.")
     admin.post("/api/filmography/bulk-set", json={"image_ids": [ids[0]], "year": "2014"})  # restore
 
-    # 3. Non-admin cannot bulk-set or bulk-clear.
+    # 3. V75: a friend CAN call the bulk filmography endpoints, but they only
+    # touch the friend's OWN photos — the admin's images (ids seeded above) are
+    # silently out of scope, so an attempt against them changes nothing.
     friend_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     friend = mod.app.test_client()
     friend.post("/api/auth/register", json={"invite_code": friend_code, "username": "casey", 'email': 'casey@test.com', "password": "friendpass1"})
-    assert friend.post("/api/filmography/bulk-set", json={"image_ids": ids, "title": "x"}).status_code == 403
-    assert friend.post("/api/filmography/bulk-clear", json={"image_ids": ids}).status_code == 403
-    print("3. Non-admin blocked from both bulk filmography endpoints.")
+
+    r = friend.post("/api/filmography/bulk-set", json={"image_ids": ids, "title": "x"})
+    body = r.get_json()
+    assert r.status_code == 200 and body["updated"] == 0 and sorted(body["invalid_ids"]) == sorted(ids), body
+
+    r = friend.post("/api/filmography/bulk-clear", json={"image_ids": ids})
+    body = r.get_json()
+    assert r.status_code == 200 and body["cleared"] == 0 and sorted(body["invalid_ids"]) == sorted(ids), body
+
+    # the admin's filmography survived the friend's attempts untouched
+    admin_film = {img["id"]: img["filmography"] for img in admin.get("/api/search").get_json()["images"]}
+    for image_id in ids:
+        assert admin_film[image_id] and admin_film[image_id]["title"] == "Interstellar", admin_film[image_id]
+    print("3. A friend's bulk filmography calls succeed but scope to their own photos — the admin's are untouched.")
 
     # 4. Bulk-clear wipes filmography from all selected.
     r = admin.post("/api/filmography/bulk-clear", json={"image_ids": ids})

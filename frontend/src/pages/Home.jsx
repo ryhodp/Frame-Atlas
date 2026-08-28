@@ -1039,7 +1039,8 @@ export default function Home() {
           </div>
 
           {/* V18: Select Mode is for everyone — friends bulk-crop their own
-              images and add to decks; the bar's tag panels stay admin-only. */}
+              images and add to decks. V75: the bar's tag + filmography panels
+              are open to everyone too, scoped server-side to your own photos. */}
           <button
             onClick={toggleTagMode}
             title="Select Mode — bulk-select images to crop, tag, or add to a deck (press V)"

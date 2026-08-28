@@ -3161,3 +3161,140 @@ the real database`, 221 embeddings loaded, live site `/api/health` 200 and bad l
 session so the next person isn't flying blind. `app.py` calls `backup.start_backup_scheduler()` on
 boot. Done when: `backup.py` exists, suite green, and ideally one real backup confirmed in the
 Railway logs after deploy.
+
+---
+
+## Unplanned — Friends can edit tags & filmography on their own photos (Frame Atlas V75)
+*Completed: August 27, 2026*
+*Status: V75 COMPLETE locally — 43 Python + 3 `.mjs` green; browser-check harness boots + syncs clean. NOT yet pushed/deployed at time of writing.*
+
+### Why this jumped the queue (Day 33 backup split pushed back one session)
+Ryan invited a friend, who connected his Drive folder but not a Gemini key. When the friend
+opened one of his own photos and tried to add a tag by hand, **nothing saved and no error
+appeared.** Diagnosis:
+1. **The real cause:** `POST/DELETE /api/images/<id>/tags` (and every bulk tag endpoint, and
+   every filmography endpoint) was `@admin_required` — full stop, regardless of who owns the
+   photo. A friend is role `user`, so the server returned `403 {error: 'admin_required'}`. The
+   missing Gemini key was a red herring — that only gates the AI auto-tagger, not manual edits.
+2. **Why it was silent:** `ImageDetail.jsx`'s `addTag` / `removeTag` / `saveFilm` did
+   `const data = await res.json(); if (data.tags) {...}` with a bare `catch {}`. A 403 body has
+   no `tags`, so the happy-path check just fell through and nothing — not even a console line —
+   told the friend it failed.
+
+### What We Built
+**Backend (`backend/app.py`, +87 / −20 lines) — 8 endpoints opened from admin-only to
+owner-or-admin, one stays admin-only:**
+
+| Endpoint | Before | After |
+|---|---|---|
+| `POST/DELETE /api/images/<id>/tags` | `@admin_required` | owner-or-admin (plain 404 to a non-owner, never 403) |
+| `POST /api/images/<id>/filmography` | `@admin_required` | owner-or-admin (same 404 rule) |
+| `POST /api/tags/bulk-apply` | `@admin_required` | any user; ids scoped to caller's own photos |
+| `POST /api/tags/bulk-remove` | `@admin_required` | any user; ids scoped to caller's own photos |
+| `POST /api/tags/selection-summary` | `@admin_required` | any user; ids scoped; empty → `{total:0,...}` |
+| `POST /api/tags/suggestions` | `@admin_required` | any user; ids scoped; empty → `{suggestions:[]}` |
+| `POST /api/filmography/bulk-set` | `@admin_required` | any user; ids scoped |
+| `POST /api/filmography/bulk-clear` | `@admin_required` | any user; ids scoped |
+| `GET /api/tags/removal-preview` | `@admin_required` | **unchanged** — the library-wide "remove this tag everywhere" cleanup (V32) stays admin-only |
+
+- **New helper `_scope_ids_to_user(c, image_ids)`** (just above `count_tags_for_images`): returns
+  `list(image_ids)` untouched — *no query runs* — when `session['role'] == 'admin'`; otherwise
+  returns only the ids whose `images.user_id` matches the caller. Chunked via `chunked()` for the
+  same reason `count_tags_for_images` is (a friend's whole-library selection can pass 400
+  placeholders). Every bulk endpoint now runs its list through this, so a hand-tampered request
+  body can't reach another person's library.
+- The two single-image endpoints follow the **exact `update_notes()` (V39) precedent**:
+  `SELECT user_id`, then `if not row or (row['user_id'] != session['user_id'] and
+  session.get('role') != 'admin'): return 404`. A non-owner gets "Image not found", never a
+  signal that the photo exists.
+- **Admin path is byte-unchanged** in behaviour — `_scope_ids_to_user` short-circuits, the
+  single-image 404 branch only adds a condition that's false for an admin. The bulk endpoints
+  keep `requested_ids` so `invalid_ids` still reports scoped-out ids to the caller.
+
+**Frontend:**
+- `ImageDetail.jsx` — `addTag` / `removeTag` / `saveFilm` now check `res.ok` and the expected
+  payload; on failure they set an **inline red message** (`tagError` / `filmError` state,
+  rendered next to the add-tag row and under the filmography editor) **and** fire a `useToast`
+  toast (Ryan's Q2 answer: both). A failed add restores the text to the input; a failed remove
+  puts the tag chip back.
+- `TagModeBar.jsx` — deleted the `{isAdmin && <> … </>}` wrapper around APPLY TAG / FILMOGRAPHY /
+  SHARED TAGS / SUGGESTIONS (they're for everyone now). The 4 bulk fetches went through a new
+  local `postBulk()` helper that throws on `!res.ok`; the existing `catch` now shows a toast
+  instead of only `console.error`. `useAuth` import dropped (no longer referenced).
+- `SelectModeHeader.jsx` — "Edit tags" button is `{count > 0 && (…)}`, was `… && isAdmin`.
+  `useAuth` import dropped.
+- `Home.jsx` — one comment updated (the Select-Mode button's "tag panels stay admin-only" note).
+
+### The three pre-coding decisions (answered by Ryan)
+- **Permission scope:** single add/remove **+ bulk on own photos** (not just single). The
+  library-wide removal preview stays admin-only as the safety rail.
+- **Failure visibility:** inline message **and** toast.
+- **Re-tag button when no Gemini key:** "hide it if no key" — turned out to be **already done**.
+  There's no per-photo re-tag button anywhere; the only re-tag action ("Tag my photos" on the
+  Account page) is already gated behind `keyStatus?.has_key`. No work needed.
+- **Follow-up from Ryan mid-session:** "friends can adjust filmography on their own images too" —
+  folded in (filmography got the identical treatment as tags, reversing the Day 39 "admin-only
+  because it's an AI guess to curate" stance for the *owner* case).
+
+### Testing
+- **Full suite green: 43 Python + 3 `.mjs`.** (42 → 43 Python: `test_friend_tag_edit_locally.py`
+  added, 15 checks.)
+- **Updated 2 tests that pinned the old behaviour:**
+  - `test_bulk_filmography_locally.py` §3 — was "Non-admin blocked from both bulk filmography
+    endpoints (403)"; now "a friend's bulk calls succeed but `updated`/`cleared` == 0 and the
+    admin's `ids` come back in `invalid_ids`; the admin's filmography is untouched."
+  - `test_select_all_and_tag_cleanup_locally.py` §5 — kept "friend refused removal-preview
+    (403)"; changed "friend refused bulk-remove (403)" → "friend's bulk-remove returns 200 with
+    `removed: 0` (scoped to own photos), admin's `neon` tags all survive."
+- **New `test_friend_tag_edit_locally.py`:** friend adds/removes a tag on their own photo (the
+  original bug), friend blocked 404 from the admin's photo, single + bulk filmography same
+  pattern, bulk-apply on a mixed selection touches only the friend's 2 of 3 and reports the
+  admin's id invalid, `selection-summary` counts only the friend's 2, removal-preview still 403
+  for the friend / 200 for admin, and admin can still edit the friend's photo.
+- `scripts/run_local_for_browser_check.py` boots clean: `[schema] OK`, `[selftest] OK`,
+  "Sync complete. 10 new images added.", `/api/health` 200.
+- `vite build` clean (77 modules).
+
+### Technical Debt / Notes
+- **`TagModeBar.jsx` indentation:** the ~240 lines that were inside the removed
+  `{isAdmin && <>}` wrapper are still at their old (one-level-deep) indentation. Valid JSX,
+  builds + runs fine, just reads oddly. Left as-is on purpose — reindenting would bury the real
+  change under +240/−240 whitespace lines. A formatter pass can flatten it later.
+- **`/api/tags/removal-preview` + `/api/tags/bulk-remove` relationship:** the library-wide
+  cleanup UI (`TagRemovalPreview.jsx`) is admin-only via the preview endpoint's gate; the
+  *removal itself* reuses `bulk-remove`, which is now open. That's fine — a non-admin hitting
+  `bulk-remove` directly is scoped to their own photos, and the admin-only preview is what
+  actually drives the library-wide flow. No friend UI reaches the library-wide path.
+- The Day 39 note in CLAUDE.md that "every other edit endpoint (tags, filmography) is
+  `@admin_required`, full stop" is now stale — updated in CLAUDE.md this session.
+
+### Files Changed
+- `backend/app.py` — 8 route decorators dropped, `_scope_ids_to_user()` added, 2 single-image
+  404 checks, 6 bulk endpoints scoped (+87 / −20)
+- `frontend/src/components/ImageDetail.jsx` — error surfacing on tag/film saves (+77 / −20)
+- `frontend/src/components/TagModeBar.jsx` — admin wrapper removed, `postBulk()` + toast on failure
+- `frontend/src/components/SelectModeHeader.jsx` — "Edit tags" button ungated
+- `frontend/src/pages/Home.jsx` — one comment
+- `scripts/test_friend_tag_edit_locally.py` — new, 15 checks
+- `scripts/test_bulk_filmography_locally.py`, `scripts/test_select_all_and_tag_cleanup_locally.py`
+  — assertions updated for the new behaviour
+- `CLAUDE.md` — Auth section (tag/filmography now owner-or-admin), API Endpoints list, CI count
+  (42 → 43)
+- `Docs/2_Frame_Atlas_Build_Timeline.md` — V75 interrupt noted before Day 33
+
+### Commits
+_(to be filled in after commit/push)_
+
+### Starting Point for Next Session
+**Day 33 — Monthly backup → `backup.py`** (unchanged from before this interrupt). Move
+`run_db_backup()`, `_backup_due()`, `_backup_scheduler_loop()`, `start_backup_scheduler()`,
+`get_or_create_backups_folder()`, `BACKUP_FOLDER_NAME`, `KEEP_BACKUP_COUNT` (~115 lines) into
+`backend/backup.py` (imports `core` + `drive`). Write `test_backup_locally.py`. `app.py` calls
+`backup.start_backup_scheduler()` on boot. Done when: `backup.py` exists, suite green, one real
+backup confirmed in the Railway logs after deploy.
+
+**Sweep done this session:** the "friend can't do X" category was checked end to end —
+decks/scenes/bookmarks/favorites/flags are per-user, notes are owner-or-admin (V39),
+tags+filmography now are too (V75), and `/api/images/<id>/crop` already gates on
+`user_id != 1 and row['user_id'] != user_id` (owner-or-admin, where admin == user 1). Bulk
+delete was already owner-or-admin. No other friend-facing edit gap found.

@@ -257,12 +257,17 @@ def main():
         "email": "casey@test.com", "password": "friendpass1"})
     check("Friend registration succeeds", reg.status_code == 200, reg.get_json())
 
+    # The library-wide removal preview (V32) stays admin-only.
     r = friend.get("/api/tags/removal-preview?value=neon")
     check("Non-admin is refused the removal preview (403)", r.status_code == 403, r.get_json())
+    # V75: bulk-remove is no longer 403 for a friend — but it only touches the
+    # friend's OWN photos, so aiming it at the admin's images 5 & 6 removes
+    # nothing and leaves every 'neon' tag in place.
     r = friend.post("/api/tags/bulk-remove",
                     json={"image_ids": [5, 6], "category": "mood", "value": "neon"})
-    check("Non-admin is refused bulk-remove (403)", r.status_code == 403, r.get_json())
-    check("...and nothing was removed by the attempt", tag_count("mood", "neon") == 8)
+    check("A friend's bulk-remove succeeds but is scoped to their own photos",
+          r.status_code == 200 and r.get_json().get("removed") == 0, r.get_json())
+    check("...so nothing the admin owns was removed by the attempt", tag_count("mood", "neon") == 8)
 
     anon = mod.app.test_client()
     r = anon.get("/api/search/ids")

@@ -2777,7 +2777,6 @@ def toggle_favorite(image_id):
     return jsonify({'success': True, 'is_favorite': result})
 
 @app.route('/api/images/<int:image_id>/tags', methods=['POST', 'DELETE'])
-@admin_required
 def edit_tags(image_id):
     data = request.get_json(force=True) or {}
     # No category picked -> misc. Kept out of CAT_LABELS/CAT_COLORS on
@@ -2793,7 +2792,11 @@ def edit_tags(image_id):
     c = conn.cursor()
     c.execute('SELECT user_id FROM images WHERE id = ?', (image_id,))
     row = c.fetchone()
-    if not row:
+    # V75: tag editing is owner-or-admin, not admin-only — a friend can fix the
+    # tags on their OWN photos (same rule as the On-Set Notes editor, V39). A
+    # non-owner gets a plain 404, never a 403, so the endpoint doesn't confirm
+    # the image exists to someone who can't touch it.
+    if not row or (row['user_id'] != session['user_id'] and session.get('role') != 'admin'):
         conn.close()
         return jsonify({'error': 'Image not found'}), 404
 
@@ -2816,6 +2819,29 @@ def edit_tags(image_id):
     tags = [{'category': t[0], 'value': t[1]} for t in c.fetchall()]
     conn.close()
     return jsonify({'success': True, 'tags': tags})
+
+def _scope_ids_to_user(c, image_ids):
+    """Cut a client-supplied image_id list down to the photos the current user
+    is allowed to edit metadata on: an admin keeps the whole list (byte-for-
+    byte — no query runs), a friend keeps only the ids their own user_id owns.
+
+    Every bulk tag / filmography endpoint runs its id list through this (V75),
+    so 'apply this to my selection' from a friend can never reach into another
+    person's library even if the request body is hand-tampered. Chunked for the
+    same reason count_tags_for_images() is — a friend's whole-library selection
+    can exceed SQLite's placeholder limit just like the admin's can."""
+    if session.get('role') == 'admin':
+        return list(image_ids)
+    uid = session.get('user_id')
+    owned = set()
+    for batch in chunked(image_ids):
+        placeholders = ','.join('?' * len(batch))
+        for row in c.execute(
+            f'SELECT id FROM images WHERE id IN ({placeholders}) AND user_id = ?',
+            list(batch) + [uid]
+        ).fetchall():
+            owned.add(row['id'])
+    return [i for i in image_ids if i in owned]
 
 def count_tags_for_images(c, image_ids):
     """{(category, value): how many of these images carry it}, highest first.
@@ -2858,7 +2884,6 @@ def _parse_bulk_tag_request(data):
     return image_ids, category, value, None
 
 @app.route('/api/tags/bulk-apply', methods=['POST'])
-@admin_required
 def bulk_apply_tags():
     data = request.get_json(force=True) or {}
     image_ids, category, value, error = _parse_bulk_tag_request(data)
@@ -2867,10 +2892,16 @@ def bulk_apply_tags():
 
     conn = get_db()
     c = conn.cursor()
+    # V75: friends may bulk-tag in Select Mode, but only their own photos. An
+    # admin's list is returned untouched; a friend's is trimmed to what they
+    # own, and anything dropped is reported back in invalid_ids.
+    requested_ids = image_ids
+    image_ids = _scope_ids_to_user(c, image_ids)
+    scoped = set(image_ids)
+    invalid_ids = [i for i in requested_ids if i not in scoped]
 
     applied = 0
     already_had = 0
-    invalid_ids = []
 
     for image_id in image_ids:
         c.execute('SELECT user_id FROM images WHERE id = ?', (image_id,))
@@ -2896,7 +2927,6 @@ def bulk_apply_tags():
     return jsonify({'applied': applied, 'already_had': already_had, 'invalid_ids': invalid_ids})
 
 @app.route('/api/tags/bulk-remove', methods=['POST'])
-@admin_required
 def bulk_remove_tags():
     data = request.get_json(force=True) or {}
     image_ids, category, value, error = _parse_bulk_tag_request(data)
@@ -2905,6 +2935,11 @@ def bulk_remove_tags():
 
     conn = get_db()
     c = conn.cursor()
+    # V75: friends may bulk-remove a shared tag from their OWN selection in
+    # Select Mode. The library-wide "remove this tag everywhere" cleanup (V32)
+    # stays admin-only — that path is gated at /api/tags/removal-preview, which
+    # keeps its @admin_required.
+    image_ids = _scope_ids_to_user(c, image_ids)
     # Chunked because V32's "remove this tag from every result" can hand this
     # the whole filtered library at once, and SQLite caps how many `?`
     # placeholders one statement may carry. The delete is scoped to the exact
@@ -2991,7 +3026,6 @@ def tag_removal_preview():
     })
 
 @app.route('/api/tags/selection-summary', methods=['POST'])
-@admin_required
 def tags_selection_summary():
     data = request.get_json(force=True) or {}
     image_ids = data.get('image_ids')
@@ -3001,6 +3035,13 @@ def tags_selection_summary():
 
     conn = get_db()
     c = conn.cursor()
+    # V75: the shared-tags panel is available to friends now, scoped to their
+    # own photos (an admin's list passes through untouched).
+    image_ids = _scope_ids_to_user(c, image_ids)
+    if not image_ids:
+        conn.close()
+        return jsonify({'total': 0, 'tags': [],
+                        'common_filmography': {f: None for f in ('title', 'director', 'dp', 'year')}})
     tag_counts = count_tags_for_images(c, image_ids)
 
     # Filmography consensus: a field only counts as "common" when EVERY
@@ -3040,7 +3081,6 @@ def tags_selection_summary():
     })
 
 @app.route('/api/tags/suggestions', methods=['POST'])
-@admin_required
 def tags_suggestions():
     data = request.get_json(force=True) or {}
     image_ids = data.get('image_ids')
@@ -3050,6 +3090,11 @@ def tags_suggestions():
 
     conn = get_db()
     c = conn.cursor()
+    # V75: available to friends, scoped to their own photos.
+    image_ids = _scope_ids_to_user(c, image_ids)
+    if not image_ids:
+        conn.close()
+        return jsonify({'suggestions': []})
     total = len(image_ids)
     selection_tags = count_tags_for_images(c, image_ids)
 
@@ -3093,10 +3138,13 @@ def tags_suggestions():
     return jsonify({'suggestions': suggestions})
 
 @app.route('/api/images/<int:image_id>/filmography', methods=['POST'])
-@admin_required
 def update_filmography(image_id):
     """Set or clear the film info Gemini guessed for this image. Sending all
-    empty fields clears it entirely."""
+    empty fields clears it entirely.
+
+    V75: owner-or-admin, not admin-only — a friend knows what they shot and can
+    fix the film credit on their own photo, same rule as tag editing and the
+    On-Set Notes editor (V39)."""
     data = request.get_json(force=True) or {}
     title = (data.get('title') or '').strip()
     director = (data.get('director') or '').strip()
@@ -3105,8 +3153,8 @@ def update_filmography(image_id):
 
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT 1 FROM images WHERE id = ?', (image_id,))
-    if not c.fetchone():
+    row = c.execute('SELECT user_id FROM images WHERE id = ?', (image_id,)).fetchone()
+    if not row or (row['user_id'] != session['user_id'] and session.get('role') != 'admin'):
         conn.close()
         return jsonify({'error': 'Image not found'}), 404
 
@@ -3170,7 +3218,6 @@ def _parse_bulk_image_ids(data):
     return image_ids, None
 
 @app.route('/api/filmography/bulk-set', methods=['POST'])
-@admin_required
 def bulk_set_filmography():
     """Applies only the fields you actually typed to every selected image —
     a blank field means "leave this field alone" per image, not "clear it."
@@ -3194,10 +3241,13 @@ def bulk_set_filmography():
 
     conn = get_db()
     c = conn.cursor()
+    # V75: friends may bulk-set filmography on their OWN selection only.
+    requested_ids = image_ids
+    image_ids = _scope_ids_to_user(c, image_ids)
     valid_ids = [r[0] for r in c.execute(
         f"SELECT id FROM images WHERE id IN ({','.join('?' * len(image_ids))})", image_ids
-    ).fetchall()]
-    invalid_ids = [i for i in image_ids if i not in valid_ids]
+    ).fetchall()] if image_ids else []
+    invalid_ids = [i for i in requested_ids if i not in valid_ids]
 
     for image_id in valid_ids:
         existing = c.execute(
@@ -3223,10 +3273,9 @@ def bulk_set_filmography():
     })
 
 @app.route('/api/filmography/bulk-clear', methods=['POST'])
-@admin_required
 def bulk_clear_filmography():
     """Wipes filmography from every selected image — for stills Gemini
-    guessed a film on that isn't one at all."""
+    guessed a film on that isn't one at all. V75: owner-scoped for friends."""
     data = request.get_json(force=True) or {}
     image_ids, error = _parse_bulk_image_ids(data)
     if error:
@@ -3234,10 +3283,12 @@ def bulk_clear_filmography():
 
     conn = get_db()
     c = conn.cursor()
+    requested_ids = image_ids
+    image_ids = _scope_ids_to_user(c, image_ids)
     valid_ids = [r[0] for r in c.execute(
         f"SELECT id FROM images WHERE id IN ({','.join('?' * len(image_ids))})", image_ids
-    ).fetchall()]
-    invalid_ids = [i for i in image_ids if i not in valid_ids]
+    ).fetchall()] if image_ids else []
+    invalid_ids = [i for i in requested_ids if i not in valid_ids]
 
     for image_id in valid_ids:
         c.execute('DELETE FROM filmography WHERE image_id = ?', (image_id,))

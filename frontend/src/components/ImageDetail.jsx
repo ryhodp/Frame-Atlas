@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useToast } from '../ToastContext';
 import CompositionOverlay, { OVERLAY_MODES, OVERLAY_LABELS, OVERLAY_ROTATABLE } from './CompositionOverlay';
 import { fetchDecks, addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
 import { PAGE_BG, accentBlue, accentVioletLight, black, danger, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, outline, outlineVariant, primary, primaryDim, surfaceBright, surfaceContainerDark, surfaceContainerHigh, surfaceContainerLowestAlt, surfaceContainerWarmDark, tertiary, warning, white, withAlpha } from '../theme';
@@ -29,6 +30,7 @@ const CAT_ORDER = [
 
 export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSearchFilm, onFindSimilar, onCrop }) {
   const isMobile = useIsMobile();
+  const { showToast } = useToast();
   const [fullImage, setFullImage] = useState(null);
   const [fullError, setFullError] = useState(false);
 
@@ -38,6 +40,10 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const [editingTags, setEditingTags] = useState(false);
   const [newTagCat, setNewTagCat] = useState(''); // blank = misc, matches the backend default
   const [newTagValue, setNewTagValue] = useState('');
+  // V75: tag/filmography edits used to swallow every failure silently, so a
+  // friend blocked by the old admin-only rule saw nothing happen. Surface it.
+  const [tagError, setTagError] = useState(null);
+  const [filmError, setFilmError] = useState(null);
 
   const [film, setFilm] = useState(image?.filmography || null);
   const [editingFilm, setEditingFilm] = useState(false);
@@ -192,6 +198,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   };
 
   const removeTag = async (category, value) => {
+    const prevTags = tags;
+    setTagError(null);
     setTags(prev => prev.filter(t => !(t.category === category && t.value === value)));
     try {
       const res = await fetch(`/api/images/${image.id}/tags`, {
@@ -199,30 +207,41 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category, value })
       });
-      const data = await res.json();
-      if (data.tags) {
-        setTags(data.tags);
-        onUpdated?.(image.id, { tags: data.tags });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.tags) {
+        setTags(prevTags); // put it back — the delete didn't take
+        throw new Error(data.error || 'Couldn’t remove that tag.');
       }
-    } catch {}
+      setTags(data.tags);
+      onUpdated?.(image.id, { tags: data.tags });
+    } catch (e) {
+      setTagError(e.message || 'Couldn’t remove that tag — try again.');
+      showToast(e.message || 'Couldn’t remove that tag — try again.', 'error');
+    }
   };
 
   const addTag = async () => {
     const value = newTagValue.trim().toLowerCase();
     if (!value) return;
     setNewTagValue('');
+    setTagError(null);
     try {
       const res = await fetch(`/api/images/${image.id}/tags`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: newTagCat, value })
       });
-      const data = await res.json();
-      if (data.tags) {
-        setTags(data.tags);
-        onUpdated?.(image.id, { tags: data.tags });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.tags) {
+        throw new Error(data.error || 'Couldn’t add that tag.');
       }
-    } catch {}
+      setTags(data.tags);
+      onUpdated?.(image.id, { tags: data.tags });
+    } catch (e) {
+      setNewTagValue(value); // keep what they typed so it isn't lost
+      setTagError(e.message || 'Couldn’t add that tag — try again.');
+      showToast(e.message || 'Couldn’t add that tag — try again.', 'error');
+    }
   };
 
   const startEditFilm = () => {
@@ -234,19 +253,24 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   };
 
   const saveFilm = async (draft) => {
+    setFilmError(null);
     try {
       const res = await fetch(`/api/images/${image.id}/filmography`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(draft)
       });
-      const data = await res.json();
-      if (data.success) {
-        setFilm(data.filmography);
-        onUpdated?.(image.id, { filmography: data.filmography });
-        setEditingFilm(false);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Couldn’t save the film info.');
       }
-    } catch {}
+      setFilm(data.filmography);
+      onUpdated?.(image.id, { filmography: data.filmography });
+      setEditingFilm(false);
+    } catch (e) {
+      setFilmError(e.message || 'Couldn’t save the film info — try again.');
+      showToast(e.message || 'Couldn’t save the film info — try again.', 'error');
+    }
   };
 
   const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '' });
@@ -801,6 +825,16 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         </button>
                       )}
                     </div>
+                    {filmError && (
+                      <p style={{
+                        fontSize: '11.5px', color: danger, margin: '10px 0 0',
+                        padding: '7px 10px', borderRadius: '6px',
+                        background: withAlpha(danger, 0.1),
+                        border: `1px solid ${withAlpha(danger, 0.3)}`
+                      }}>
+                        {filmError}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1039,6 +1073,17 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   Add
                 </button>
               </div>
+            )}
+
+            {editingTags && tagError && (
+              <p style={{
+                fontSize: '11.5px', color: danger, margin: '-6px 0 12px',
+                padding: '7px 10px', borderRadius: '6px',
+                background: withAlpha(danger, 0.1),
+                border: `1px solid ${withAlpha(danger, 0.3)}`
+              }}>
+                {tagError}
+              </p>
             )}
 
             {/* Tags by category */}
