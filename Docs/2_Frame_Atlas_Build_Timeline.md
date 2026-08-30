@@ -998,7 +998,7 @@ Day 33 (backup split) slips one session.
 
 ---
 
-## Day 33 — Monthly backup → `backup.py` *(planned)*
+## Day 33 — Monthly backup → `backup.py` *(V76 — COMPLETE)*
 
 **Goal:** The once-a-month database-snapshot-to-Drive job, isolated.
 
@@ -1014,6 +1014,23 @@ next person isn't flying blind.
 
 **Done when:** `backup.py` exists, `app.py` calls `backup.start_backup_scheduler()` on boot,
 suite green, one live backup confirmed.
+
+**How it actually shipped (V76, August 29 2026):**
+- `backend/backup.py` (151 lines) — the 5 functions + 2 constants, **byte-for-byte identical to
+  `HEAD`** (diffed). Imports `get_db` / `db_path` from `core`, `import drive`, `MediaIoBaseUpload`,
+  stdlib `io` / `gzip` / `sqlite3` / `time` / `threading` / `datetime`.
+- **`MediaIoBaseUpload` now imported in both `app.py` (crop worker + `/api/upload`) and
+  `backup.py`** — same both-files pattern as `MediaIoBaseDownload` (Day 29). `import gzip` removed
+  from `app.py` (backup was its only user).
+- Rule 2 (qualify + repoint). The 2 backup routes stay in `app.py` and call
+  `backup.run_db_backup()` / `backup.KEEP_BACKUP_COUNT`; both boot blocks call
+  `backup.start_backup_scheduler()`. `app.py` diff: 11 insertions, 128 deletions.
+- **No test script repointed** (nothing ever referenced a backup name). New
+  `scripts/test_backup_locally.py`, 23 checks, fake Drive client — first automated coverage this
+  job has ever had. It neuters `backup._backup_due` right after import so the already-running
+  scheduler daemon can't race the explicit test calls.
+- Full suite **44 Python + 3 `.mjs` green** (43→44). `app.py`: **5,184 → 5,118 lines** (−66).
+- Live backup confirmed after deploy via `POST /api/backups/run` — see Session Log.
 
 ---
 
@@ -1196,7 +1213,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 31 | Image hydration & palette → `images_common.py` | `build_image_dict`/hydrate/`_fetch` + 4 backfills out; `favorite_col`→`core.py`; 3 test scripts repointed (app.py −344 lines) ✅ *(V73)* |
 | 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + SSE progress state + prompt out; 8 test scripts repointed (app.py −300 lines) ✅ *(V74)* |
 | — | *Interrupt:* friends edit tags & filmography on their own photos | 8 endpoints admin-only → owner-or-admin + `_scope_ids_to_user`; silent-failure fixed; 43 Python tests ✅ *(V75)* |
-| 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job isolated *(planned)* |
+| 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job + scheduler isolated; first-ever test (23 checks); app.py −66 lines ✅ *(V76)* |
 | 34 | Crop worker → `crop.py` | Background crop queue + worker thread *(planned)* |
 | 35 | Drive sync → `sync.py` | Folder-sync worker + ingest, last big worker domain *(planned)* |
 | 36 | Routes → `routes_auth.py` | Login/register/invite routes as a blueprint *(planned)* |
