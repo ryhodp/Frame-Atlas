@@ -3389,7 +3389,14 @@ the test — the first two runs failed "exactly one backup file was uploaded" wi
   summary table row
 
 ### Commits
-_(to be filled in after commit/push + live backup confirmation)_
+`a06ddd9` (V76 (Day 33): Monthly backup job -> backend/backup.py) — pushed to `main`, Railway
+deploy `6ac5ee08` **SUCCESS** (Aug 30 2026): boot log `[schema] OK — all expected columns
+present.` + `[selftest] OK — 3 live check(s) passed against the real database.`, 221 embeddings
+loaded; live site `/api/health` 200, `/api/backups/status` 401 without auth (gate intact). No
+migration ran. No `[db-backup]` line at boot — August's backup already ran earlier this month so
+`_backup_due()` correctly returned False. **Live backup still to be confirmed:** Ryan to click
+"Run backup now" on the Settings page (drives `POST /api/backups/run`) and check for
+`[db-backup] Uploaded library-backup-<date>.db.gz to Drive.` in the Railway logs.
 
 ### Starting Point for Next Session
 **Day 34 — Crop worker → `crop.py`.** Move `_process_crop_jobs()` (the ~190-line worker sitting
