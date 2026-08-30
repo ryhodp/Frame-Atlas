@@ -3394,9 +3394,9 @@ deploy `6ac5ee08` **SUCCESS** (Aug 30 2026): boot log `[schema] OK — all expec
 present.` + `[selftest] OK — 3 live check(s) passed against the real database.`, 221 embeddings
 loaded; live site `/api/health` 200, `/api/backups/status` 401 without auth (gate intact). No
 migration ran. No `[db-backup]` line at boot — August's backup already ran earlier this month so
-`_backup_due()` correctly returned False. **Live backup still to be confirmed:** Ryan to click
-"Run backup now" on the Settings page (drives `POST /api/backups/run`) and check for
-`[db-backup] Uploaded library-backup-<date>.db.gz to Drive.` in the Railway logs.
+`_backup_due()` correctly returned False. **Live backup confirmed:** Ryan clicked "Run backup
+now" on the Settings page and confirmed `[db-backup] Uploaded library-backup-<date>.db.gz to
+Drive.` in the Railway logs. ✅ **Day 33 COMPLETE.**
 
 ### Starting Point for Next Session
 **Day 34 — Crop worker → `crop.py`.** Move `_process_crop_jobs()` (the ~190-line worker sitting
