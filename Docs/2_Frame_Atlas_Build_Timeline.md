@@ -1034,7 +1034,7 @@ suite green, one live backup confirmed.
 
 ---
 
-## Day 34 — Crop worker → `crop.py` *(planned)*
+## Day 34 — Crop worker → `crop.py` *(V77 — COMPLETE)*
 
 **Goal:** The background crop-job queue and its worker thread — including the 190-line
 `_process_crop_jobs()` that currently sits near the *top* of `app.py` for no reason.
@@ -1054,6 +1054,38 @@ suite green, one live backup confirmed.
 **Done when:** `crop.py` exists, both crop test scripts repointed, suite green, and one real crop
 run confirmed on the live site (the standing "Day 27 crop" item — a real crop that explains
 itself in the toast if it fails).
+
+**How it actually shipped (V77, August 31 2026):**
+- `backend/crop.py` (271 lines) — `_process_crop_jobs()`, the 4 pieces of queue/progress state,
+  `CROP_SAVE_FORMATS`, and a new `start_crop_worker()` wrapper (mirroring `backup.py`'s
+  `start_backup_scheduler()` pattern) that replaced the old bare `threading.Thread(...).start()`
+  at the call site. The worker body is **byte-for-byte identical to `HEAD`** — every name it
+  calls was already either a bare import or already qualified in the original file, so nothing
+  inside the function itself needed to change.
+- **`get_crop_progress()` and `reset_crop_progress()` did NOT move**, contrary to this entry's own
+  original wording — they're `@app.route` functions, and the standing Phase-3 rule (routes stay
+  in `app.py` until the Day 36+ blueprint work) applies to them exactly like it did to the
+  tag-progress routes (Day 32) and the backup routes (Day 33). They read `crop._crop_progress` /
+  `crop._crop_lock` qualified instead. `crop_image()` (the queueing route) also stayed, with its
+  now-stale `global _crop_job_counter` removed.
+- **Only 1 of the 2 anticipated test scripts needed repointing** — `test_perspective_crop_locally.py`
+  pokes the queue directly for one legacy-job-dict check (3 lines: `mod._crop_*` →
+  `mod.crop._crop_*`). `test_crop_queue_locally.py` drives the endpoint over HTTP and never
+  touched the moved names, so it needed no changes at all.
+- **Found and fixed a real gap during live verification, outside the official test suite:**
+  `scripts/run_local_for_browser_check.py` fakes `MediaIoBaseUpload` by patching it onto the
+  `app` module — that stopped reaching the crop worker once the worker's own `MediaIoBaseUpload`
+  import lived in `crop.py` instead, so a real crop against that harness failed with
+  `'MediaIoBaseUpload' object has no attribute 'fh'`. Fixed with the same both-files qualify
+  pattern used everywhere else in this phase: patch `mod.crop.MediaIoBaseUpload` too.
+- **Live verification, per Ryan's choice:** rather than the production site, verified against the
+  local `run_local_for_browser_check.py` harness (a real Flask server, real HTTP requests, a fake
+  Drive standing in for Google) — queued a rectangle crop AND a perspective crop through the real
+  endpoints, both completed cleanly, and confirmed `/api/crop-progress/reset` clears state.
+- **No new dedicated test file** — the 2 existing crop test scripts already covered the moved code
+  thoroughly, so none was needed (Ryan's call, matching the judgment used on smaller Phase 3 days).
+- Full suite **44 Python + 3 `.mjs` green**, before and after. `app.py`: **5,118 → 4,915 lines**
+  (−203). `crop.py` is 271 lines.
 
 ---
 
@@ -1214,7 +1246,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 32 | Tagging worker → `tagging.py` | Gemini auto-tag loop + SSE progress state + prompt out; 8 test scripts repointed (app.py −300 lines) ✅ *(V74)* |
 | — | *Interrupt:* friends edit tags & filmography on their own photos | 8 endpoints admin-only → owner-or-admin + `_scope_ids_to_user`; silent-failure fixed; 43 Python tests ✅ *(V75)* |
 | 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job + scheduler isolated; first-ever test (23 checks); app.py −66 lines ✅ *(V76)* |
-| 34 | Crop worker → `crop.py` | Background crop queue + worker thread *(planned)* |
+| 34 | Crop worker → `crop.py` | Background crop queue + worker thread; app.py −203 lines ✅ *(V77)* |
 | 35 | Drive sync → `sync.py` | Folder-sync worker + ingest, last big worker domain *(planned)* |
 | 36 | Routes → `routes_auth.py` | Login/register/invite routes as a blueprint *(planned)* |
 | 37 | Routes → `routes_search.py` | Search/autocomplete/bookmarks/similar as a blueprint *(planned)* |

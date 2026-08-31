@@ -44,13 +44,21 @@ Every major iteration or structural change to the codebase must be labeled:
 
 ---
 
-## End of Session Protocol
+## Session Log Updates
 
-When Ryan says **"End chat"**:
+Update `/docs/3_Session_Log.md` by appending a new entry (never overwrite or truncate previous
+entries — only append) at **either** of these triggers:
 
-1. Update `/docs/3_Session_Log.md` by appending a new entry at the bottom
-2. Include: what was built, decisions made, any new technical debt, and the exact starting point for next session
-3. **Never overwrite or truncate previous log entries** — only append
+1. **A day's "Done when" criteria (from the Build Timeline) are actually met** — append the entry
+   as soon as that's verified true, without waiting to be told. If a "Done when" criterion
+   requires Ryan's own confirmation (e.g. "confirmed on the live site"), wait for that
+   confirmation before logging it as met — don't log a step as done on the strength of a local
+   test alone if the criterion specifically calls for the live check.
+2. **Ryan says "End chat"** — append a wrap-up entry covering whatever was done this session, even
+   if a day isn't fully complete yet.
+
+Either way, include: what was built, decisions made, any new technical debt, and the exact
+starting point for next session.
 
 ---
 
@@ -84,7 +92,7 @@ When Ryan says **"End chat"**:
 ```
 frame-atlas/
 ├── backend/
-│   ├── app.py              # Endpoints, tagging, crop worker, sync (Phase 3 splits this)
+│   ├── app.py              # Endpoints, sync (Phase 3 splits this)
 │   ├── core.py             # get_db/db_path, favorite_col, tag normalisation, taxonomy maps, Gemini constants (V70; favorite_col V73)
 │   ├── schema.py           # init_db + all migrations + check_schema + load_embeddings_seed (V70)
 │   ├── drive.py            # Google Drive: service/OAuth clients, folder listing, _Removed, download (V71)
@@ -92,6 +100,7 @@ frame-atlas/
 │   ├── images_common.py    # build_image_dict / hydrate_image_rows / _fetch_image_dict / save_palette + boot backfills (V73)
 │   ├── tagging.py          # Gemini auto-tag worker + SSE progress state + GEMINI_TAGGING_PROMPT (V74)
 │   ├── backup.py           # Monthly SQLite-snapshot-to-Drive job + scheduler (V76)
+│   ├── crop.py             # Background crop-job queue + worker (rectangle + perspective) (V77)
 │   ├── colors.py           # Palette extraction + colour matching (V45)
 │   ├── fingerprint.py      # phash + signature, duplicate detection (V45)
 │   ├── imaging.py          # Thumbnails + aspect-ratio maths (V45)
@@ -172,10 +181,22 @@ These are hard-won lessons from debugging. Don't second-guess them.
 
 **Backend module split — Phase 3, Day 33 (V76): `backup.py`**
 - The monthly SQLite-snapshot-to-Drive job (V27) moved out of `app.py` into `backend/backup.py` (~150 lines): `run_db_backup()`, `_backup_due()`, `_backup_scheduler_loop()`, `start_backup_scheduler()`, `get_or_create_backups_folder()` + `BACKUP_FOLDER_NAME` / `KEEP_BACKUP_COUNT`. The moved block (constants through `start_backup_scheduler`) is **byte-for-byte identical to `HEAD`** — verified by diff. Imports `get_db` / `db_path` from `core`, `import drive`, `from googleapiclient.http import MediaIoBaseUpload`, + stdlib `io` / `gzip` / `sqlite3` / `time` / `threading` + `from datetime import datetime`.
-- **`MediaIoBaseUpload` is imported in BOTH `app.py` and `backup.py`.** `run_db_backup()` moved (so `backup.py` imports it), but the crop worker (`_process_crop_jobs` back-up-to-`_Removed` write) and the `/api/upload` route still use it directly in `app.py`. Same both-files pattern as `MediaIoBaseDownload` (Day 29) and `genai_client` (Day 32). `import gzip` was **removed from `app.py`** — `run_db_backup` was its only user (there's a pre-existing unused `import zlib` there too; left alone, not this session's business).
+- **`MediaIoBaseUpload` is imported in `app.py`, `backup.py`, AND `crop.py`.** `run_db_backup()` moved to `backup.py` (so it imports it); the crop worker's `_process_crop_jobs` back-up-to-`_Removed` write moved to `crop.py` in V77/Day 34 (so it imports its own copy too); the `/api/upload` route still uses it directly in `app.py`. Same both-files (now three-files) pattern as `MediaIoBaseDownload` (Day 29) and `genai_client` (Day 32). `import gzip` was **removed from `app.py`** — `run_db_backup` was its only user (there's a pre-existing unused `import zlib` there too; left alone, not this session's business).
 - **Qualify + repoint (rule 2), same as Days 29–32.** `app.py` does `import backup`; the 2 Flask routes that stay in `app.py` (`/api/backups/status`, `/api/backups/run` — routes don't move until Day 36) call `backup.KEEP_BACKUP_COUNT` / `backup.run_db_backup()` qualified, and both boot blocks call `backup.start_backup_scheduler()`. Net `app.py` diff: `−import gzip`, `+import backup`, backup block → 6-line pointer comment, 4 one-token call-site edits.
 - **No test script repointed** — nothing in `scripts/` ever referenced a backup name (one comment mention in `test_oauth_token_refresh_locally.py`, no code). New `scripts/test_backup_locally.py` (23 checks) is the first automated coverage this job has ever had: fake Drive client, a run serializes→gzips→uploads a valid SQLite snapshot + writes a `db_backups` row, a second run reuses the folder, pruning keeps exactly `KEEP_BACKUP_COUNT` and deletes the oldest from Drive + table, `_backup_due()` flips across a month boundary, no admin Google connection → clean `False` skip with no row written. The test neuters `backup._backup_due` to `False` right after import because `app.py` boot has already started the scheduler daemon, which would otherwise race `run_db_backup()` against the explicit test calls.
 - `app.py`: **5,184 → 5,118 lines** (−66 net: 128 deletions, 11 insertions — the pointer comment + qualified call sites). `backup.py` is 151.
+
+**Backend module split — Phase 3, Day 34 (V77): `crop.py`**
+- The background crop-job queue and worker (V27; perspective V32) moved out of `app.py` into `backend/crop.py` (271 lines): `_process_crop_jobs()`, the `_crop_queue` / `_crop_progress` / `_crop_lock` / `_crop_job_counter` state, `CROP_SAVE_FORMATS`, and a new `start_crop_worker()` wrapper. The worker body is **byte-for-byte identical to `HEAD`** — verified by diff — because every name it calls (`get_db`, `drive.*`, `generate_thumbnail`/`get_image_aspect_ratio`, `compute_phash`, `extract_palette`, `images_common.save_palette`, the `perspective.*` helpers) was already either a bare import or already qualified in the original file, so nothing inside the function needed to change to live in its own module. Imports `get_db` from `core`, `import drive`, `import images_common`, `extract_palette` from `colors`, `compute_phash` from `fingerprint`, `generate_thumbnail`/`get_image_aspect_ratio` from `imaging`, the 3 perspective helpers from `perspective`, `MediaIoBaseUpload` from `googleapiclient.http`, + stdlib `io`/`threading`/`queue`/`datetime` + `from PIL import Image, ImageOps`.
+- **The destructive-write tail moved as ONE block, per the standing V27 lesson** — download → crop → back up original to `_Removed` FIRST → overwrite the live Drive file → refresh thumbnail/aspect_ratio/md5/phash/palette. This is the exact sequence that broke in V27 (Drive got the cropped pixels, the DB write that should have followed immediately instead threw on columns that never existed, leaving Drive right and the DB stale) — CLAUDE.md's own crop section flags this, so it was never a candidate for splitting into two functions.
+- **Two Flask routes stayed in `app.py`, not moved, despite the original Day 34 plan text listing them as things to move** — `GET /api/crop-progress` and `POST /api/crop-progress/reset` are routes, and the standing Phase-3 rule ("endpoints stay put" until the Day 36+ blueprint work) applies to them exactly like it did to the tag-progress routes (Day 32) and the backup routes (Day 33). They now read `crop._crop_progress` / `crop._crop_lock` qualified. `crop_image()` (the route that queues a job) also stayed, qualified as `crop._crop_queue.put(...)` / `crop._crop_job_counter` / `crop._crop_lock` / `crop._crop_progress`; its stale `global _crop_job_counter` declaration was removed since the counter no longer lives in `app.py`'s own namespace.
+- **`ImageOps` dropped from `app.py`'s PIL import** — it was only ever used inside the crop worker (EXIF-orientation correction before cropping); `Image` stays imported in `app.py` (used elsewhere, e.g. the clip-upload validation path).
+- **The crop-worker-thread start moved from an inline `threading.Thread(...).start()` at its old location to `crop.start_crop_worker()`, called from the exact same line position in `app.py`** — deliberately NOT relocated down to the `__main__`/module-scope boot blocks at the bottom of the file (unlike `backup.start_backup_scheduler()`, which lives there), to keep the timing of when the worker starts relative to the rest of the file identical to before the move.
+- **Only 1 test script needed repointing** — `test_perspective_crop_locally.py` pushes a job directly onto the queue for one legacy-job-dict-shape check (`mod._crop_lock` / `mod._crop_progress` / `mod._crop_queue` → `mod.crop.<name>`, 3 lines, hand-edited). `test_crop_queue_locally.py` needed no changes — it drives the crop endpoint over HTTP rather than touching the internal state directly, so nothing in it referenced a moved name.
+- **Found and fixed a real gap while doing the live-server verification pass (not part of the official CI suite, but a script in the repo):** `scripts/run_local_for_browser_check.py` patches `mod.MediaIoBaseUpload = FakeMediaUpload` so its fake Drive can stand in for crop's backup-then-overwrite writes — that patch reached the crop worker only because the worker used to resolve `MediaIoBaseUpload` from `app.py`'s own namespace. After the move it resolves from `crop.py`'s namespace instead, so the fake silently stopped applying and a real crop against that harness failed with `'MediaIoBaseUpload' object has no attribute 'fh'`. Fixed with the same both-files qualify pattern as everywhere else: `mod.crop.MediaIoBaseUpload = FakeMediaUpload` added alongside the existing `mod.MediaIoBaseUpload` patch.
+- Verified live against that harness after the fix: logged in, queued a rectangle crop AND a perspective crop through the real HTTP endpoints, both completed (`status: completed`, thumbnail/aspect-ratio refreshed), and `POST /api/crop-progress/reset` cleared the counters correctly.
+- Full suite **44 Python + 3 `.mjs` green**, both before and after — no new dedicated test file added, since the 2 existing crop test scripts (`test_crop_queue_locally.py`, `test_perspective_crop_locally.py`) already exercise the moved code thoroughly.
+- `app.py`: **4,915 lines** (was 5,118 at the end of Day 33; −203 net). `crop.py` is 271.
 
 **CI (V43/Day 25)**
 - `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **44 Python + 3 `.mjs` as of V76** (`test_tagging_locally.py` added Day 32; `test_friend_tag_edit_locally.py` added V75; `test_backup_locally.py` added Day 33). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in
@@ -358,6 +379,7 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - Regression harness: `scripts/crop_regression.html` (serve the repo root over HTTP; see the comment in the file). `scripts/test_crop_queue_locally.py` covers the endpoint and the background queue
 - **A failed crop used to report a count and destroy the reason (fixed V45/Day 27).** The background worker's `except` stores the message in `_crop_progress` and never prints it, so nothing reaches Railway; the auto-start toast showed only "✗ N images failed to crop"; and `CropModal` then POSTs `/api/crop-progress/reset` about a second later, wiping both `failed` and `active_jobs`. `applyCrops()`'s results screen does render full error text per image, but the auto-start effect fires first on every real batch, so it is unreachable in practice. The toast now carries the deduplicated reasons and holds 30s (not the 4s default) because it is the only surviving record. Same species as the V44 `except: pass` audit, missed by it because it isn't literally `except: pass` — it's catch, store, then delete the store
 - **Select-Mode selection used to survive a crop batch (fixed V38).** Selecting photos and running Crop All left Select Mode and the selection stuck on after returning to Home — `<CropModal onClose={() => setCropImages(null)}>` only closed the modal, never touched selection state. `CropModal` now calls `onClose(started)`, where `started` is only true if at least one crop was actually queued (the auto-start effect reaching `'summary'` with a real target, or the manual `applyCrops()` path) — every other close (cancel, Escape, deleting the whole review batch) passes `false`. Home only exits Select Mode on `true`, via the same `toggleTagMode()` that bulk delete's Exit button already used
+- **The background worker moved to `crop.py` in V77/Day 34** — `_process_crop_jobs()`, the `_crop_queue`/`_crop_progress`/`_crop_lock`/`_crop_job_counter` state, and `CROP_SAVE_FORMATS`, byte-for-byte. The two progress routes (`GET /api/crop-progress`, `POST /api/crop-progress/reset`) and the job-queueing route (`crop_image()`) stayed in `app.py`, reading `crop._crop_progress` / `crop._crop_lock` / `crop._crop_queue` qualified — same "endpoints stay put" rule as every other Phase 3 split. Full detail in the Phase 3 section below.
 
 **Perspective crop (V32)**
 - A second crop SHAPE, not a second crop tool: `POST /api/images/<id>/crop` takes an optional `corners` field (four x/y points, percentages 0–100, same resolution-independence as `box`). Absent `corners` = the pre-V32 rectangle path, byte for byte. Old queued jobs and old clients keep working

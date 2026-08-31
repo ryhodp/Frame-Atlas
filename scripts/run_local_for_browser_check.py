@@ -294,6 +294,11 @@ mod.MediaIoBaseDownload = FakeDownloader
 # to drive.py — patch its MediaIoBaseDownload reference there too.
 mod.drive.MediaIoBaseDownload = FakeDownloader
 mod.MediaIoBaseUpload = FakeMediaUpload
+# Day 34: _process_crop_jobs() (the backup-then-overwrite write) moved to
+# crop.py, which imports its own MediaIoBaseUpload — patch it there too, or
+# the crop worker keeps using the real googleapiclient class against this
+# fake Drive and fails with "'MediaIoBaseUpload' object has no attribute 'fh'".
+mod.crop.MediaIoBaseUpload = FakeMediaUpload
 
 # Upload (V7) and web clipping (V25) write through the admin's *user* Google
 # connection rather than the service account, so they need their own stand-in —

@@ -589,10 +589,10 @@ def main():
     conn.commit()
     conn.close()
 
-    with mod._crop_lock:
-        mod._crop_progress['total'] += 1
-        mod._crop_progress['in_progress'] += 1
-    mod._crop_queue.put({
+    with mod.crop._crop_lock:
+        mod.crop._crop_progress['total'] += 1
+        mod.crop._crop_progress['in_progress'] += 1
+    mod.crop._crop_queue.put({
         'id': 9999,
         'image_id': 10,
         'user_id': 1,
