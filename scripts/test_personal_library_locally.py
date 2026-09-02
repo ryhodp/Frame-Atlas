@@ -117,6 +117,10 @@ def main():
     drive = FakeDrive(jpeg)
     mod.drive.get_drive_service = lambda: drive
     mod.MediaIoBaseDownload = FakeDownloader
+    # Day 35: sync_folder_worker() moved to sync.py, which imports its own
+    # MediaIoBaseDownload — patch it there too or the worker keeps using the
+    # real googleapiclient class against this fake Drive.
+    mod.sync.MediaIoBaseDownload = FakeDownloader
 
     FRIEND_FOLDER = "FriendFolderId_ABC123xyz"
     drive.folders[FRIEND_FOLDER] = {
@@ -181,8 +185,8 @@ def main():
     # 6. Friend sync runs through the SERVICE ACCOUNT (no OAuth needed at all).
     tag_calls = []
     mod.tagging.trigger_tagging = lambda user_id=None: tag_calls.append(user_id)
-    mod.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)
-    assert not mod.sync_state["errors"], mod.sync_state["errors"]
+    mod.sync.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)
+    assert not mod.sync.sync_state["errors"], mod.sync.sync_state["errors"]
     s = friend.get("/api/account/setup-status").get_json()
     assert s["image_count"] == 5, s
     print("6. Friend's 5 images synced via the robot account — no Google sign-in.")
@@ -197,7 +201,7 @@ def main():
     assert tag_calls == [], tag_calls
     r = friend.post("/api/account/gemini-key", json={"key": "friend-key-xyz"})
     assert r.status_code == 200, r.get_json()
-    mod.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)
+    mod.sync.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)
     assert tag_calls == [FRIEND_ID], tag_calls
     print("8. Post-sync auto-tag: skipped while keyless, fires (scoped) once a key exists.")
 
@@ -208,10 +212,10 @@ def main():
          "size": "1000", "md5Checksum": f"md5x_{i}"}
         for i in range(5)
     ]
-    mod.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)
+    mod.sync.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)
     s = friend.get("/api/account/setup-status").get_json()
     assert s["image_count"] == 7, s
-    assert any("limit" in e for e in mod.sync_state["errors"]), mod.sync_state["errors"]
+    assert any("limit" in e for e in mod.sync.sync_state["errors"]), mod.sync.sync_state["errors"]
     print("9. Soft cap: sync stopped at the limit with a clear message.")
 
     # 10. Friend deletes their own image: DB-only, excluded from future syncs.
@@ -220,7 +224,7 @@ def main():
     assert r.status_code == 200 and r.get_json()["moved_to"] is None, r.get_json()
     s = friend.get("/api/account/setup-status").get_json()
     assert s["image_count"] == 6, s
-    mod.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)  # room under cap now
+    mod.sync.sync_folder_worker(FRIEND_FOLDER, FRIEND_ID)  # room under cap now
     s = friend.get("/api/account/setup-status").get_json()
     assert s["image_count"] == 7, s  # refilled from remaining folder files, victim NOT re-imported
     ids_now = {i["filename"] for i in friend.get("/api/search").get_json()["images"]}
@@ -233,14 +237,14 @@ def main():
     ]}
     r = admin.post("/api/sync/connect-folder", json={"folder": "AdminFolderId_ABC123xyz"})
     assert r.status_code == 200, r.get_json()
-    mod.sync_folder_worker("AdminFolderId_ABC123xyz", 1)
+    mod.sync.sync_folder_worker("AdminFolderId_ABC123xyz", 1)
     admin_img = admin.get("/api/search").get_json()["images"][0]
     r = friend.delete(f"/api/images/{admin_img['id']}")
     assert r.status_code == 404, r.get_json()
     print("11. Friend deleting an admin image → 404 (ownership enforced).")
 
     # 12. Sync-status privacy: friend's sync details hidden from other users.
-    mod.sync_state.update({"in_progress": True, "user_id": FRIEND_ID,
+    mod.sync.sync_state.update({"in_progress": True, "user_id": FRIEND_ID,
                            "current_file": "casey_secret_project.jpg", "errors": []})
     other_code = admin.post("/api/admin/invite-codes").get_json()["code"]
     other = mod.app.test_client()
@@ -252,7 +256,7 @@ def main():
     assert view_owner["yours"] is True and view_owner["current_file"] == "casey_secret_project.jpg", view_owner
     view_admin = admin.get("/api/sync/status").get_json()
     assert view_admin["current_file"] == "casey_secret_project.jpg", view_admin
-    mod.sync_state.update({"in_progress": False, "user_id": None, "current_file": ""})
+    mod.sync.sync_state.update({"in_progress": False, "user_id": None, "current_file": ""})
     print("12. Sync status: owner + admin see details, other users just see 'busy'.")
 
     # 13. start_sync no longer demands a Google sign-in for friends.
@@ -260,7 +264,7 @@ def main():
     assert r.status_code == 200, r.get_json()
     import time
     for _ in range(50):
-        if not mod.sync_state["in_progress"]:
+        if not mod.sync.sync_state["in_progress"]:
             break
         time.sleep(0.1)
     print("13. /api/sync/start works for a friend with zero OAuth setup.")

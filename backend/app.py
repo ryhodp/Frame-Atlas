@@ -103,6 +103,7 @@ import tagging
 import images_common
 import backup
 import crop
+import sync
 
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -135,17 +136,11 @@ app.config['SESSION_COOKIE_SECURE'] = not RUNNING_LOCALLY
 # mod.DB_PATH directly. The live source of truth is core.db_path().
 DB_PATH = db_path()
 
-sync_state = {
-    'in_progress': False,
-    'user_id': None,  # whose sync is running — one sync at a time, app-wide (Day 14 Stage 2)
-    'processed': 0,
-    'total': 0,
-    'current_file': '',
-    'errors': [],
-    'new_count': 0,      # V48: how many were actually new, for the completion toast
-    'removed_count': 0,  # V48: how many were removed (deleted from Drive), same reason
-}
-
+# Day 35 (Phase 3): the sync_state progress dict moved to sync.py with the
+# worker. Read it qualified as sync.sync_state — it is only ever mutated in
+# place, never rebound, so every reader sees the same live object. Note
+# /api/regenerate-thumbnails borrows it for its own progress + running-lock
+# (pre-existing behaviour, not introduced by the split).
 # Day 32 (Phase 3): _tag_progress / _tag_progress_lock / _sse_queues / _sse_lock
 # moved to tagging.py with the worker. The tag-progress routes below reach them
 # qualified as tagging._tag_progress etc.
@@ -773,7 +768,8 @@ def revoke_invite_code(invite_id):
 # get_or_create_removed_folder, download_drive_file, drive_error_reason —
 # plus REMOVED_FOLDER_NAME, PERSONAL_LIBRARY_CAP, UPLOAD_SCOPES — all moved to
 # drive.py. Call them qualified: drive.get_drive_service(), etc.
-# sync_folder_worker() and reconcile_drive_changes() still live below.
+# (Day 35: sync_folder_worker() and reconcile_drive_changes(), which used to
+# live below this note, are now in sync.py.)
 
 # ============================================================================
 # V27: MONTHLY DATABASE BACKUP TO DRIVE
@@ -789,178 +785,9 @@ def revoke_invite_code(invite_id):
 # the four boot-time backfills (backfill_palettes / backfill_phashes /
 # backfill_notes_fts / merge_plural_tag_duplicates) moved to images_common.py.
 # Call sites are qualified images_common.<name>().
-def sync_folder_worker(folder_id, user_id):
-    global sync_state
-    try:
-        sync_state['in_progress'] = True
-        sync_state['user_id'] = user_id
-        sync_state['processed'] = 0
-        sync_state['total'] = 0
-        sync_state['current_file'] = ''
-        sync_state['errors'] = []
-        sync_state['new_count'] = 0
-        sync_state['removed_count'] = 0
-
-        # EVERYONE syncs through the shared service account (V17). Friends
-        # share their folder with the service account's email (same as Ryan
-        # did on Day 2) — their own Google sign-in stays drive.file-scoped,
-        # which can only see files the app itself created, so it could never
-        # read a pre-existing folder. Verified against Google's docs before
-        # abandoning the OAuth read path: picking a folder in the Google
-        # Picker grants access to the folder itself, NOT the files inside it.
-        service = drive.get_drive_service()
-        print(f"Listing images in folder {folder_id}...")
-        try:
-            all_images = drive.list_images_in_folder(service, folder_id)
-        except Exception as e:
-            msg = str(e)
-            if '404' in msg or 'notFound' in msg or '403' in msg or 'insufficient' in msg.lower():
-                sync_state['errors'].append(
-                    'Frame Atlas can\'t see that folder — make sure it\'s shared with '
-                    f'{drive.get_service_account_email() or "the Frame Atlas robot email"} (Share → Viewer), then try again.')
-                return
-            raise
-        sync_state['total'] = len(all_images)
-
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('SELECT drive_file_id FROM images WHERE user_id = ?', (user_id,))
-        existing_ids = set(row[0] for row in c.fetchall())
-        library_count = len(existing_ids)
-        # Files this user deleted from their library — never re-import (V17)
-        c.execute('SELECT drive_file_id FROM sync_exclusions WHERE user_id = ?', (user_id,))
-        existing_ids |= set(row[0] for row in c.fetchall())
-        conn.close()
-
-        new_count = 0
-        for image in all_images:
-            # Soft cap (V17): friends' thumbnails live in the shared database,
-            # so one giant folder can't balloon storage. Admin is exempt.
-            if user_id != 1 and library_count + new_count >= drive.PERSONAL_LIBRARY_CAP:
-                sync_state['errors'].append(
-                    f'Stopped at the {drive.PERSONAL_LIBRARY_CAP}-image limit — the rest of the '
-                    'folder wasn\'t synced. Ask Ryan if you need more room.')
-                break
-            try:
-                file_id = image['id']
-                filename = image['name']
-
-                if file_id in existing_ids:
-                    sync_state['processed'] += 1
-                    continue
-
-                sync_state['current_file'] = filename
-
-                req = service.files().get_media(fileId=file_id)
-                fh = io.BytesIO()
-                downloader = MediaIoBaseDownload(fh, req)
-                done = False
-                while not done:
-                    status, done = downloader.next_chunk()
-
-                image_data = fh.getvalue()
-                thumbnail = generate_thumbnail(image_data)
-                if not thumbnail:
-                    sync_state['errors'].append(f"Failed thumbnail: {filename}")
-                    sync_state['processed'] += 1
-                    continue
-
-                aspect_ratio = get_image_aspect_ratio(image_data)
-
-                conn = get_db()
-                c = conn.cursor()
-                c.execute('''
-                    INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio, tagging_status, md5_checksum, phash)
-                    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
-                ''', (user_id, file_id, filename, thumbnail, aspect_ratio,
-                      image.get('md5Checksum'), compute_phash(thumbnail)))
-                new_image_id = c.lastrowid
-                conn.commit()
-                conn.close()
-
-                hexes = extract_palette(thumbnail)
-                if hexes:
-                    images_common.save_palette(new_image_id, user_id, hexes)
-
-                new_count += 1
-                sync_state['processed'] += 1
-
-            except Exception as e:
-                sync_state['errors'].append(f"{filename}: {str(e)}")
-                sync_state['processed'] += 1
-                continue
-
-        # V30: sync-delete parity. A photo deleted directly in Drive (not
-        # through the app) just vanishes from this listing — nothing else
-        # here would ever notice, so the library would carry a dead entry
-        # forever. Automatic, no confirmation (Ryan's call), but guarded
-        # against the one failure mode that makes "automatic" dangerous: a
-        # partial or broken Drive listing looking identical to a mass
-        # deletion. If more than half the library would vanish in one pass,
-        # that's almost certainly Drive/pagination trouble, not Ryan deleting
-        # half his library — skip and log instead of cascading the deletes.
-        current_drive_ids = {image['id'] for image in all_images}
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('SELECT id, drive_file_id, filename FROM images WHERE user_id = ?', (user_id,))
-        library_rows = c.fetchall()
-        conn.close()
-
-        missing_rows = [row for row in library_rows if row['drive_file_id'] not in current_drive_ids]
-        removed_count = 0
-        if library_rows and len(missing_rows) > len(library_rows) / 2:
-            sync_state['errors'].append(
-                f"Skipped removing {len(missing_rows)} image(s) that looked deleted from Drive — "
-                "that's more than half the library, which usually means Drive didn't fully list the "
-                "folder rather than a real mass-deletion. Nothing was removed; try syncing again.")
-        else:
-            for row in missing_rows:
-                conn = get_db()
-                c = conn.cursor()
-                for table in ('tags', 'colors', 'embeddings', 'deck_images', 'filmography',
-                              'user_favorites', 'user_flags', 'image_views'):
-                    c.execute(f'DELETE FROM {table} WHERE image_id = ?', (row['id'],))
-                c.execute('DELETE FROM images WHERE id = ?', (row['id'],))
-                conn.commit()
-                conn.close()
-                removed_count += 1
-
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('''
-            UPDATE sync_settings SET last_sync = CURRENT_TIMESTAMP
-            WHERE user_id = ? AND folder_id = ?
-        ''', (user_id, folder_id))
-        conn.commit()
-        conn.close()
-
-        sync_state['new_count'] = new_count
-        sync_state['removed_count'] = removed_count
-
-        print(f"Sync complete. {new_count} new images added"
-              + (f", {removed_count} removed (deleted from Drive)" if removed_count else "") + ".")
-
-    except Exception as e:
-        sync_state['errors'].append(f"Sync failed: {str(e)}")
-    finally:
-        # Auto-tagging after sync: admin rides the shared key (Day 5). A
-        # friend's photos auto-tag too, but ONLY if they've saved their own
-        # Gemini key (V16) — scoped to just their images, on their key, so
-        # it can never spend the admin's budget. Keyless friends' photos sit
-        # untagged (searchable by filename, zero cost) until they add one.
-        #
-        # V48: called BEFORE sync_state['in_progress'] flips false, not
-        # after. trigger_tagging() now resolves "is there anything to tag"
-        # synchronously (see its own docstring), so by the time in_progress
-        # goes false, _tag_progress already reflects the real answer — the
-        # Home page's background sync-then-tag toast watches exactly that
-        # flip and needs it to be trustworthy the instant it sees it,
-        # without guessing via a timing delay.
-        if user_id == 1:
-            tagging.trigger_tagging()
-        elif gemini.get_user_gemini_key(user_id):
-            tagging.trigger_tagging(user_id=user_id)
-        sync_state['in_progress'] = False
+# Day 35 (Phase 3): sync_folder_worker() moved to sync.py, along with the
+# sync_state dict (above) and the V30 half-the-library delete guard. The
+# /api/sync/start route below launches it as sync.sync_folder_worker.
 
 # ============================================================================
 # API ROUTES
@@ -1148,8 +975,8 @@ def backups_run_now():
 def start_sync():
     user_id = session['user_id']
 
-    if sync_state['in_progress']:
-        return jsonify({'error': 'Sync already in progress', 'user_id': sync_state['user_id']}), 400
+    if sync.sync_state['in_progress']:
+        return jsonify({'error': 'Sync already in progress', 'user_id': sync.sync_state['user_id']}), 400
 
     conn = get_db()
     c = conn.cursor()
@@ -1161,7 +988,7 @@ def start_sync():
         return jsonify({'error': 'No sync folder configured'}), 400
 
     folder_id = row[0]
-    thread = threading.Thread(target=sync_folder_worker, args=(folder_id, user_id))
+    thread = threading.Thread(target=sync.sync_folder_worker, args=(folder_id, user_id))
     thread.daemon = True
     thread.start()
 
@@ -1173,9 +1000,9 @@ def sync_status():
     # (or the admin) sees filenames/errors — another user just learns the
     # slot is busy, not what's in someone else's Drive folder. (V17)
     uid = session['user_id']
-    if sync_state['user_id'] in (None, uid) or uid == 1:
-        return jsonify({**sync_state, 'yours': sync_state['user_id'] in (None, uid)})
-    return jsonify({'in_progress': sync_state['in_progress'], 'yours': False,
+    if sync.sync_state['user_id'] in (None, uid) or uid == 1:
+        return jsonify({**sync.sync_state, 'yours': sync.sync_state['user_id'] in (None, uid)})
+    return jsonify({'in_progress': sync.sync_state['in_progress'], 'yours': False,
                     'processed': 0, 'total': 0, 'current_file': '', 'errors': []})
 
 @app.route('/api/tag-progress/stream')
@@ -2044,13 +1871,13 @@ def regenerate_thumbnails():
             images = c.fetchall()
             conn.close()
 
-            sync_state['total'] = len(images)
-            sync_state['processed'] = 0
+            sync.sync_state['total'] = len(images)
+            sync.sync_state['processed'] = 0
 
             service = drive.get_drive_service()
             for img in images:
                 try:
-                    sync_state['current_file'] = f"regenerating #{img['id']}"
+                    sync.sync_state['current_file'] = f"regenerating #{img['id']}"
                     file_id = img['drive_file_id']
                     req = service.files().get_media(fileId=file_id)
                     fh = io.BytesIO()
@@ -2074,15 +1901,15 @@ def regenerate_thumbnails():
                             images_common.save_palette(img['id'], img['user_id'], hexes)
                 except Exception as e:
                     print(f"[regenerate] Failed {img['id']}: {e}")
-                sync_state['processed'] += 1
+                sync.sync_state['processed'] += 1
             print("[regenerate] All thumbnails updated")
         finally:
-            sync_state['in_progress'] = False
+            sync.sync_state['in_progress'] = False
 
-    if sync_state['in_progress']:
+    if sync.sync_state['in_progress']:
         return jsonify({'error': 'Sync already in progress'}), 400
 
-    sync_state['in_progress'] = True
+    sync.sync_state['in_progress'] = True
     thread = threading.Thread(target=_regenerate_job, daemon=True)
     thread.start()
 
@@ -2178,93 +2005,9 @@ def google_disconnect():
     conn.close()
     return jsonify({'success': True})
 
-def _load_existing_phashes():
-    """Every already-known image fingerprint plus palette (for the
-    color-overlap check), for near-duplicate checks."""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT id, filename, thumbnail_blob, phash FROM images WHERE phash IS NOT NULL')
-    rows = [dict(r) for r in c.fetchall()]
-    c.execute('SELECT image_id, hex, share FROM colors')
-    palettes = {}
-    for r in c.fetchall():
-        palettes.setdefault(r['image_id'], []).append((r['hex'], r['share']))
-    conn.close()
-    for r in rows:
-        r['colors'] = palettes.get(r['id'], [])
-    return rows
-
-
-def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
-                  force=False, source_url=None):
-    """Put one image into the library: duplicate check, write to Drive, store
-    the row, build the thumbnail + palette.
-
-    Shared by /api/upload and /api/clip so the browser extension can't drift
-    away from the in-app uploader. `existing` is the phash+palette list from
-    _load_existing_phashes(); successful ingests are appended to it so a batch
-    also dedupes against itself. Returns the per-file result dict.
-    """
-    img_phash = compute_phash(image_data)
-    thumbnail = generate_thumbnail(image_data)
-    new_palette = extract_palette(thumbnail) if thumbnail else []
-    new_signature = compute_signature(thumbnail) if thumbnail else None
-
-    if not force and img_phash:
-        # Same three gates as the Duplicate Review scan, cheapest first: the
-        # fingerprint nominates, the signature and the palette confirm. The
-        # signature is only decoded for candidates the fingerprint nominated.
-        def _is_dup(r):
-            if phash_distance(img_phash, r['phash']) > PHASH_NEAR_DUP_THRESHOLD:
-                return False
-            if 'signature' not in r:
-                r['signature'] = compute_signature(r['thumbnail_blob'])
-            return (signatures_match(new_signature, r['signature'])
-                    and palettes_overlap(new_palette, r['colors']))
-
-        dup = next((r for r in existing if _is_dup(r)), None)
-        if dup:
-            return {
-                'filename': filename,
-                'status': 'duplicate',
-                'existing': {
-                    'id': dup['id'],
-                    'filename': dup['filename'],
-                    'thumbnail': f"data:image/jpeg;base64,{base64.b64encode(dup['thumbnail_blob']).decode('utf-8')}"
-                }
-            }
-
-    try:
-        media = MediaIoBaseUpload(io.BytesIO(image_data), mimetype=mimetype or 'image/jpeg')
-        drive_file = service.files().create(
-            body={'name': filename, 'parents': [folder_id]},
-            media_body=media, fields='id, md5Checksum'
-        ).execute()
-    except Exception as e:
-        return {'filename': filename, 'status': 'error', 'message': str(e)}
-
-    aspect_ratio = get_image_aspect_ratio(image_data)
-
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio,
-                            tagging_status, md5_checksum, phash, source_url)
-        VALUES (1, ?, ?, ?, ?, 'pending', ?, ?, ?)
-    ''', (drive_file['id'], filename, thumbnail, aspect_ratio,
-          drive_file.get('md5Checksum'), img_phash, source_url))
-    new_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
-    if thumbnail:
-        if new_palette:
-            images_common.save_palette(new_id, 1, new_palette)
-        existing.append({'id': new_id, 'filename': filename,
-                         'thumbnail_blob': thumbnail, 'phash': img_phash,
-                         'colors': new_palette, 'signature': new_signature})
-
-    return {'filename': filename, 'status': 'uploaded', 'image_id': new_id}
+# Day 35 (Phase 3): _load_existing_phashes() and _ingest_image() moved to
+# sync.py. They serve /api/upload and /api/clip (NOT the folder sync), and
+# both routes below call them qualified as sync.<name>().
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -2294,10 +2037,10 @@ def upload_images():
         return jsonify({'error': 'No files provided'}), 400
 
     folder_id = drive.get_root_folder_id(1)
-    existing = _load_existing_phashes()
+    existing = sync._load_existing_phashes()
 
     results = [
-        _ingest_image(service, folder_id, f.read(), f.filename, f.mimetype, existing, force=force)
+        sync._ingest_image(service, folder_id, f.read(), f.filename, f.mimetype, existing, force=force)
         for f in files
     ]
 
@@ -2408,8 +2151,8 @@ def clip_image():
             'message': 'Connect Google Drive in Frame Atlas → Settings first.'
         }), 401
 
-    existing = _load_existing_phashes()
-    result = _ingest_image(
+    existing = sync._load_existing_phashes()
+    result = sync._ingest_image(
         service, drive.get_root_folder_id(user_id), image_data,
         _clip_filename(source_url, mimetype), mimetype,
         existing, force=force, source_url=source_url,
@@ -3315,103 +3058,10 @@ def reset_crop_progress():
 # DAY 8 (V7): DUPLICATE DETECTION
 # ============================================================================
 
-def _users_with_synced_folders():
-    """Every user whose photos can legitimately be reconciled against a Drive
-    folder: the admin always (get_root_folder_id falls back to the hardcoded
-    default folder if they've never explicitly set one), plus anyone who has
-    actually connected their own folder. A friend with no sync_settings row
-    has no photos of their own to reconcile — their uploads/clips land in the
-    ADMIN's folder (see upload_images), not theirs — so skipping them here
-    isn't a gap, it's what keeps this from comparing their nonexistent folder
-    against the admin's by way of get_root_folder_id's fallback."""
-    conn = get_db()
-    ids = {r[0] for r in conn.execute('SELECT DISTINCT user_id FROM sync_settings').fetchall()}
-    conn.close()
-    ids.add(1)
-    return ids
-
-def reconcile_drive_changes():
-    """Self-heals every image whose Drive file no longer matches what the
-    database thinks it looks like. One folder listing per user (each user's
-    own folder — a friend's photos live in THEIR folder, not the admin's, so
-    this must never assume a single shared listing), then for any image
-    whose stored checksum differs from Drive's current one, the thumbnail,
-    aspect ratio, fingerprint and palette are rebuilt from the current file.
-
-    That mismatch is exactly what a crop leaves behind: the V27 background
-    crop worker overwrote the Drive file but crashed before updating the row,
-    so the grid kept showing the pre-crop thumbnail while the full-res
-    inspector (which reads straight from Drive) showed the cropped image.
-    Fixed going forward (V30), but already-affected rows still need this to
-    catch up — so it runs both at boot (self-heals without Ryan needing to
-    remember to open Duplicate Review) and as the first step of that scan.
-
-    Never deletes anything — a file missing from a listing here just means
-    "skip it," on purpose. Deletion-on-sync is a deliberately separate,
-    explicit decision that lives in sync_folder_worker() instead, tied to
-    the moment Ryan (or a friend) actually triggers a sync of their folder."""
-    try:
-        service = drive.get_drive_service()
-    except Exception as e:
-        print(f"[reconcile] Drive reconciliation skipped: {e}")
-        return
-
-    backfilled = repaired = 0
-    for user_id in _users_with_synced_folders():
-        try:
-            files = drive.list_images_in_folder(service, drive.get_root_folder_id(user_id))
-            md5_map = {f['id']: f.get('md5Checksum') for f in files}
-        except Exception as e:
-            print(f"[reconcile] Could not list Drive folder for user {user_id}: {e}")
-            continue
-
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('SELECT id, user_id, drive_file_id, filename, md5_checksum '
-                  'FROM images WHERE user_id = ?', (user_id,))
-        rows = c.fetchall()
-        conn.close()
-
-        for r in rows:
-            drive_md5 = md5_map.get(r['drive_file_id'])
-            if not drive_md5 or drive_md5 == r['md5_checksum']:
-                continue
-
-            if r['md5_checksum'] is None:
-                # Never had a checksum — just record it. The stored thumbnail
-                # is still the right one, so nothing needs rebuilding.
-                conn = get_db()
-                conn.execute('UPDATE images SET md5_checksum = ? WHERE id = ?',
-                             (drive_md5, r['id']))
-                conn.commit()
-                conn.close()
-                backfilled += 1
-                continue
-
-            # The file in Drive changed under us (a crop). Rebuild from it.
-            try:
-                current_bytes = drive.download_drive_file(service, r['drive_file_id'])
-                thumbnail = generate_thumbnail(current_bytes)
-                if not thumbnail:
-                    raise ValueError('thumbnail could not be generated')
-                conn = get_db()
-                conn.execute('''UPDATE images
-                    SET thumbnail_blob = ?, aspect_ratio = ?, md5_checksum = ?, phash = ?
-                    WHERE id = ?''',
-                    (thumbnail, get_image_aspect_ratio(current_bytes), drive_md5,
-                     compute_phash(thumbnail), r['id']))
-                conn.commit()
-                conn.close()
-                hexes = extract_palette(thumbnail)
-                if hexes:
-                    images_common.save_palette(r['id'], r['user_id'], hexes)
-                repaired += 1
-            except Exception as e:
-                print(f"[reconcile] Could not refresh {r['filename']}: {e}")
-
-    if backfilled or repaired:
-        print(f"[reconcile] Recorded {backfilled} checksum(s); "
-              f"refreshed {repaired} image(s) that changed in Drive.")
+# Day 35 (Phase 3): _users_with_synced_folders() and reconcile_drive_changes()
+# moved to sync.py. reconcile_drive_changes() never deletes anything — that
+# is deliberately sync_folder_worker()'s job alone. The duplicates/scan route
+# below and both boot blocks call sync.reconcile_drive_changes().
 
 @app.route('/api/duplicates/scan', methods=['POST'])
 @admin_required
@@ -3450,7 +3100,7 @@ def duplicates_scan():
         if hexes:
             images_common.save_palette(r['id'], r['user_id'], hexes)
 
-    reconcile_drive_changes()
+    sync.reconcile_drive_changes()
 
     return find_duplicates()
 
@@ -4900,7 +4550,7 @@ if __name__ == '__main__':
     images_common.backfill_phashes()
     images_common.backfill_notes_fts()
     images_common.merge_plural_tag_duplicates()
-    threading.Thread(target=reconcile_drive_changes, daemon=True).start()
+    threading.Thread(target=sync.reconcile_drive_changes, daemon=True).start()
     backup.start_backup_scheduler()
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
@@ -4911,5 +4561,5 @@ images_common.backfill_palettes()
 images_common.backfill_phashes()
 images_common.backfill_notes_fts()
 images_common.merge_plural_tag_duplicates()
-threading.Thread(target=reconcile_drive_changes, daemon=True).start()
+threading.Thread(target=sync.reconcile_drive_changes, daemon=True).start()
 backup.start_backup_scheduler()

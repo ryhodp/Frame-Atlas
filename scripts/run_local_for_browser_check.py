@@ -299,6 +299,10 @@ mod.MediaIoBaseUpload = FakeMediaUpload
 # the crop worker keeps using the real googleapiclient class against this
 # fake Drive and fails with "'MediaIoBaseUpload' object has no attribute 'fh'".
 mod.crop.MediaIoBaseUpload = FakeMediaUpload
+# Day 35: sync_folder_worker() (download) and _ingest_image() (upload) moved to
+# sync.py, which imports its own copies of BOTH classes — same reason as above.
+mod.sync.MediaIoBaseDownload = FakeDownloader
+mod.sync.MediaIoBaseUpload = FakeMediaUpload
 
 # Upload (V7) and web clipping (V25) write through the admin's *user* Google
 # connection rather than the service account, so they need their own stand-in —

@@ -1089,7 +1089,7 @@ itself in the toast if it fails).
 
 ---
 
-## Day 35 — Drive sync → `sync.py` *(planned)*
+## Day 35 — Drive sync → `sync.py` *(V78 — COMPLETE)*
 
 **Goal:** The folder-sync worker and everything it calls — the last big worker domain in
 `app.py`.
@@ -1113,12 +1113,51 @@ itself in the toast if it fails).
 **Done when:** `sync.py` exists, 4 test scripts repointed, suite green, and one real sync run
 confirmed on the live site.
 
+**How it actually shipped (V78, September 2 2026):**
+- `backend/sync.py` (447 lines) — `sync_folder_worker()`, `sync_state`, `_load_existing_phashes()`,
+  `_ingest_image()`, `_users_with_synced_folders()`, `reconcile_drive_changes()`. All four moved
+  blocks **byte-for-byte identical to `HEAD`**, verified by extracting each line range out of
+  `git show HEAD:backend/app.py` and diffing before `app.py` was touched at all.
+- **`merge_plural_tag_duplicates()` was already gone** — this entry listed it, but it moved to
+  `images_common.py` back on Day 31. Nothing to do.
+- **`_ingest_image()` / `_load_existing_phashes()` turned out NOT to be sync-worker code** — they
+  serve `/api/upload` and `/api/clip` only. Moved into `sync.py` anyway (Ryan's call, over a
+  separate `ingest.py`): same family of work, nearly identical imports, and the Day 36+ blueprint
+  work can relocate them cleanly later if it wants to.
+- **`sync_state` is shared with `/api/regenerate-thumbnails`**, which borrows it for its own
+  progress reporting *and* its "something's already running" lock — pre-existing behaviour this
+  entry didn't anticipate. Moved to `sync.py` regardless (Ryan's call, over inventing a home for
+  mutable app state in `core.py`); that route now reads `sync.sync_state`.
+- **Only 2 test scripts needed repointing, not 4.** `test_v25_clip_locally.py` mentions
+  `_ingest_image` in a docstring only; `test_duplicate_color_check_locally.py` patches
+  `mod.drive.*` / `mod.tagging.*`, which keep working through the shared module objects. Both pass
+  untouched.
+- **The Day 34 `MediaIoBaseDownload` trap recurred and was caught before running anything.** Both
+  sync test scripts patch `mod.MediaIoBaseDownload`, which stops reaching the worker once the
+  worker imports its own copy in `sync.py`. Fixed proactively — then *proved the fix was real* by
+  removing that one line and watching `test_sync_delete_parity` fail 6 checks with `'FakeRequest'
+  object has no attribute 'uri'`. `run_local_for_browser_check.py` needed the same for both the
+  download and upload classes.
+- **Live verification went well beyond "one real sync" (Ryan chose the thorough option, because
+  this is the code path that can delete library rows):** a real Flask server on a real port,
+  driven over real HTTP, **31/31 checks** — normal sync imports 8 photos, re-sync is a clean
+  no-op, one photo vanishing from Drive removes exactly one row, **most of the folder vanishing
+  deletes NOTHING and reports the V30 guard**, `/api/regenerate-thumbnails` takes and releases the
+  shared lock, and `reconcile_drive_changes()` runs without deleting anything.
+- Full suite **44 Python + 3 `.mjs` green**, before and after. No new dedicated test file (same
+  judgment as Day 34 — existing coverage plus the live pass is thorough).
+- `app.py`: **4,915 → 4,565 lines** (−350). `sync.py` is 447. **Phase 3's worker extractions are
+  now complete** — `app.py` is down from ~6,960 at the start of the phase, and Days 36+ (route
+  blueprints) are next.
+
 ---
 
 ## Days 36–42 — Route Blueprints (backend) *(planned, granular)*
 
 With the workers out (Day 35), `app.py` should be roughly **routes + startup wiring**, likely in
-the 3,500–4,000-line range (down from ~6,960). Now the routes themselves come out, grouped by
+the 3,500–4,000-line range (down from ~6,960). *(Actual after Day 35: **4,565 lines** — a few
+hundred above that estimate, since the routes themselves are the bulk of what's left and several
+non-worker helpers stayed put.)* Now the routes themselves come out, grouped by
 domain into Flask "blueprints" (a blueprint = a bundle of related routes registered onto the app
 as a unit). This is a distinct risk class from the worker extractions — blueprint registration,
 `url_for` endpoint names, and decorator availability all change — so each blueprint gets its own
@@ -1247,7 +1286,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | — | *Interrupt:* friends edit tags & filmography on their own photos | 8 endpoints admin-only → owner-or-admin + `_scope_ids_to_user`; silent-failure fixed; 43 Python tests ✅ *(V75)* |
 | 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job + scheduler isolated; first-ever test (23 checks); app.py −66 lines ✅ *(V76)* |
 | 34 | Crop worker → `crop.py` | Background crop queue + worker thread; app.py −203 lines ✅ *(V77)* |
-| 35 | Drive sync → `sync.py` | Folder-sync worker + ingest, last big worker domain *(planned)* |
+| 35 | Drive sync → `sync.py` | Folder-sync worker + ingest; app.py −350 lines; workers done ✅ *(V78)* |
 | 36 | Routes → `routes_auth.py` | Login/register/invite routes as a blueprint *(planned)* |
 | 37 | Routes → `routes_search.py` | Search/autocomplete/bookmarks/similar as a blueprint *(planned)* |
 | 38 | Routes → `routes_tags.py` | Bulk tag ops + tag editing as a blueprint *(planned)* |

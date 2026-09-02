@@ -105,6 +105,10 @@ def main():
     drive = FakeDrive(jpeg)
     mod.drive.get_drive_service = lambda: drive
     mod.MediaIoBaseDownload = FakeDownloader
+    # Day 35: sync_folder_worker() moved to sync.py, which imports its own
+    # MediaIoBaseDownload — patch it there too or the worker keeps using the
+    # real googleapiclient class against this fake Drive.
+    mod.sync.MediaIoBaseDownload = FakeDownloader
     mod.tagging.trigger_tagging = lambda *a, **k: None
 
     failures = []
@@ -123,9 +127,9 @@ def main():
     ]
 
     def run_sync():
-        mod.sync_state['errors'] = []
-        mod.sync_folder_worker(FOLDER, 1)
-        return list(mod.sync_state['errors'])
+        mod.sync.sync_state['errors'] = []
+        mod.sync.sync_folder_worker(FOLDER, 1)
+        return list(mod.sync.sync_state['errors'])
 
     def library_rows():
         conn = sqlite3.connect(db_path)
