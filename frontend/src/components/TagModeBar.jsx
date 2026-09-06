@@ -427,9 +427,17 @@ export default function TagModeBar({
     if (!confirm) return;
     setBusy(true);
     const ids = Array.from(selectedIds);
+    // V79: every branch below reports success, not just failure. These writes
+    // touch photos that may be scrolled off-screen (a 30-image selection), so
+    // the local-state patch is invisible proof at best — the confirm dialog
+    // just closing looked identical to nothing having happened. Bulk delete
+    // already toasted on success; tags and filmography did not.
+    const photos = `${ids.length} photo${ids.length === 1 ? '' : 's'}`;
+    let successMessage = null;
     try {
       if (confirm.kind === 'filmography-set') {
         await postBulk('/api/filmography/bulk-set', { image_ids: ids, ...confirm.touched });
+        successMessage = `Film info updated on ${photos}`;
         // Only overlay the touched fields onto each image's own existing
         // filmography — mirrors the backend's per-field merge exactly.
         onBulkChanged?.(ids, (img) => {
@@ -440,9 +448,11 @@ export default function TagModeBar({
         });
       } else if (confirm.kind === 'filmography-clear') {
         await postBulk('/api/filmography/bulk-clear', { image_ids: ids });
+        successMessage = `Film info cleared from ${photos}`;
         onBulkChanged?.(ids, (img) => ids.includes(img.id) ? { ...img, filmography: null } : img);
       } else if (confirm.kind === 'apply') {
         await postBulk('/api/tags/bulk-apply', { image_ids: ids, category: confirm.category, value: confirm.value });
+        successMessage = `Added “${confirm.value}” to ${photos}`;
         // Update local image state so grid/detail reflect the new tag without a full reload
         onBulkChanged?.(ids, (img) => {
           if (!ids.includes(img.id)) return img;
@@ -454,6 +464,7 @@ export default function TagModeBar({
         setTagCategory('');
       } else {
         await postBulk('/api/tags/bulk-remove', { image_ids: ids, category: confirm.category, value: confirm.value });
+        successMessage = `Removed “${confirm.value}” from ${photos}`;
         onBulkChanged?.(ids, (img) => {
           if (!ids.includes(img.id)) return img;
           return { ...img, tags: (img.tags || []).filter(t => !(t.category === confirm.category && t.value === confirm.value)) };
@@ -467,6 +478,7 @@ export default function TagModeBar({
       // that no longer qualifies, instead of leaving stale results on screen.
       onBulkMutated?.();
       refetchSelectionData();
+      if (successMessage) showToast(successMessage, 'success');
     } catch (e) {
       console.error('Bulk tag operation failed', e);
       showToast(e.message || 'That change didn’t save — try again.', 'error');

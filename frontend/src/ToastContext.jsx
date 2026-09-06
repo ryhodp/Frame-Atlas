@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback } from 'react';
-import { danger, primary, tertiary, withAlpha } from './theme';
+import { danger, primary, tertiary, white, withAlpha } from './theme';
 
 const ToastContext = createContext(null);
 
@@ -10,9 +10,13 @@ export function ToastProvider({ children }) {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  const showToast = useCallback((message, type = 'info', duration = 4000) => {
+  // `action` (optional) is {label, onClick} and renders as a button inside the
+  // toast — for a background job whose result needs a decision rather than just
+  // an FYI (e.g. upload finding duplicates). The toast dismisses itself once the
+  // action is clicked, so the handler doesn't have to.
+  const showToast = useCallback((message, type = 'info', duration = 4000, action = null) => {
     const id = Math.random().toString(36).slice(2);
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts(prev => [...prev, { id, message, type, action }]);
     if (duration) {
       setTimeout(() => dismissToast(id), duration);
     }
@@ -22,7 +26,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={{ showToast, dismissToast, toasts }}>
       {children}
-      <ToastContainer toasts={toasts} />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </ToastContext.Provider>
   );
 }
@@ -38,7 +42,7 @@ export function useToast() {
   return { showToast: context.showToast, dismissToast: context.dismissToast };
 }
 
-function ToastContainer({ toasts }) {
+function ToastContainer({ toasts, onDismiss }) {
   return (
     <div style={{
       position: 'fixed',
@@ -78,7 +82,28 @@ function ToastContainer({ toasts }) {
             }),
           }}
         >
-          {toast.message}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ flex: 1, minWidth: 0 }}>{toast.message}</span>
+            {toast.action && (
+              <button
+                onClick={() => { onDismiss(toast.id); toast.action.onClick?.(); }}
+                style={{
+                  flexShrink: 0,
+                  background: withAlpha(white, 0.1),
+                  border: `1px solid ${withAlpha(white, 0.25)}`,
+                  color: 'inherit',
+                  borderRadius: '6px',
+                  padding: '5px 10px',
+                  fontSize: '11.5px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
+          </div>
         </div>
       ))}
       <style>{`

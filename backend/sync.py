@@ -261,10 +261,24 @@ def sync_folder_worker(folder_id, user_id):
 
 def _load_existing_phashes():
     """Every already-known image fingerprint plus palette (for the
-    color-overlap check), for near-duplicate checks."""
+    color-overlap check), for near-duplicate checks.
+
+    **Deliberately does NOT select `thumbnail_blob` (V79).** It used to, and
+    that single column was the dominant cost of an upload: this runs once per
+    `/api/upload` and `/api/clip` request, so at real library size (~3,500
+    images x ~40-80KB of stored JPEG) it pulled a couple of hundred MB of image
+    bytes into memory before a single photo was processed — on a Railway box
+    whose whole volume is 434MB. It's also almost entirely wasted work: the
+    blob is only ever needed for the handful of rows phash actually nominates
+    as candidates (see `_is_dup` below), which for a normal upload is zero.
+
+    `_thumbnail_for()` fetches those few on demand instead. The duplicate
+    ALGORITHM is untouched — same three gates, same thresholds, same order.
+    Only the moment the bytes are read changed.
+    """
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, filename, thumbnail_blob, phash FROM images WHERE phash IS NOT NULL')
+    c.execute('SELECT id, filename, phash FROM images WHERE phash IS NOT NULL')
     rows = [dict(r) for r in c.fetchall()]
     c.execute('SELECT image_id, hex, share FROM colors')
     palettes = {}
@@ -274,6 +288,25 @@ def _load_existing_phashes():
     for r in rows:
         r['colors'] = palettes.get(r['id'], [])
     return rows
+
+
+def _thumbnail_for(row):
+    """Stored thumbnail bytes for one candidate row, read on demand (V79).
+
+    Rows appended by `_ingest_image` during a batch already carry their blob
+    (so a batch still dedupes against itself with no extra query); rows from
+    `_load_existing_phashes` don't, and pay one primary-key lookup each — only
+    when phash has already nominated them. Returns None if the row vanished or
+    never had a thumbnail; every caller tolerates that (`compute_signature`
+    returns None for unreadable bytes, and the preview falls back to no image).
+    """
+    if row.get('thumbnail_blob') is not None:
+        return row['thumbnail_blob']
+    conn = get_db()
+    r = conn.execute('SELECT thumbnail_blob FROM images WHERE id = ?',
+                     (row['id'],)).fetchone()
+    conn.close()
+    return r['thumbnail_blob'] if r else None
 
 
 def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
@@ -294,24 +327,28 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
     if not force and img_phash:
         # Same three gates as the Duplicate Review scan, cheapest first: the
         # fingerprint nominates, the signature and the palette confirm. The
-        # signature is only decoded for candidates the fingerprint nominated.
+        # signature is only decoded for candidates the fingerprint nominated —
+        # and since V79 the thumbnail BYTES are only read for those candidates
+        # too (see _load_existing_phashes / _thumbnail_for).
         def _is_dup(r):
             if phash_distance(img_phash, r['phash']) > PHASH_NEAR_DUP_THRESHOLD:
                 return False
             if 'signature' not in r:
-                r['signature'] = compute_signature(r['thumbnail_blob'])
+                r['signature'] = compute_signature(_thumbnail_for(r))
             return (signatures_match(new_signature, r['signature'])
                     and palettes_overlap(new_palette, r['colors']))
 
         dup = next((r for r in existing if _is_dup(r)), None)
         if dup:
+            dup_thumb = _thumbnail_for(dup)
             return {
                 'filename': filename,
                 'status': 'duplicate',
                 'existing': {
                     'id': dup['id'],
                     'filename': dup['filename'],
-                    'thumbnail': f"data:image/jpeg;base64,{base64.b64encode(dup['thumbnail_blob']).decode('utf-8')}"
+                    'thumbnail': (f"data:image/jpeg;base64,{base64.b64encode(dup_thumb).decode('utf-8')}"
+                                  if dup_thumb else None)
                 }
             }
 

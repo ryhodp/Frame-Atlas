@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useToast } from '../ToastContext';
 import { black, danger, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, primaryDim, success, surfaceContainerDark, surfaceContainerLowest, warning, white, withAlpha } from '../theme';
 
 const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
   const isMobile = useIsMobile();
+  const { showToast } = useToast();
   const [signedIn, setSignedIn] = useState(null); // null = still checking
   const [panelOpen, setPanelOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -12,6 +14,26 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
   const [results, setResults] = useState([]); // array of {filename, status, ...}
   const [pendingFiles, setPendingFiles] = useState({}); // filename -> File, for "upload anyway"
   const fileInputRef = useRef(null);
+
+  // ── V79: uploads run in the BACKGROUND ────────────────────────────────────
+  // The old flow held a full-screen modal open for the whole request and
+  // refused to close while `uploading` was true, so the app was unusable until
+  // the server finished. Worse, the progress bar it showed only ever measured
+  // the browser SENDING the bytes — it hit 100% the instant the last byte left,
+  // and then sat there spinning through all the slow server-side work
+  // (thumbnail, palette, duplicate check, the Drive write for every photo).
+  // "100% and still spinning, can't touch anything" was that gap, not a hang.
+  //
+  // Now: the panel closes the moment a batch starts, a small pill reports what's
+  // in flight, and the outcome arrives as a toast — the same instant-close +
+  // background-toast pattern CropModal / DuplicateReview / bulk delete already
+  // use (V35). `bgCount` is how many photos are in flight right now; the pill
+  // hides itself at 0.
+  const [bgCount, setBgCount] = useState(0);
+  // Duplicates found by a background batch, parked until the toast's "Review"
+  // button reopens the panel with just those. Kept in a ref as well so the
+  // toast's onClick (captured at show time) always sees the latest set.
+  const parkedDupesRef = useRef([]);
 
   useEffect(() => {
     fetch('/api/auth/status')
@@ -27,99 +49,146 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
     }
   }, []);
 
+  // POST one batch. Resolves to the server's per-file result array (or an
+  // array of synthetic error rows), so both the foreground and background
+  // callers can decide for themselves how to present the outcome.
+  const postBatch = (files, force, { onProgress } = {}) => new Promise((resolve) => {
+    const errorRows = (message) => files.map(f => ({ filename: f.name, status: 'error', message }));
+    const formData = new FormData();
+    files.forEach(f => formData.append('files', f));
+
+    const xhr = new XMLHttpRequest();
+
+    // NOTE: this measures bytes leaving the browser only. The server still has
+    // real work to do after it reaches 100% — never present it as "done".
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100));
+    });
+
+    xhr.addEventListener('load', () => {
+      let data;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch (e) {
+        console.error('Upload parse error:', e);
+        resolve(errorRows('Upload failed — check your connection and try again.'));
+        return;
+      }
+      if (xhr.status === 401) {
+        setSignedIn(false);
+        resolve(errorRows(data.message || 'Sign in with Google first.'));
+        return;
+      }
+      if (!xhr.status || xhr.status >= 400) {
+        resolve(errorRows(data.message || data.error || 'Upload failed.'));
+        return;
+      }
+      resolve(data.results || []);
+    });
+
+    xhr.addEventListener('error', () => {
+      resolve(errorRows('Upload failed — check your connection and try again.'));
+    });
+
+    xhr.open('POST', `/api/upload${force ? '?force=true' : ''}`);
+    xhr.send(formData);
+  });
+
+  // Summarise a finished background batch as one toast. Duplicates aren't
+  // auto-decided — they're parked and offered behind a Review button, because
+  // "upload it anyway" is a judgement only Ryan can make.
+  const reportBatch = (results) => {
+    const uploaded = results.filter(r => r.status === 'uploaded');
+    const dupes = results.filter(r => r.status === 'duplicate');
+    const errors = results.filter(r => r.status === 'error');
+
+    const parts = [];
+    if (uploaded.length) parts.push(`${uploaded.length} uploaded`);
+    if (dupes.length) parts.push(`${dupes.length} possible duplicate${dupes.length === 1 ? '' : 's'}`);
+    if (errors.length) parts.push(`${errors.length} failed`);
+    const message = parts.length ? parts.join(' · ') : 'Nothing to upload.';
+
+    if (dupes.length) {
+      parkedDupesRef.current = dupes;
+      // Held open (duration 0) until acted on — it's the only route back to a
+      // decision, and a 4s auto-dismiss would silently drop those photos.
+      showToast(message, errors.length ? 'error' : 'info', 0, {
+        label: 'Review',
+        onClick: () => {
+          setResults(parkedDupesRef.current);
+          setPanelOpen(true);
+        },
+      });
+    } else if (errors.length) {
+      // Errors carry their reason; show the first verbatim rather than a count
+      // alone (the V45 lesson — a bare count destroys the only diagnosis).
+      showToast(`${message} — ${errors[0].message || 'unknown error'}`, 'error', 12000);
+    } else {
+      showToast(message, 'success');
+    }
+  };
+
+  // Runs a batch in the background: no modal, a pill while it's in flight, a
+  // toast at the end. Never awaited by the caller — that's the whole point.
+  const uploadInBackground = async (files) => {
+    setBgCount(n => n + files.length);
+    // Remember the Files so "Upload anyway" still works after the panel closed.
+    setPendingFiles(prev => {
+      const next = { ...prev };
+      files.forEach(f => { next[f.name] = f; });
+      return next;
+    });
+    try {
+      const results = await postBatch(files, false);
+      if (results.some(r => r.status === 'uploaded')) onUploaded?.();
+      reportBatch(results);
+    } finally {
+      setBgCount(n => Math.max(0, n - files.length));
+    }
+  };
+
+  // Foreground upload — only used from inside the open panel ("Upload anyway"),
+  // where there's already a visible surface to report into.
   const doUpload = async (files, force) => {
     if (!files.length) return;
     setUploading(true);
     setUploadProgress(0);
-    const formData = new FormData();
-    files.forEach(f => formData.append('files', f));
-
-    return new Promise((resolve) => {
-      const xhr = new XMLHttpRequest();
-
-      // Track upload progress
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 100);
-          setUploadProgress(pct);
-        }
-      });
-
-      xhr.addEventListener('load', async () => {
-        try {
-          const data = JSON.parse(xhr.responseText);
-
-          if (xhr.status === 401) {
-            // Google auth failed — show the backend error message
-            setResults(prev => [...prev, ...files.map(f => ({
-              filename: f.name,
-              status: 'error',
-              message: data.message || 'Sign in with Google first.'
-            }))]);
-            setSignedIn(false);
-            setUploading(false);
-            setUploadProgress(0);
-            resolve();
-            return;
-          }
-
-          setResults(prev => {
-            const byName = new Map(prev.map(r => [r.filename, r]));
-            (data.results || []).forEach(r => byName.set(r.filename, r));
-            return Array.from(byName.values());
-          });
-          const nextPending = { ...pendingFiles };
-          files.forEach(f => { nextPending[f.name] = f; });
-          setPendingFiles(nextPending);
-
-          if ((data.results || []).some(r => r.status === 'uploaded')) {
-            onUploaded?.();
-            // Auto-close the panel 1.5 seconds after successful upload
-            // so the user can see the results briefly, then the badge takes over
-            setTimeout(() => {
-              setPanelOpen(false);
-              setResults([]);
-              setUploadProgress(0);
-            }, 1500);
-          }
-        } catch (e) {
-          console.error('Upload parse error:', e);
-          setResults(prev => [...prev, ...files.map(f => ({
-            filename: f.name,
-            status: 'error',
-            message: 'Upload failed — check your connection and try again.'
-          }))]);
-        }
-        setUploading(false);
-        resolve();
-      });
-
-      xhr.addEventListener('error', () => {
-        setResults(prev => [...prev, ...files.map(f => ({
-          filename: f.name,
-          status: 'error',
-          message: 'Upload failed — check your connection and try again.'
-        }))]);
-        setUploading(false);
-        setUploadProgress(0);
-        resolve();
-      });
-
-      xhr.open('POST', `/api/upload${force ? '?force=true' : ''}`);
-      xhr.send(formData);
+    const results = await postBatch(files, force, { onProgress: setUploadProgress });
+    setResults(prev => {
+      const byName = new Map(prev.map(r => [r.filename, r]));
+      results.forEach(r => byName.set(r.filename, r));
+      return Array.from(byName.values());
     });
+    setPendingFiles(prev => {
+      const next = { ...prev };
+      files.forEach(f => { next[f.name] = f; });
+      return next;
+    });
+    if (results.some(r => r.status === 'uploaded')) onUploaded?.();
+    setUploading(false);
+    setUploadProgress(0);
   };
 
   // Exposed to the page so dropping files anywhere on Home (not just inside
-  // this button's own panel) opens the panel and starts uploading right
-  // away — same upload path either way, just a bigger drop target.
+  // this button's own panel) starts an upload right away — same upload path
+  // either way, just a bigger drop target.
+  //
+  // V79: this no longer opens the panel. Dropping photos should get you a
+  // library that's filling up, not a box in front of the library.
   const acceptFiles = (fileList) => {
-    const imageFiles = Array.from(fileList || []).filter(f => f.type.startsWith('image/'));
-    if (!imageFiles.length) return;
-    setResults([]);
-    setUploadProgress(0);
-    setPanelOpen(true);
-    doUpload(imageFiles, false);
+    const all = Array.from(fileList || []);
+    const imageFiles = all.filter(f => f.type.startsWith('image/'));
+    if (!imageFiles.length) {
+      if (all.length) showToast('Those files aren’t images — nothing was uploaded.', 'error');
+      return;
+    }
+    const skipped = all.length - imageFiles.length;
+    showToast(
+      `Uploading ${imageFiles.length} photo${imageFiles.length === 1 ? '' : 's'} in the background…`
+        + (skipped ? ` (${skipped} non-image file${skipped === 1 ? '' : 's'} skipped)` : ''),
+      'info', 3500);
+    setPanelOpen(false);
+    uploadInBackground(imageFiles);
   };
 
   useImperativeHandle(ref, () => ({ acceptFiles }));
@@ -135,10 +204,12 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
     setPanelOpen(true);
   };
 
+  // Browsing from inside the panel goes through the same background path as a
+  // drop — the panel closes and you get on with your day.
   const handleFilesSelected = (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = ''; // allow re-selecting the same file later
-    doUpload(files, false);
+    acceptFiles(files);
   };
 
   const handleDrop = (e) => {
@@ -150,15 +221,22 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
   const uploadAnyway = (filename) => {
     const file = pendingFiles[filename];
     if (!file) return;
+    // Drop it from the parked set first, so dismissing the panel afterwards
+    // can't resurrect a photo that's already been re-sent.
+    parkedDupesRef.current = parkedDupesRef.current.filter(r => r.filename !== filename);
     doUpload([file], true);
   };
 
   const dismissResult = (filename) => {
+    parkedDupesRef.current = parkedDupesRef.current.filter(r => r.filename !== filename);
     setResults(prev => prev.filter(r => r.filename !== filename));
   };
 
+  // V79: closing is ALWAYS allowed. It used to bail out while `uploading` was
+  // true, which — combined with the full-screen overlay — is what locked the
+  // whole app until the server finished. Any batch still in flight keeps going
+  // and reports through the pill + toast.
   const closePanel = () => {
-    if (uploading) return;
     setPanelOpen(false);
     setResults([]);
     setUploadProgress(0);
@@ -189,6 +267,34 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
       >
         ⬆
       </button>
+
+      {/* V79: background-upload pill. The only on-screen sign a batch is still
+          running once the panel has closed — deliberately small, bottom-left so
+          it never collides with the toast stack (bottom-right), and
+          pointer-events:none so it can't block anything underneath. */}
+      {bgCount > 0 && (
+        <div
+          aria-live="polite"
+          style={{
+            position: 'fixed', bottom: '20px', left: '20px', zIndex: 1500,
+            display: 'flex', alignItems: 'center', gap: '9px',
+            padding: '9px 14px', borderRadius: '999px',
+            background: surfaceContainerLowest,
+            border: `1px solid ${withAlpha(primaryDim, 0.35)}`,
+            boxShadow: `0 8px 24px ${withAlpha(black, 0.5)}`,
+            color: onSurfaceWarm, fontSize: '12.5px', fontWeight: 500,
+            fontFamily: "'Hanken Grotesk', system-ui, sans-serif",
+            pointerEvents: 'none',
+          }}
+        >
+          <span style={{
+            display: 'inline-block', width: '12px', height: '12px',
+            border: `2px solid ${withAlpha(primaryDim, 0.25)}`, borderTopColor: primaryDim,
+            borderRadius: '50%', animation: 'spin 0.7s linear infinite'
+          }} />
+          Uploading {bgCount} photo{bgCount === 1 ? '' : 's'}…
+        </div>
+      )}
 
       {panelOpen && (
         <>
@@ -259,8 +365,11 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                   <div style={{ fontSize: '13.5px', color: onSurfaceWarm, marginBottom: '4px' }}>
                     Drag photos here
                   </div>
-                  <div style={{ fontSize: '12px', color: onSurfaceFaint }}>
+                  <div style={{ fontSize: '12px', color: onSurfaceFaint, marginBottom: '6px' }}>
                     or <span style={{ color: warning, textDecoration: 'underline' }}>browse files</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: onSurfaceFaint }}>
+                    Uploads run in the background — you can keep working.
                   </div>
                 </>
               )}
@@ -295,11 +404,21 @@ const UploadButton = forwardRef(function UploadButton({ onUploaded }, ref) {
                             Looks like a duplicate of an image already in your library:
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <img
-                              src={r.existing.thumbnail}
-                              alt={r.existing.filename}
-                              style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '5px' }}
-                            />
+                            {/* thumbnail can be null if the stored blob is
+                                missing — render a placeholder rather than a
+                                broken image. */}
+                            {r.existing.thumbnail ? (
+                              <img
+                                src={r.existing.thumbnail}
+                                alt={r.existing.filename}
+                                style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '5px' }}
+                              />
+                            ) : (
+                              <div style={{
+                                width: '48px', height: '48px', borderRadius: '5px',
+                                background: withAlpha(white, 0.06), flexShrink: 0
+                              }} />
+                            )}
                             <div style={{ fontSize: '10.5px', color: onSurfaceMuted, flex: 1 }}>{r.existing.filename}</div>
                             <button
                               onClick={() => uploadAnyway(r.filename)}
