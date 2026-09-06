@@ -3520,3 +3520,170 @@ half-the-library-vanished guard (V30) and the sync-delete cascade table list mus
 `reconcile_drive_changes()` runs at boot on a background thread — confirm `app.py` still starts
 that thread, now pointing at `sync.reconcile_drive_changes`. Done when: `sync.py` exists, 4 test
 scripts repointed, suite green, one real sync run confirmed on the live site.
+
+---
+
+## Day 35 — Drive sync → `sync.py`, then V79 upload fixes (Frame Atlas V78 + V79 complete)
+*Completed: September 2–6, 2026*
+*Status: DAY 35 COMPLETE — live sync confirmed by Ryan on production. V79 (background uploads + upload speed + bulk-write confirmations) shipped on top, live.*
+
+### Part 1 — V78: `sync.py` (Day 35 proper)
+
+The Drive-sync domain moved out of `app.py` into `backend/sync.py` (447 lines) — the last big
+worker module, completing Phase 3's worker extractions.
+
+- **Moved (all four blocks byte-for-byte identical to `HEAD` — verified by extracting each line
+  range out of `git show HEAD:backend/app.py` and diffing BEFORE `app.py` was touched):**
+  `sync_folder_worker()`, the `sync_state` dict, `_load_existing_phashes()`, `_ingest_image()`,
+  `_users_with_synced_folders()`, `reconcile_drive_changes()`.
+- **Imports:** `get_db` from `core`; `import drive` / `gemini` / `images_common` / `tagging`;
+  `extract_palette` + `palettes_overlap` from `colors`; the phash/signature set from `fingerprint`;
+  `generate_thumbnail` + `get_image_aspect_ratio` from `imaging`; `MediaIoBaseDownload` +
+  `MediaIoBaseUpload` from `googleapiclient.http`; stdlib `base64` / `io`. Nothing from `app.py`.
+  Only Phase 3 module that imports `tagging` and `gemini` (the post-sync auto-tag handoff).
+- **`app.py`: 4,915 → 4,565 lines** (−350). Net diff: `+import sync`, 4 pointer comments, 1 stale
+  comment corrected, ~19 one-token call-site edits. Nothing else.
+
+#### Three plan corrections found while reading the actual code
+- **`merge_plural_tag_duplicates()` was already gone** — the plan listed it, but it moved to
+  `images_common.py` on Day 31. Nothing to do.
+- **`_ingest_image()` / `_load_existing_phashes()` are NOT folder-sync code** — they serve
+  `/api/upload` and `/api/clip` only. Moved into `sync.py` anyway (Ryan's call over a separate
+  `ingest.py`): same family of work, nearly identical imports, and the Day 36+ blueprint work can
+  relocate them cleanly later.
+- **`sync_state` is shared with `/api/regenerate-thumbnails`**, which borrows it for its own
+  progress reporting AND its "something's already running" lock — pre-existing behaviour the plan
+  didn't anticipate. Moved to `sync.py` regardless (Ryan's call over inventing a home for mutable
+  app state in `core.py`); that route reads `sync.sync_state`. The dict is only ever mutated in
+  place, never rebound, so every reader sees the same live object.
+
+#### The Day 34 patch trap recurred — caught before running anything, then PROVEN
+`test_personal_library_locally.py` and `test_sync_delete_parity_locally.py` both patch
+`mod.MediaIoBaseDownload = FakeDownloader`, which only ever reached the worker while the worker
+resolved that name in `app.py`'s namespace. Both now also patch `mod.sync.MediaIoBaseDownload`.
+**Proved the patch is load-bearing rather than cargo-culted from Day 34:** removing that single
+line makes `test_sync_delete_parity` fail 6 checks with `'FakeRequest' object has no attribute
+'uri'` — same species as Day 34's `'MediaIoBaseUpload' object has no attribute 'fh'`.
+`run_local_for_browser_check.py` needed the same for BOTH classes.
+
+#### Only 2 test scripts repointed, not the 4 the plan predicted
+`test_v25_clip_locally.py` mentions `_ingest_image` in a docstring only;
+`test_duplicate_color_check_locally.py` patches `mod.drive.*` / `mod.tagging.*` (module-object
+patches, which keep working through the shared module). Both pass untouched.
+
+#### Verification
+- Full suite **44 Python + 3 `.mjs` green**, before and after. No new dedicated test file (same
+  judgment as Day 34 — the 2 existing sync scripts plus the live pass cover it).
+- **Live-server pass, 31/31 checks** (Ryan chose the thorough option because this is the code path
+  that can delete library rows): a real Flask server on a real port, driven over real HTTP —
+  normal sync imports 8, re-sync is a clean no-op, one photo vanishing from Drive removes exactly
+  one row, **most of the folder vanishing deletes NOTHING and reports the V30 guard**,
+  `/api/regenerate-thumbnails` takes and releases the shared lock, `reconcile_drive_changes()`
+  runs and deletes nothing, and all 6 moved names are absent from `app.py`, present on `sync.py`.
+
+### Part 2 — V79: three user-reported bugs (same session, after deploy)
+
+**1. Uploads locked the whole app.** Ryan: "says it's at 100% but it keeps spinning and I can't
+use the program." Two independent causes:
+- `closePanel()` began with `if (uploading) return;` and the panel overlay is
+  `position: fixed; inset: 0` — so the app was deliberately unusable until the server finished.
+- **The progress bar was measuring the wrong thing.** `xhr.upload.onprogress` tracks bytes LEAVING
+  THE BROWSER; it hits 100% the instant the last byte is sent, and every slow part happens after
+  that (thumbnail, palette, phash, signature, duplicate scan, and a Drive `files().create()` per
+  photo — all synchronous inside `/api/upload`). It wasn't stuck, it had finished measuring.
+- Fix: `acceptFiles()` closes the panel and hands to `uploadInBackground()` — the same
+  instant-close-plus-background-toast pattern as CropModal / DuplicateReview / bulk delete (V35).
+  `postBatch()` is the shared XHR both the background and foreground ("Upload anyway") paths call.
+  A small `bgCount` pill (bottom-LEFT, `pointerEvents: 'none'`, deliberately opposite the
+  bottom-right toast stack) is the only sign a batch is running. Closing is always allowed now.
+- **Duplicates are parked, never auto-decided.** `showToast` grew an optional 4th arg
+  `action: {label, onClick}`; a batch with duplicates shows a **Review** button, duration 0 (a 4s
+  auto-dismiss would silently drop photos Ryan never got to decide about), reopening the panel
+  with only those photos. `File` objects stay in `pendingFiles` so "Upload anyway" still works.
+
+**2. Why uploads were slow — the actual root cause.** `_load_existing_phashes()` selected
+`thumbnail_blob` for EVERY image, once per `/api/upload` and `/api/clip` call, pulling the whole
+library's stored JPEGs into RAM before a single photo was processed — on a box whose entire volume
+is 434MB (the same class of pressure as the 2026-07-31 disk-full crash). Nearly all waste: the
+blob is only needed for rows phash nominates, normally zero. `_thumbnail_for(row)` now fetches
+those few on demand; rows appended mid-batch already carry their blob, so within-batch dedupe
+costs no extra query. **Measured at 3,500 rows: peak memory 804MB → 1.5MB (235KB blobs), 23MB →
+1.5MB (6KB blobs); time 1.6×–6.2× depending on blob size.** Memory is the real win — SQLite still
+walks the pages those inline blobs occupy during the scan, so the time saving does NOT scale the
+way the memory saving does. **The duplicate ALGORITHM is untouched** — same three gates, same
+thresholds, same order, same calibration; only the moment the bytes are read changed.
+`dup['thumbnail_blob']` in the duplicate-preview base64 moved to `_thumbnail_for(dup)` too, and
+`thumbnail` can now be `null`, which `UploadButton.jsx` renders as a grey placeholder.
+
+**3. Bulk writes confirmed nothing on success.** Ryan: "when I change filmography on 30 images…
+I don't think there's a confirmation that it worked." `runConfirm()` in `TagModeBar.jsx` toasted
+only on error; on success the dialog just closed, and with most of a 30-photo selection scrolled
+off-screen the local-state patch is invisible proof at best. All four branches (filmography
+set/clear, tag apply/remove) now set a `successMessage` and toast it. Bulk delete already did
+this — these were the inconsistent ones.
+
+#### V79 verification — driven in a real browser, not just tests
+Dropped 2 photos (10 → 12, **zero blocking overlays** confirmed by querying computed styles for
+`fixed`/`inset:0` elements, toast reported the result); re-dropped the same 2 (correctly held at
+12, "2 possible duplicates" toast with a working **Review** button that reopened the compare view
+with both thumbnails rendering — which also confirms the lazy `_thumbnail_for` fetch);
+"Upload anyway" (12 → 13, row flipped to "✓ Uploaded"); panel closed cleanly; a 13-photo
+filmography set showed "Film info updated on 13 photos" and **all 13 rows were confirmed written
+to the database** via sqlite3. Suite 44 Python + 3 `.mjs` green.
+
+### Also fixed (cosmetic, pre-existing)
+`scripts/run_local_for_browser_check.py` printed `Admin library pre-synced: ? images` on every
+boot — it read `total_images` off `/api/sync/status`, which returns the sync PROGRESS dict and has
+never had that key. Confirmed pre-existing by reproducing it on a stashed tree at `HEAD` before
+touching it, and deliberately left out of the V79 commit as unrelated. Now counts rows in the
+database directly, and additionally warns if the pre-sync didn't finish inside its 30s wait or
+came back with errors — both of which previously looked identical to success.
+
+### Technical Debt / Notes
+- **Background uploads are tab-scoped.** Closing the browser mid-batch stops that batch (Ryan's
+  explicit choice over a server-side job queue — the queue would survive a closed tab but is a
+  much bigger change than the bug warranted). Worth revisiting if it ever bites.
+- The per-photo Drive `files().create()` inside `/api/upload` is still sequential and is now the
+  dominant cost of a large upload. Parallelising it the way V36 did for bulk-delete's Drive moves
+  (thread pool, one service object per thread via `threading.local()`) is the obvious next step if
+  uploads still feel slow.
+- `/api/upload` remains admin-only and always writes through user 1's Google connection.
+
+### Files Changed
+- `backend/sync.py` — new (447 lines), then `_load_existing_phashes()` + `_thumbnail_for()` (V79)
+- `backend/app.py` — `import sync`, 4 pointer comments, ~19 call sites qualified (4,915 → 4,565)
+- `scripts/test_personal_library_locally.py`, `scripts/test_sync_delete_parity_locally.py` —
+  repointed to `mod.sync.*` incl. the `MediaIoBaseDownload` patch
+- `scripts/run_local_for_browser_check.py` — `mod.sync.MediaIoBaseDownload` +
+  `mod.sync.MediaIoBaseUpload` patches; pre-synced-count bug fixed
+- `frontend/src/components/UploadButton.jsx` — background upload, pill, Review flow
+- `frontend/src/ToastContext.jsx` — optional `action: {label, onClick}` on `showToast`
+- `frontend/src/components/TagModeBar.jsx` — success toasts on all four bulk branches
+- `CLAUDE.md` — File Structure (+`sync.py`), Phase 3 Day 35 subsection, new V79 section, Day 29
+  `MediaIoBaseDownload` note marked superseded, 3 behaviour-section pointers
+- `Docs/2_Frame_Atlas_Build_Timeline.md` — Day 35 complete + "How it actually shipped" + table row
+  + corrected the Days 36–42 line-count estimate against the real number
+
+### Commits
+- `0cdb7c9` (V78 (Day 35): Drive sync -> backend/sync.py) — Railway deploy `0a6f9367` **SUCCESS**
+  (Sep 2 2026): `[schema] OK`, `[selftest] OK — 3 live check(s) passed`, 221 embeddings, no
+  migrations, no reconcile errors. **Ryan confirmed a real sync on the live site: "confirmed the
+  live sync. It works."** ✅ **Day 35 COMPLETE.**
+- `0e6a6d0` (V79: Background uploads, upload speed fix, bulk-write confirmations) — Railway deploy
+  `94992d7f` **SUCCESS** (Sep 6 2026): clean boot, and the served bundle was verified to be the
+  newly built one (`index-16a2e08f.js`, matching the local build) rather than a cached older
+  asset. Awaiting Ryan's real-world read on whether uploads now *feel* faster (the memory fix is
+  measured; the remaining wall-clock is Drive's per-file create, which a fake Drive can't model).
+
+### Starting Point for Next Session
+**Days 36–42 — Route Blueprints.** Phase 3's worker extractions are DONE; `app.py` is now
+**4,565 lines** (from ~6,960 at the start of the phase) and is essentially routes + startup
+wiring. Next is pulling the routes themselves out into Flask blueprints, one domain per session.
+The pattern each session follows: create `routes_<domain>.py` with a `Blueprint`, move that
+domain's `@app.route(...)` functions in changing `@app.route` → `@bp.route` with URL paths
+byte-identical, register with `app.register_blueprint(bp)`, and move the `admin_required` /
+`require_login` decorators to `core.py` (or a new `auth_helpers.py`) so blueprints can import them
+without touching `app.py`. **This is a different risk class from the worker moves** — blueprint
+registration, `url_for` endpoint names and decorator availability all change at once, which is
+why each blueprint gets its own session. Note the Days 36–42 plan text estimated app.py would be
+3,500–4,000 lines by now; the real number is 4,565 (timeline updated to say so).

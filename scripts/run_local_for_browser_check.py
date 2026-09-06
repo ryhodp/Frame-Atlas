@@ -332,12 +332,29 @@ r = admin.post("/api/sync/connect-folder", json={"folder": "SharedDemoFolder_ABC
 assert r.status_code == 200, f"connect-folder failed: {r.get_json()}"
 r = admin.post("/api/sync/start")
 assert r.status_code == 200, f"sync start failed: {r.get_json()}"
+finished = False
 for _ in range(120):
     time.sleep(0.25)
     if not admin.get("/api/sync/status").get_json().get("in_progress"):
+        finished = True
         break
-count = admin.get("/api/sync/status").get_json()
-print(f"Admin library pre-synced: {count.get('total_images', '?')} images")
+
+# The count comes from the database, not from /api/sync/status. That endpoint
+# returns the sync PROGRESS dict (in_progress / processed / total / errors …)
+# and has never had a `total_images` key — so this line printed a literal "?"
+# on every single boot, and a pre-sync that failed outright looked exactly the
+# same as one that worked. Report the real row count, and say so when the sync
+# didn't finish or came back with errors.
+status = admin.get("/api/sync/status").get_json()
+_c = mod.get_db()
+image_count = _c.execute("SELECT COUNT(*) FROM images WHERE user_id = 1").fetchone()[0]
+_c.close()
+print(f"Admin library pre-synced: {image_count} images")
+if not finished:
+    print("  ⚠ sync was still running when we stopped waiting (30s) — "
+          "the grid may fill in as it catches up.")
+for err in (status.get("errors") or []):
+    print(f"  ⚠ sync error: {err}")
 
 port = int(os.environ.get("PORT", 8080))
 print(f"Admin login:  ryan@test.com / adminpass123")
