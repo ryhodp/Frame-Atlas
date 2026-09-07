@@ -49,6 +49,11 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const [editingFilm, setEditingFilm] = useState(false);
   const [filmDraft, setFilmDraft] = useState({ title: '', director: '', dp: '', year: '' });
 
+  // Filmography autocomplete state — one suggestion list per field
+  const [filmSuggestions, setFilmSuggestions] = useState({ title: [], director: [], dp: [] });
+  const [filmFocused, setFilmFocused] = useState(null); // 'title', 'director', 'dp', or null
+  const [filmHighlight, setFilmHighlight] = useState(-1); // index in current field's suggestions
+
   // V39: DP technical notes — camera/rig, lens, lens filter, stop, freeform
   // on-set notes. Collapsed by default (Ryan's call — most photos won't have
   // this filled in, and the panel is already dense), directly editable when
@@ -256,24 +261,62 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     setFilmError(null);
     try {
       const res = await fetch(`/api/images/${image.id}/filmography`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: ‘POST’,
+        headers: { ‘Content-Type’: ‘application/json’ },
         body: JSON.stringify(draft)
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Couldn’t save the film info.');
+        throw new Error(data.error || ‘Couldn’t save the film info.’);
       }
       setFilm(data.filmography);
       onUpdated?.(image.id, { filmography: data.filmography });
       setEditingFilm(false);
+      showToast(‘Film info saved.’, ‘success’);
+      setTimeout(() => onClose?.(), 150); // Close inspector after success toast shows
     } catch (e) {
-      setFilmError(e.message || 'Couldn’t save the film info — try again.');
-      showToast(e.message || 'Couldn’t save the film info — try again.', 'error');
+      setFilmError(e.message || ‘Couldn’t save the film info — try again.’);
+      showToast(e.message || ‘Couldn’t save the film info — try again.’, ‘error’);
     }
   };
 
   const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '' });
+
+  // Filmography autocomplete — fetch suggestions as user types
+  const fetchFilmSuggestions = async (field, value) => {
+    if (!value || value.length < 1) {
+      setFilmSuggestions(prev => ({ ...prev, [field]: [] }));
+      setFilmHighlight(-1);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/filmography/autocomplete?field=${field}&q=${encodeURIComponent(value)}`);
+      const suggestions = await res.json();
+      setFilmSuggestions(prev => ({ ...prev, [field]: suggestions }));
+      setFilmHighlight(-1); // reset highlight when suggestions change
+    } catch (err) {
+      console.error('Filmography autocomplete failed:', err);
+    }
+  };
+
+  // Handle filmography field keyboard navigation (arrow keys + Enter)
+  const handleFilmKeyDown = (e, field) => {
+    const current = filmSuggestions[field] || [];
+    if (!current.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setFilmHighlight(prev => (prev + 1) % current.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setFilmHighlight(prev => (prev - 1 + current.length) % current.length);
+    } else if (e.key === 'Enter' && filmHighlight >= 0 && filmHighlight < current.length) {
+      e.preventDefault();
+      setFilmDraft(prev => ({ ...prev, [field]: current[filmHighlight].value }));
+      setFilmSuggestions(prev => ({ ...prev, [field]: [] }));
+      setFilmHighlight(-1);
+    }
+  };
 
   const saveNotes = async (draft) => {
     try {
@@ -555,6 +598,18 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
 
           <div style={{ flex: 1 }} />
 
+          <button
+            onClick={() => setEditingTags(v => !v)}
+            style={{
+              ...footBtn(editingTags ? warning : onSurfaceMuted),
+              background: editingTags ? withAlpha(primaryDim,0.2) : 'transparent',
+              border: `1px solid ${editingTags ? withAlpha(primaryDim,0.5) : withAlpha(white,0.12)}`
+            }}
+            title={editingTags ? 'Done editing tags' : 'Edit tags'}
+          >
+            {editingTags ? '✓ Done' : '🏷 Edit tags'}
+          </button>
+
           <a
             href={`/api/images/${image.id}/download`}
             download={image.filename}
@@ -743,18 +798,51 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   <div>
                     <div style={{
                       display: 'grid', gridTemplateColumns: '1fr 76px',
-                      gap: '6px', marginBottom: '6px'
+                      gap: '6px', marginBottom: '6px', position: 'relative'
                     }}>
-                      <input
-                        value={filmDraft.title}
-                        onChange={e => setFilmDraft(d => ({ ...d, title: e.target.value }))}
-                        placeholder="Film title"
-                        style={{
-                          background: surfaceContainerDark, color: onSurfaceWarm,
-                          border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
-                          padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
-                        }}
-                      />
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          value={filmDraft.title}
+                          onChange={e => {
+                            setFilmDraft(d => ({ ...d, title: e.target.value }));
+                            fetchFilmSuggestions('title', e.target.value);
+                          }}
+                          onKeyDown={e => handleFilmKeyDown(e, 'title')}
+                          onFocus={() => setFilmFocused('title')}
+                          onBlur={() => setTimeout(() => setFilmFocused(null), 100)}
+                          placeholder="Film title"
+                          style={{
+                            width: '100%', background: surfaceContainerDark, color: onSurfaceWarm,
+                            border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
+                            padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+                          }}
+                        />
+                        {filmFocused === 'title' && filmSuggestions.title.length > 0 && (
+                          <div style={{
+                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                            background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
+                            borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
+                            maxHeight: '150px', overflowY: 'auto'
+                          }}>
+                            {filmSuggestions.title.map((s, i) => (
+                              <div
+                                key={i}
+                                onClick={() => {
+                                  setFilmDraft(d => ({ ...d, title: s.value }));
+                                  setFilmSuggestions(prev => ({ ...prev, title: [] }));
+                                }}
+                                style={{
+                                  padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                                  background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                                  color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                                }}
+                              >
+                                {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <input
                         value={filmDraft.year}
                         onChange={e => setFilmDraft(d => ({ ...d, year: e.target.value }))}
@@ -767,26 +855,92 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
-                      <input
-                        value={filmDraft.director}
-                        onChange={e => setFilmDraft(d => ({ ...d, director: e.target.value }))}
-                        placeholder="Director"
-                        style={{
-                          background: surfaceContainerDark, color: onSurfaceWarm,
-                          border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
-                          padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
-                        }}
-                      />
-                      <input
-                        value={filmDraft.dp}
-                        onChange={e => setFilmDraft(d => ({ ...d, dp: e.target.value }))}
-                        placeholder="Cinematographer (DP)"
-                        style={{
-                          background: surfaceContainerDark, color: onSurfaceWarm,
-                          border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
-                          padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
-                        }}
-                      />
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          value={filmDraft.director}
+                          onChange={e => {
+                            setFilmDraft(d => ({ ...d, director: e.target.value }));
+                            fetchFilmSuggestions('director', e.target.value);
+                          }}
+                          onKeyDown={e => handleFilmKeyDown(e, 'director')}
+                          onFocus={() => setFilmFocused('director')}
+                          onBlur={() => setTimeout(() => setFilmFocused(null), 100)}
+                          placeholder="Director"
+                          style={{
+                            width: '100%', background: surfaceContainerDark, color: onSurfaceWarm,
+                            border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
+                            padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+                          }}
+                        />
+                        {filmFocused === 'director' && filmSuggestions.director.length > 0 && (
+                          <div style={{
+                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                            background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
+                            borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
+                            maxHeight: '150px', overflowY: 'auto'
+                          }}>
+                            {filmSuggestions.director.map((s, i) => (
+                              <div
+                                key={i}
+                                onClick={() => {
+                                  setFilmDraft(d => ({ ...d, director: s.value }));
+                                  setFilmSuggestions(prev => ({ ...prev, director: [] }));
+                                }}
+                                style={{
+                                  padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                                  background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                                  color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                                }}
+                              >
+                                {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          value={filmDraft.dp}
+                          onChange={e => {
+                            setFilmDraft(d => ({ ...d, dp: e.target.value }));
+                            fetchFilmSuggestions('dp', e.target.value);
+                          }}
+                          onKeyDown={e => handleFilmKeyDown(e, 'dp')}
+                          onFocus={() => setFilmFocused('dp')}
+                          onBlur={() => setTimeout(() => setFilmFocused(null), 100)}
+                          placeholder="Cinematographer (DP)"
+                          style={{
+                            width: '100%', background: surfaceContainerDark, color: onSurfaceWarm,
+                            border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
+                            padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+                          }}
+                        />
+                        {filmFocused === 'dp' && filmSuggestions.dp.length > 0 && (
+                          <div style={{
+                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                            background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
+                            borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
+                            maxHeight: '150px', overflowY: 'auto'
+                          }}>
+                            {filmSuggestions.dp.map((s, i) => (
+                              <div
+                                key={i}
+                                onClick={() => {
+                                  setFilmDraft(d => ({ ...d, dp: s.value }));
+                                  setFilmSuggestions(prev => ({ ...prev, dp: [] }));
+                                }}
+                                style={{
+                                  padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                                  background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                                  color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                                }}
+                              >
+                                {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                       <button
@@ -1002,28 +1156,12 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               </div>
             )}
 
-            {/* Tags header + edit toggle */}
+            {/* Tags header (edit button moved to footer) */}
             <div style={{
-              display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', marginBottom: '10px'
+              fontSize: '9px', fontWeight: 600, color: onSurfaceFaint, letterSpacing: '0.08em',
+              marginBottom: '10px'
             }}>
-              <div style={{
-                fontSize: '9px', fontWeight: 600, color: onSurfaceFaint, letterSpacing: '0.08em'
-              }}>
-                TAGS
-              </div>
-              <button
-                onClick={() => setEditingTags(v => !v)}
-                style={{
-                  background: 'none',
-                  border: `1px solid ${editingTags ? withAlpha(primaryDim,0.5) : withAlpha(white,0.12)}`,
-                  color: editingTags ? warning : onSurfaceMuted,
-                  borderRadius: '5px', padding: '3px 9px',
-                  cursor: 'pointer', fontSize: '10.5px', fontFamily: 'inherit'
-                }}
-              >
-                {editingTags ? 'Done' : 'Edit tags'}
-              </button>
+              TAGS
             </div>
 
             {/* Add-tag row (edit mode) */}

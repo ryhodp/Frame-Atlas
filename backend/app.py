@@ -2039,10 +2039,33 @@ def upload_images():
     folder_id = drive.get_root_folder_id(1)
     existing = sync._load_existing_phashes()
 
-    results = [
-        sync._ingest_image(service, folder_id, f.read(), f.filename, f.mimetype, existing, force=force)
-        for f in files
-    ]
+    # One Drive service per worker thread, not one shared across all workers
+    # or rebuilt per photo — building it is cheap (no network call), and
+    # threading.local keeps each worker's httplib2 transport from colliding.
+    thread_local = threading.local()
+    def _get_thread_service():
+        if not hasattr(thread_local, 'service'):
+            thread_local.service = drive.get_user_drive_service(1)
+        return thread_local.service
+
+    def ingest_one(f):
+        """Ingest one file using a thread-local Drive service."""
+        return sync._ingest_image(
+            _get_thread_service(), folder_id, f.read(), f.filename, f.mimetype,
+            existing, force=force
+        )
+
+    # Process files 5 at a time to parallelize Drive I/O — faster than sequential.
+    # (Within-batch dedup is sacrificed for speed; the next sync will catch any
+    # true duplicates, and it's rare to upload the exact same photo twice in
+    # one batch.)
+    results = []
+    if len(files) > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=BULK_DELETE_WORKERS) as pool:
+            results = list(pool.map(ingest_one, files))
+    else:
+        # Single file: skip thread overhead
+        results = [ingest_one(f) for f in files]
 
     if any(r['status'] == 'uploaded' for r in results):
         tagging.trigger_tagging()
@@ -2568,6 +2591,33 @@ def tags_suggestions():
             break
 
     return jsonify({'suggestions': suggestions})
+
+@app.route('/api/filmography/autocomplete')
+def filmography_autocomplete():
+    """Suggest filmography values (title, director, DP) based on what the logged-in
+    user has already entered on other photos. Ordered by frequency."""
+    field = request.args.get('field', '').strip()  # 'title', 'director', or 'dp'
+    q = request.args.get('q', '').strip().lower()
+
+    if not field or field not in ('title', 'director', 'dp') or not q:
+        return jsonify([])
+
+    uid = session['user_id']
+    conn = get_db()
+    c = conn.cursor()
+
+    rows = c.execute(f'''
+        SELECT {field} as value, COUNT(DISTINCT f.image_id) as cnt
+        FROM filmography f JOIN images i ON i.id = f.image_id
+        WHERE i.user_id = ? AND f.{field} IS NOT NULL AND LOWER(f.{field}) LIKE ?
+        GROUP BY f.{field}
+        ORDER BY cnt DESC
+        LIMIT 20
+    ''', (uid, f'{q}%')).fetchall()
+
+    conn.close()
+    return jsonify([{'value': r['value'], 'count': r['cnt']} for r in rows])
+
 
 @app.route('/api/images/<int:image_id>/filmography', methods=['POST'])
 def update_filmography(image_id):
