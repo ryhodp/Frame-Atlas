@@ -1234,9 +1234,10 @@ def autocomplete():
             LIMIT 20
         ''', (uid, f'{q}%')).fetchall()
 
-    # Filmography matches — lets the same search bar find "Her" by title or
-    # "Spike Jonze" by director/DP, reusing the exact film= filter that
-    # clicking a name in the detail panel already applies (see /api/search).
+    # Filmography matches — lets the same search bar find "Her" by title,
+    # "Spike Jonze" by director/DP, "Rembrandt" by painter, or "Ansel Adams"
+    # by photographer — reusing the exact film= filter that clicking a name
+    # in the detail panel already applies (see /api/search).
     #
     # Matches anywhere in the value, not just the start — "Ozu" finds
     # "Yasujiro Ozu", "Korra" finds "The Legend of Korra" — since the useful
@@ -1267,9 +1268,22 @@ def autocomplete():
         FROM filmography f JOIN images i ON i.id = f.image_id
         WHERE i.user_id = ? AND f.dp IS NOT NULL AND LOWER(f.dp) LIKE ?
         GROUP BY f.dp
+        UNION ALL
+        SELECT f.painter, 'painter', COUNT(DISTINCT f.image_id),
+               CASE WHEN LOWER(f.painter) LIKE ? THEN 0 ELSE 1 END
+        FROM filmography f JOIN images i ON i.id = f.image_id
+        WHERE i.user_id = ? AND f.painter IS NOT NULL AND LOWER(f.painter) LIKE ?
+        GROUP BY f.painter
+        UNION ALL
+        SELECT f.photographer, 'photographer', COUNT(DISTINCT f.image_id),
+               CASE WHEN LOWER(f.photographer) LIKE ? THEN 0 ELSE 1 END
+        FROM filmography f JOIN images i ON i.id = f.image_id
+        WHERE i.user_id = ? AND f.photographer IS NOT NULL AND LOWER(f.photographer) LIKE ?
+        GROUP BY f.photographer
         ORDER BY prefix_rank ASC, cnt DESC
         LIMIT 8
-    ''', (prefix_like, uid, like, prefix_like, uid, like, prefix_like, uid, like)).fetchall()
+    ''', (prefix_like, uid, like, prefix_like, uid, like, prefix_like, uid, like,
+          prefix_like, uid, like, prefix_like, uid, like)).fetchall()
 
     # V15: aspect-ratio matches — "9:16", "2.35", "scope" etc. suggest format
     # buckets. Counting requires a scan of the user's images, so only do it
@@ -1523,25 +1537,32 @@ def build_search_filters(c, uid, args):
         # exact (case-insensitive) match first. Only fall back to substring
         # matching when nothing matches exactly — otherwise a short title like
         # "Her" would also return every "Christopher Nolan" film.
+        #
+        # V81: painter/photographer joined title/director/dp here — clicking
+        # "Rembrandt" or "Ansel Adams" in the detail panel needs to filter the
+        # same way clicking a director already does.
         exact_hit = c.execute('''
             SELECT 1 FROM filmography
             WHERE title = ? COLLATE NOCASE OR director = ? COLLATE NOCASE
-               OR dp = ? COLLATE NOCASE LIMIT 1
-        ''', (film_raw, film_raw, film_raw)).fetchone()
+               OR dp = ? COLLATE NOCASE OR painter = ? COLLATE NOCASE
+               OR photographer = ? COLLATE NOCASE LIMIT 1
+        ''', (film_raw, film_raw, film_raw, film_raw, film_raw)).fetchone()
         if exact_hit:
             conditions.append('''id IN (
                 SELECT image_id FROM filmography
                 WHERE title = ? COLLATE NOCASE OR director = ? COLLATE NOCASE
-                   OR dp = ? COLLATE NOCASE
+                   OR dp = ? COLLATE NOCASE OR painter = ? COLLATE NOCASE
+                   OR photographer = ? COLLATE NOCASE
             )''')
-            params.extend([film_raw, film_raw, film_raw])
+            params.extend([film_raw, film_raw, film_raw, film_raw, film_raw])
         else:
             like = f'%{film_raw}%'
             conditions.append('''id IN (
                 SELECT image_id FROM filmography
                 WHERE title LIKE ? OR director LIKE ? OR dp LIKE ?
+                   OR painter LIKE ? OR photographer LIKE ?
             )''')
-            params.extend([like, like, like])
+            params.extend([like, like, like, like, like])
 
     is_unfiltered = not (active_chips or nl_groups or notes_phrases or color_raw or film_raw or ar_raw)
     return conditions, params, is_unfiltered
@@ -2510,7 +2531,7 @@ def tags_selection_summary():
     if not image_ids:
         conn.close()
         return jsonify({'total': 0, 'tags': [],
-                        'common_filmography': {f: None for f in ('title', 'director', 'dp', 'year')}})
+                        'common_filmography': {f: None for f in ('title', 'director', 'dp', 'year', 'painter', 'photographer')}})
     tag_counts = count_tags_for_images(c, image_ids)
 
     # Filmography consensus: a field only counts as "common" when EVERY
@@ -2521,14 +2542,14 @@ def tags_selection_summary():
     for batch in chunked(image_ids):
         placeholders = ','.join('?' * len(batch))
         film_rows += c.execute(f'''
-            SELECT image_id, title, director, dp, year FROM filmography
+            SELECT image_id, title, director, dp, year, painter, photographer FROM filmography
             WHERE image_id IN ({placeholders})
         ''', batch).fetchall()
     conn.close()
 
     film_by_image = {r['image_id']: r for r in film_rows}
     common_filmography = {}
-    for field in ('title', 'director', 'dp', 'year'):
+    for field in ('title', 'director', 'dp', 'year', 'painter', 'photographer'):
         values = {(film_by_image[iid][field] if iid in film_by_image else None) for iid in image_ids}
         only_value = next(iter(values)) if len(values) == 1 else None
         common_filmography[field] = only_value or None
@@ -2618,10 +2639,10 @@ def filmography_autocomplete():
     contains it, so an exact-prefix match like "Yi" -> "Yi Yi" doesn't get
     buried under unrelated contains-matches; frequency breaks ties within
     each of those two groups."""
-    field = request.args.get('field', '').strip()  # 'title', 'director', or 'dp'
+    field = request.args.get('field', '').strip()  # 'title', 'director', 'dp', 'painter', or 'photographer'
     q = request.args.get('q', '').strip().lower()
 
-    if not field or field not in ('title', 'director', 'dp') or not q:
+    if not field or field not in ('title', 'director', 'dp', 'painter', 'photographer') or not q:
         return jsonify([])
 
     uid = session['user_id']
@@ -2644,17 +2665,24 @@ def filmography_autocomplete():
 
 @app.route('/api/images/<int:image_id>/filmography', methods=['POST'])
 def update_filmography(image_id):
-    """Set or clear the film info Gemini guessed for this image. Sending all
-    empty fields clears it entirely.
+    """Set or clear the creator info for this image. Sending all empty fields
+    clears it entirely.
+
+    V81: Director/DP (film stills), Painter (paintings) and Photographer
+    (photographs) all live on this same table — the frontend shows whichever
+    pair applies based on a media-type switch, but the backend doesn't care
+    which one was filled in; it just stores whatever came in the request.
 
     V75: owner-or-admin, not admin-only — a friend knows what they shot and can
-    fix the film credit on their own photo, same rule as tag editing and the
+    fix the credit on their own photo, same rule as tag editing and the
     On-Set Notes editor (V39)."""
     data = request.get_json(force=True) or {}
     title = (data.get('title') or '').strip()
     director = (data.get('director') or '').strip()
     dp = (data.get('dp') or '').strip()
     year = str(data.get('year') or '').strip()
+    painter = (data.get('painter') or '').strip()
+    photographer = (data.get('photographer') or '').strip()
 
     conn = get_db()
     c = conn.cursor()
@@ -2665,13 +2693,16 @@ def update_filmography(image_id):
 
     c.execute('DELETE FROM filmography WHERE image_id = ?', (image_id,))
     filmography = None
-    if any([title, director, dp, year]):
+    if any([title, director, dp, year, painter, photographer]):
         c.execute(
-            'INSERT INTO filmography (image_id, title, director, dp, year) VALUES (?,?,?,?,?)',
-            (image_id, title or None, director or None, dp or None, year or None)
+            'INSERT INTO filmography (image_id, title, director, dp, year, painter, photographer) '
+            'VALUES (?,?,?,?,?,?,?)',
+            (image_id, title or None, director or None, dp or None, year or None,
+             painter or None, photographer or None)
         )
         filmography = {'title': title or None, 'director': director or None,
-                       'dp': dp or None, 'year': year or None}
+                       'dp': dp or None, 'year': year or None,
+                       'painter': painter or None, 'photographer': photographer or None}
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'filmography': filmography})
@@ -2739,10 +2770,12 @@ def bulk_set_filmography():
         'director': (data.get('director') or '').strip(),
         'dp': (data.get('dp') or '').strip(),
         'year': str(data.get('year') or '').strip(),
+        'painter': (data.get('painter') or '').strip(),
+        'photographer': (data.get('photographer') or '').strip(),
     }
     touched = {k: v for k, v in touched.items() if v}
     if not touched:
-        return jsonify({'error': 'At least one of title/director/dp/year is required'}), 400
+        return jsonify({'error': 'At least one of title/director/dp/year/painter/photographer is required'}), 400
 
     conn = get_db()
     c = conn.cursor()
@@ -2756,17 +2789,19 @@ def bulk_set_filmography():
 
     for image_id in valid_ids:
         existing = c.execute(
-            'SELECT title, director, dp, year FROM filmography WHERE image_id = ?', (image_id,)
+            'SELECT title, director, dp, year, painter, photographer FROM filmography WHERE image_id = ?', (image_id,)
         ).fetchone()
         merged = {
             field: touched.get(field, existing[field] if existing else None)
-            for field in ('title', 'director', 'dp', 'year')
+            for field in ('title', 'director', 'dp', 'year', 'painter', 'photographer')
         }
         c.execute('DELETE FROM filmography WHERE image_id = ?', (image_id,))
         if any(merged.values()):
             c.execute(
-                'INSERT INTO filmography (image_id, title, director, dp, year) VALUES (?,?,?,?,?)',
-                (image_id, merged['title'], merged['director'], merged['dp'], merged['year'])
+                'INSERT INTO filmography (image_id, title, director, dp, year, painter, photographer) '
+                'VALUES (?,?,?,?,?,?,?)',
+                (image_id, merged['title'], merged['director'], merged['dp'], merged['year'],
+                 merged['painter'], merged['photographer'])
             )
     conn.commit()
     conn.close()
@@ -3136,63 +3171,18 @@ def reset_crop_progress():
 # is deliberately sync_folder_worker()'s job alone. The duplicates/scan route
 # below and both boot blocks call sync.reconcile_drive_changes().
 
-@app.route('/api/duplicates/scan', methods=['POST'])
-@admin_required
-def duplicates_scan():
-    """Self-heals the library's derived data, then returns duplicate groups.
+def _compute_duplicate_groups(rows, palette_map, on_progress=None):
+    """The actual O(images²) comparison. Pulled out of find_duplicates() so
+    the background scan job (which reports progress) and the plain
+    synchronous GET route (which doesn't need to) share one implementation —
+    two copies of this logic WILL drift the moment one changes.
 
-    Everything the duplicate check reads is rebuilt here first, because a
-    missing piece doesn't just weaken the check — it silently changes which
-    gates apply:
-
-      1. Fingerprints — missing ones, and (V30) ones still at the old 8x8
-         width, rebuilt from the stored thumbnail. Instant.
-      2. Colour palettes — missing ones, likewise from the thumbnail.
-      3. Drive reconciliation (see reconcile_drive_changes) — also runs at
-         boot now, but re-running it here means a click on this scan always
-         reflects the current state of Drive, not just whatever boot found.
+    `on_progress(processed, total)`, if given, is called once per outer-loop
+    index — cheap enough to call unconditionally (an image's inner loop
+    against every later image is the expensive part, not this one callback),
+    and fine-grained enough that a progress bar watching it climbs steadily
+    rather than jumping in big chunks.
     """
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT id, thumbnail_blob FROM images WHERE phash IS NULL OR LENGTH(phash) != ?',
-              (PHASH_HEX_LEN,))
-    for r in c.fetchall():
-        ph = compute_phash(r['thumbnail_blob'])
-        if ph:
-            c.execute('UPDATE images SET phash = ? WHERE id = ?', (ph, r['id']))
-    conn.commit()
-    c.execute('''
-        SELECT id, user_id, thumbnail_blob FROM images
-        WHERE id NOT IN (SELECT DISTINCT image_id FROM colors)
-    ''')
-    missing_palette = c.fetchall()
-    conn.close()
-
-    for r in missing_palette:
-        hexes = extract_palette(r['thumbnail_blob'])
-        if hexes:
-            images_common.save_palette(r['id'], r['user_id'], hexes)
-
-    sync.reconcile_drive_changes()
-
-    return find_duplicates()
-
-@app.route('/api/duplicates', methods=['GET'])
-@admin_required
-def find_duplicates():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''
-        SELECT id, filename, thumbnail_blob, md5_checksum, phash, date_added, aspect_ratio
-        FROM images ORDER BY date_added ASC
-    ''')
-    rows = c.fetchall()
-    c.execute('SELECT image_id, hex, share FROM colors')
-    palette_map = {}
-    for r in c.fetchall():
-        palette_map.setdefault(r['image_id'], []).append((r['hex'], r['share']))
-    conn.close()
-
     # Union-find: any two images linked by an exact or near match end up in
     # the same group, even chains (A~B, B~C => one group of three).
     n = len(rows)
@@ -3229,6 +3219,8 @@ def find_duplicates():
                   and signatures_match(signature_for(i), signature_for(j))
                   and palettes_overlap(palette_map.get(a['id'], []), palette_map.get(b['id'], []))):
                 parent[find(i)] = find(j)
+        if on_progress:
+            on_progress(i + 1, n)
 
     buckets = {}
     for i in range(n):
@@ -3253,6 +3245,145 @@ def find_duplicates():
             } for i in members]
         })
 
+    return groups
+
+
+# Background duplicate-scan progress — same shape/spirit as _crop_progress /
+# _tag_progress / sync_state: one shared dict, one lock, a plain polling GET
+# route rather than SSE (matching crop/sync, the simpler of the two existing
+# patterns — tagging's SSE stream is the outlier and isn't needed here).
+_dup_scan_lock = threading.Lock()
+_dup_scan_progress = {
+    'active': False,
+    'phase': None,       # 'fingerprints' | 'palettes' | 'reconcile' | 'comparing' | 'done' | None
+    'processed': 0,
+    'total': 0,
+    'groups': None,       # populated once phase == 'done'
+    'error': None,
+}
+
+
+def _set_dup_progress(**kwargs):
+    with _dup_scan_lock:
+        _dup_scan_progress.update(kwargs)
+
+
+def _run_duplicate_scan_job():
+    """Runs in a background thread. Mirrors duplicates_scan()'s old
+    self-heal-then-compare sequence exactly — only the moment each step
+    reports progress is new, not what any step actually does."""
+    try:
+        # 1. Fingerprints — missing ones, and (V30) ones still at the old 8x8
+        #    width, rebuilt from the stored thumbnail.
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT id, thumbnail_blob FROM images WHERE phash IS NULL OR LENGTH(phash) != ?',
+                  (PHASH_HEX_LEN,))
+        missing_phash = c.fetchall()
+        _set_dup_progress(phase='fingerprints', processed=0, total=len(missing_phash))
+        for idx, r in enumerate(missing_phash):
+            ph = compute_phash(r['thumbnail_blob'])
+            if ph:
+                c.execute('UPDATE images SET phash = ? WHERE id = ?', (ph, r['id']))
+            _set_dup_progress(processed=idx + 1)
+        conn.commit()
+
+        # 2. Colour palettes — missing ones, likewise from the thumbnail.
+        c.execute('''
+            SELECT id, user_id, thumbnail_blob FROM images
+            WHERE id NOT IN (SELECT DISTINCT image_id FROM colors)
+        ''')
+        missing_palette = c.fetchall()
+        conn.close()
+        _set_dup_progress(phase='palettes', processed=0, total=len(missing_palette))
+        for idx, r in enumerate(missing_palette):
+            hexes = extract_palette(r['thumbnail_blob'])
+            if hexes:
+                images_common.save_palette(r['id'], r['user_id'], hexes)
+            _set_dup_progress(processed=idx + 1)
+
+        # 3. Drive reconciliation — also runs at boot, but re-running it here
+        #    means a click on this scan always reflects Drive's CURRENT
+        #    state. No fine-grained progress inside it (out of scope here),
+        #    so this phase is reported as one lump step.
+        _set_dup_progress(phase='reconcile', processed=0, total=1)
+        sync.reconcile_drive_changes()
+        _set_dup_progress(processed=1)
+
+        # 4. The actual comparison — the dominant cost for a large library,
+        #    and the one phase worth a real per-image percentage.
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            SELECT id, filename, thumbnail_blob, md5_checksum, phash, date_added, aspect_ratio
+            FROM images ORDER BY date_added ASC
+        ''')
+        rows = c.fetchall()
+        c.execute('SELECT image_id, hex, share FROM colors')
+        palette_map = {}
+        for r in c.fetchall():
+            palette_map.setdefault(r['image_id'], []).append((r['hex'], r['share']))
+        conn.close()
+
+        _set_dup_progress(phase='comparing', processed=0, total=len(rows))
+        groups = _compute_duplicate_groups(
+            rows, palette_map,
+            on_progress=lambda done, total: _set_dup_progress(processed=done, total=total)
+        )
+
+        _set_dup_progress(phase='done', active=False, groups=groups, error=None)
+    except Exception as e:
+        print(f"[duplicates] background scan failed: {e}")
+        _set_dup_progress(phase='done', active=False, groups=None, error=str(e))
+
+
+@app.route('/api/duplicates/scan', methods=['POST'])
+@admin_required
+def duplicates_scan():
+    """Starts the self-heal-then-compare duplicate scan in the background
+    and returns immediately — poll GET /api/duplicates/scan-progress for
+    live progress and the final groups. Replaces the old synchronous
+    version, which could leave the caller waiting with zero feedback for
+    however long a full library comparison took."""
+    with _dup_scan_lock:
+        if _dup_scan_progress['active']:
+            return jsonify({'already_running': True})
+        _dup_scan_progress.update({
+            'active': True, 'phase': None, 'processed': 0, 'total': 0,
+            'groups': None, 'error': None,
+        })
+    threading.Thread(target=_run_duplicate_scan_job, daemon=True).start()
+    return jsonify({'started': True})
+
+
+@app.route('/api/duplicates/scan-progress', methods=['GET'])
+@admin_required
+def duplicates_scan_progress():
+    with _dup_scan_lock:
+        return jsonify(dict(_dup_scan_progress))
+
+
+@app.route('/api/duplicates', methods=['GET'])
+@admin_required
+def find_duplicates():
+    """Plain synchronous duplicate check — no self-heal, no progress
+    reporting. Kept for any direct caller that wants results in one request
+    against whatever fingerprints/palettes already exist; the Find
+    Duplicates button uses the background /api/duplicates/scan instead."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, filename, thumbnail_blob, md5_checksum, phash, date_added, aspect_ratio
+        FROM images ORDER BY date_added ASC
+    ''')
+    rows = c.fetchall()
+    c.execute('SELECT image_id, hex, share FROM colors')
+    palette_map = {}
+    for r in c.fetchall():
+        palette_map.setdefault(r['image_id'], []).append((r['hex'], r['share']))
+    conn.close()
+
+    groups = _compute_duplicate_groups(rows, palette_map)
     return jsonify({'groups': groups, 'count': len(groups)})
 
 # ============================================================================

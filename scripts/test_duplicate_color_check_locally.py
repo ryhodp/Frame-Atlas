@@ -30,6 +30,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(REPO, 'backend'))
@@ -249,9 +250,22 @@ def main():
     insert_synced_image("synced-blue-2.jpg", blue_v2)
     insert_synced_image("synced-purple.jpg", purple_v1)
 
+    # V80: /api/duplicates/scan now runs in a background thread and returns
+    # {'started': True} immediately (a real progress bar needs it to, rather
+    # than blocking the request for however long a full library comparison
+    # takes) — poll /api/duplicates/scan-progress until it reports phase
+    # 'done' and read groups from there instead of the POST's own body.
     r = admin.post("/api/duplicates/scan")
-    body = r.get_json()
-    groups = body.get("groups", [])
+    assert r.get_json().get("started") or r.get_json().get("already_running"), r.get_json()
+    body = None
+    for _ in range(200):  # 200 * 0.05s = 10s ceiling — plenty for a 7-image test library
+        body = admin.get("/api/duplicates/scan-progress").get_json()
+        if body.get("phase") == "done":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"Duplicate scan never reached phase='done': {body}")
+    groups = body.get("groups") or []
 
     def group_containing(filename):
         for g in groups:

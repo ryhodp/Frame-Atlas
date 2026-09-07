@@ -57,6 +57,7 @@ EXPECTED_COLUMNS = {
     'decks': ('invite_token', 'updated_at', 'feedback_enabled'),
     'deck_members': ('permission',),
     'colors': ('share', 'palette_version'),
+    'filmography': ('painter', 'photographer'),
 }
 
 
@@ -764,6 +765,20 @@ def init_db(run_self_test=None):
     ):
         c.execute(_idx_sql)
     conn.commit()
+
+    # V81: Painter (for paintings) and Photographer (for photographs) credits
+    # on the same filmography table Title/Director/DP/Year already live on —
+    # this app's reference library isn't only movie stills, and a painting or
+    # a photograph needs its own creator credit, not a Director/DP box that
+    # doesn't apply to it.
+    for _col in ('painter', 'photographer'):
+        try:
+            c.execute(f"ALTER TABLE filmography ADD COLUMN {_col} TEXT")
+            conn.commit()
+            print(f"[migration] Added {_col} column to filmography")
+        except Exception as e:
+            if not _is_duplicate_column_error(e):
+                print(f"[migration] WARNING: unexpected error adding {_col} column to filmography: {e}")
 
     # Last thing before the connection closes: confirm the migrations above
     # actually produced the schema the rest of the app is written against.

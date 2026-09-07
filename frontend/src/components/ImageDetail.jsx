@@ -47,21 +47,27 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
 
   const [film, setFilm] = useState(image?.filmography || null);
   const [editingFilm, setEditingFilm] = useState(false);
-  const [filmDraft, setFilmDraft] = useState({ title: '', director: '', dp: '', year: '' });
+  const [filmDraft, setFilmDraft] = useState({ title: '', director: '', dp: '', year: '', painter: '', photographer: '' });
+  // V81: which pair of creator fields the editor shows — Director/DP for a
+  // film still, a single Painter box for a painting, a single Photographer
+  // box for a photograph. Not stored in the database; inferred fresh each
+  // time editing starts from whichever fields already have values (see
+  // startEditFilm), so a photo never "forgets" which kind it is.
+  const [mediaType, setMediaType] = useState('film'); // 'film' | 'painting' | 'photo'
 
   // Filmography autocomplete state — one suggestion list per field
-  const [filmSuggestions, setFilmSuggestions] = useState({ title: [], director: [], dp: [] });
-  const [filmFocused, setFilmFocused] = useState(null); // 'title', 'director', 'dp', or null
+  const [filmSuggestions, setFilmSuggestions] = useState({ title: [], director: [], dp: [], painter: [], photographer: [] });
+  const [filmFocused, setFilmFocused] = useState(null); // 'title', 'director', 'dp', 'painter', 'photographer', or null
   const [filmHighlight, setFilmHighlight] = useState(-1); // index in current field's suggestions
   // Tracks "user just picked a suggestion, don't reopen the dropdown until they
   // type again" — separate from filmSuggestions so a picked value with 0 fresh
   // matches doesn't fall through to the "No X yet" placeholder looking stuck.
-  const [filmDismissed, setFilmDismissed] = useState({ title: false, director: false, dp: false });
+  const [filmDismissed, setFilmDismissed] = useState({ title: false, director: false, dp: false, painter: false, photographer: false });
   // Per-field request counter — typing fast fires overlapping fetches, and
   // network timing can land an older (e.g. "R") response after a newer one
   // ("Ry"), silently blanking out correct suggestions. Only the response
   // whose id still matches the latest fired request for that field gets applied.
-  const filmRequestIdRef = useRef({ title: 0, director: 0, dp: 0 });
+  const filmRequestIdRef = useRef({ title: 0, director: 0, dp: 0, painter: 0, photographer: 0 });
 
   // V39: DP technical notes — camera/rig, lens, lens filter, stop, freeform
   // on-set notes. Collapsed by default (Ryan's call — most photos won't have
@@ -261,10 +267,17 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const startEditFilm = () => {
     setFilmDraft({
       title: film?.title || '', director: film?.director || '',
-      dp: film?.dp || '', year: film?.year || ''
+      dp: film?.dp || '', year: film?.year || '',
+      painter: film?.painter || '', photographer: film?.photographer || ''
     });
+    // Default the switch to whichever kind this photo already looks like —
+    // painter/photographer filled in wins over the film default, so
+    // reopening a painting's credit box doesn't silently show Director/DP
+    // fields again. Brand new (nothing filled in yet) defaults to Film,
+    // this app's most common case.
+    setMediaType(film?.painter ? 'painting' : film?.photographer ? 'photo' : 'film');
     setEditingFilm(true);
-    setFilmDismissed({ title: false, director: false, dp: false });
+    setFilmDismissed({ title: false, director: false, dp: false, painter: false, photographer: false });
   };
 
   const saveFilm = async (draft) => {
@@ -290,7 +303,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     }
   };
 
-  const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '' });
+  const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '', painter: '', photographer: '' });
 
   // Cmd+S / Ctrl+S finishes editing — tags and/or filmography — with no
   // mouse needed, so the whole workflow (type, arrow keys, Enter, ...,
@@ -373,6 +386,65 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
       e.target.blur(); // Picking a suggestion finishes this field — don't leave the cursor sitting in it
     }
   };
+
+  // One autocomplete-enabled filmography input (title/director/dp/painter/
+  // photographer all share this exact behavior) — pulled into one function
+  // instead of five copies of the same ~50-line block, so the arrow-key nav,
+  // dismiss-on-pick and race-condition guard only exist in one place.
+  const renderFilmField = (field, placeholder, emptyLabel) => (
+    <div style={{ position: 'relative' }}>
+      <input
+        value={filmDraft[field]}
+        onChange={e => {
+          setFilmDraft(d => ({ ...d, [field]: e.target.value }));
+          fetchFilmSuggestions(field, e.target.value);
+        }}
+        onKeyDown={e => handleFilmKeyDown(e, field)}
+        onFocus={() => setFilmFocused(field)}
+        onBlur={() => setTimeout(() => setFilmFocused(null), 100)}
+        placeholder={placeholder}
+        style={{
+          width: '100%', background: surfaceContainerDark, color: onSurfaceWarm,
+          border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
+          padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
+        }}
+      />
+      {filmFocused === field && filmDraft[field].length > 0 && !filmDismissed[field] && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+          background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
+          borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
+          maxHeight: '150px', overflowY: 'auto'
+        }}>
+          {filmSuggestions[field].length > 0 ? (
+            filmSuggestions[field].map((s, i) => (
+              <div
+                key={i}
+                onMouseDown={e => {
+                  e.preventDefault();
+                  pickFilmSuggestion(field, s.value);
+                }}
+                style={{
+                  padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                  background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                  color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                }}
+              >
+                {s.value} {s.count > 1 ? `(${s.count})` : ''}
+              </div>
+            ))
+          ) : (
+            <div style={{
+              padding: '8px 10px', fontSize: '12px', color: onSurfaceFaint,
+              textAlign: 'center', fontStyle: 'italic'
+            }}>
+              {emptyLabel}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   const saveNotes = async (draft) => {
     try {
@@ -836,11 +908,45 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             </button>
                           </span>
                         )}
+                        {film.painter && (
+                          <span>
+                            🎨{' '}
+                            <button
+                              onClick={() => onSearchFilm?.(film.painter)}
+                              title={`Search all frames painted by ${film.painter}`}
+                              style={{
+                                background: 'none', border: 'none', padding: 0,
+                                color: warning, fontSize: '12px', cursor: 'pointer',
+                                fontFamily: 'inherit', textDecoration: 'underline',
+                                textDecorationColor: withAlpha(primaryDim,0.35), textUnderlineOffset: '2px'
+                              }}
+                            >
+                              {film.painter}
+                            </button>
+                          </span>
+                        )}
+                        {film.photographer && (
+                          <span>
+                            📷{' '}
+                            <button
+                              onClick={() => onSearchFilm?.(film.photographer)}
+                              title={`Search all frames shot by ${film.photographer}`}
+                              style={{
+                                background: 'none', border: 'none', padding: 0,
+                                color: warning, fontSize: '12px', cursor: 'pointer',
+                                fontFamily: 'inherit', textDecoration: 'underline',
+                                textDecorationColor: withAlpha(primaryDim,0.35), textUnderlineOffset: '2px'
+                              }}
+                            >
+                              {film.photographer}
+                            </button>
+                          </span>
+                        )}
                       </div>
                     </div>
                     <button
                       onClick={startEditFilm}
-                      title="Edit film info (AI guesses can be wrong)"
+                      title="Edit credit info (AI guesses can be wrong)"
                       style={{
                         background: 'none', border: `1px solid ${withAlpha(white,0.12)}`,
                         color: onSurfaceMuted, borderRadius: '5px', padding: '3px 9px',
@@ -852,62 +958,33 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                   </div>
                 ) : (
                   <div>
+                    {/* V81: media-type switch — decides whether the credit
+                        row below asks for Director/DP, a Painter, or a
+                        Photographer. Doesn't touch the database by itself;
+                        it just picks which box(es) render. */}
+                    <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
+                      {[['film', 'Film'], ['painting', 'Painting'], ['photo', 'Photograph']].map(([key, label]) => (
+                        <button
+                          key={key}
+                          onClick={() => setMediaType(key)}
+                          style={{
+                            flex: 1, padding: '5px 0', fontSize: '10.5px', fontFamily: 'inherit',
+                            cursor: 'pointer', borderRadius: '6px',
+                            background: mediaType === key ? withAlpha(primaryDim,0.18) : 'transparent',
+                            border: `1px solid ${mediaType === key ? withAlpha(primaryDim,0.5) : withAlpha(white,0.12)}`,
+                            color: mediaType === key ? warning : onSurfaceMuted
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
                     <div style={{
                       display: 'grid', gridTemplateColumns: '1fr 76px',
                       gap: '6px', marginBottom: '6px', position: 'relative'
                     }}>
-                      <div style={{ position: 'relative' }}>
-                        <input
-                          value={filmDraft.title}
-                          onChange={e => {
-                            setFilmDraft(d => ({ ...d, title: e.target.value }));
-                            fetchFilmSuggestions('title', e.target.value);
-                          }}
-                          onKeyDown={e => handleFilmKeyDown(e, 'title')}
-                          onFocus={() => setFilmFocused('title')}
-                          onBlur={() => setTimeout(() => setFilmFocused(null), 100)}
-                          placeholder="Film title"
-                          style={{
-                            width: '100%', background: surfaceContainerDark, color: onSurfaceWarm,
-                            border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
-                            padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
-                          }}
-                        />
-                        {filmFocused === 'title' && filmDraft.title.length > 0 && !filmDismissed.title && (
-                          <div style={{
-                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                            background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
-                            borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
-                            maxHeight: '150px', overflowY: 'auto'
-                          }}>
-                            {filmSuggestions.title.length > 0 ? (
-                              filmSuggestions.title.map((s, i) => (
-                                <div
-                                  key={i}
-                                  onMouseDown={e => {
-                                    e.preventDefault();
-                                    pickFilmSuggestion('title', s.value);
-                                  }}
-                                  style={{
-                                    padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
-                                    background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
-                                    color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
-                                  }}
-                                >
-                                  {s.value} {s.count > 1 ? `(${s.count})` : ''}
-                                </div>
-                              ))
-                            ) : (
-                              <div style={{
-                                padding: '8px 10px', fontSize: '12px', color: onSurfaceFaint,
-                                textAlign: 'center', fontStyle: 'italic'
-                              }}>
-                                No titles yet
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      {renderFilmField('title', mediaType === 'film' ? 'Film title' : 'Title', 'No titles yet')}
                       <input
                         value={filmDraft.year}
                         onChange={e => setFilmDraft(d => ({ ...d, year: e.target.value }))}
@@ -919,112 +996,23 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                         }}
                       />
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
-                      <div style={{ position: 'relative' }}>
-                        <input
-                          value={filmDraft.director}
-                          onChange={e => {
-                            setFilmDraft(d => ({ ...d, director: e.target.value }));
-                            fetchFilmSuggestions('director', e.target.value);
-                          }}
-                          onKeyDown={e => handleFilmKeyDown(e, 'director')}
-                          onFocus={() => setFilmFocused('director')}
-                          onBlur={() => setTimeout(() => setFilmFocused(null), 100)}
-                          placeholder="Director"
-                          style={{
-                            width: '100%', background: surfaceContainerDark, color: onSurfaceWarm,
-                            border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
-                            padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
-                          }}
-                        />
-                        {filmFocused === 'director' && filmDraft.director.length > 0 && !filmDismissed.director && (
-                          <div style={{
-                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                            background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
-                            borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
-                            maxHeight: '150px', overflowY: 'auto'
-                          }}>
-                            {filmSuggestions.director.length > 0 ? (
-                              filmSuggestions.director.map((s, i) => (
-                                <div
-                                  key={i}
-                                  onMouseDown={e => {
-                                    e.preventDefault();
-                                    pickFilmSuggestion('director', s.value);
-                                  }}
-                                  style={{
-                                    padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
-                                    background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
-                                    color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
-                                  }}
-                                >
-                                  {s.value} {s.count > 1 ? `(${s.count})` : ''}
-                                </div>
-                              ))
-                            ) : (
-                              <div style={{
-                                padding: '8px 10px', fontSize: '12px', color: onSurfaceFaint,
-                                textAlign: 'center', fontStyle: 'italic'
-                              }}>
-                                No directors yet
-                              </div>
-                            )}
-                          </div>
-                        )}
+
+                    {mediaType === 'film' && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
+                        {renderFilmField('director', 'Director', 'No directors yet')}
+                        {renderFilmField('dp', 'Cinematographer (DP)', 'No cinematographers yet')}
                       </div>
-                      <div style={{ position: 'relative' }}>
-                        <input
-                          value={filmDraft.dp}
-                          onChange={e => {
-                            setFilmDraft(d => ({ ...d, dp: e.target.value }));
-                            fetchFilmSuggestions('dp', e.target.value);
-                          }}
-                          onKeyDown={e => handleFilmKeyDown(e, 'dp')}
-                          onFocus={() => setFilmFocused('dp')}
-                          onBlur={() => setTimeout(() => setFilmFocused(null), 100)}
-                          placeholder="Cinematographer (DP)"
-                          style={{
-                            width: '100%', background: surfaceContainerDark, color: onSurfaceWarm,
-                            border: `1px solid ${withAlpha(white,0.12)}`, borderRadius: '6px',
-                            padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
-                          }}
-                        />
-                        {filmFocused === 'dp' && filmDraft.dp.length > 0 && !filmDismissed.dp && (
-                          <div style={{
-                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                            background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
-                            borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
-                            maxHeight: '150px', overflowY: 'auto'
-                          }}>
-                            {filmSuggestions.dp.length > 0 ? (
-                              filmSuggestions.dp.map((s, i) => (
-                                <div
-                                  key={i}
-                                  onMouseDown={e => {
-                                    e.preventDefault();
-                                    pickFilmSuggestion('dp', s.value);
-                                  }}
-                                  style={{
-                                    padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
-                                    background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
-                                    color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
-                                  }}
-                                >
-                                  {s.value} {s.count > 1 ? `(${s.count})` : ''}
-                                </div>
-                              ))
-                            ) : (
-                              <div style={{
-                                padding: '8px 10px', fontSize: '12px', color: onSurfaceFaint,
-                                textAlign: 'center', fontStyle: 'italic'
-                              }}>
-                                No cinematographers yet
-                              </div>
-                            )}
-                          </div>
-                        )}
+                    )}
+                    {mediaType === 'painting' && (
+                      <div style={{ marginBottom: '10px' }}>
+                        {renderFilmField('painter', 'Painter', 'No painters yet')}
                       </div>
-                    </div>
+                    )}
+                    {mediaType === 'photo' && (
+                      <div style={{ marginBottom: '10px' }}>
+                        {renderFilmField('photographer', 'Photographer', 'No photographers yet')}
+                      </div>
+                    )}
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                       <button
                         onClick={() => saveFilm(filmDraft)}
@@ -1051,14 +1039,14 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                       {film && (
                         <button
                           onClick={clearFilm}
-                          title="Remove film info entirely (wrong guess)"
+                          title="Remove credit info entirely (wrong guess)"
                           style={{
                             background: 'none', border: `1px solid ${withAlpha(danger,0.3)}`,
                             color: danger, borderRadius: '6px', padding: '5px 13px',
                             fontSize: '11px', cursor: 'pointer', fontFamily: 'inherit'
                           }}
                         >
-                          Not a film / wrong
+                          Clear / wrong guess
                         </button>
                       )}
                     </div>
@@ -1077,7 +1065,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
               </div>
             )}
 
-            {/* Add film info manually when Gemini didn't recognize one */}
+            {/* Add credit info manually when Gemini didn't recognize a film,
+                or this isn't a film still at all (painting/photograph) */}
             {!film && !editingFilm && (
               <button
                 onClick={startEditFilm}
@@ -1089,7 +1078,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                 onMouseEnter={e => e.currentTarget.style.color = warning}
                 onMouseLeave={e => e.currentTarget.style.color = onSurfaceFaint}
               >
-                + Add film info
+                + Add film / painter / photographer info
               </button>
             )}
 

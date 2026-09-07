@@ -91,7 +91,8 @@ def main():
     for image_id in ids:
         f = by_id[image_id]["filmography"]
         assert f == {"title": "Interstellar", "director": "Christopher Nolan",
-                      "dp": "Hoyte van Hoytema", "year": "2014"}, (image_id, f)
+                      "dp": "Hoyte van Hoytema", "year": "2014",
+                      "painter": None, "photographer": None}, (image_id, f)
     print("2. Bulk-set with all 4 fields overwrote all 4 images (incl. the one with different prior data) and flagged the bad id.")
 
     # 2b. Bulk-set with ONLY dp provided leaves title/director/year exactly as
@@ -104,14 +105,16 @@ def main():
     for image_id in ids:
         f = by_id[image_id]["filmography"]
         assert f == {"title": "Interstellar", "director": "Christopher Nolan",
-                      "dp": "Someone New", "year": "2014"}, (image_id, f)
+                      "dp": "Someone New", "year": "2014",
+                      "painter": None, "photographer": None}, (image_id, f)
     print("2b. Bulk-set with only DP provided changed DP alone — title/director/year untouched on all 4 images.")
 
     # 2c. common_filmography in selection-summary reflects the now-shared fields.
     r = admin.post("/api/tags/selection-summary", json={"image_ids": ids})
     common = r.get_json()["common_filmography"]
     assert common == {"title": "Interstellar", "director": "Christopher Nolan",
-                       "dp": "Someone New", "year": "2014"}, common
+                       "dp": "Someone New", "year": "2014",
+                       "painter": None, "photographer": None}, common
     print("2c. selection-summary reports all 4 fields as common across the selection.")
 
     # 2d. Selection where one image disagrees on `year` -> year drops out of consensus.

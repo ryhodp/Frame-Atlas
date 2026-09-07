@@ -91,10 +91,11 @@ def hydrate_image_rows(c, rows):
             tags_map.setdefault(tr['image_id'], []).append({'category': tr['category'], 'value': tr['value']})
         for cr in c.execute(f'SELECT image_id, hex FROM colors WHERE image_id IN ({ph}) ORDER BY rank ASC', img_ids).fetchall():
             colors_map.setdefault(cr['image_id'], []).append(cr['hex'])
-        for fr in c.execute(f'SELECT image_id, title, director, dp, year FROM filmography WHERE image_id IN ({ph})', img_ids).fetchall():
+        for fr in c.execute(f'SELECT image_id, title, director, dp, year, painter, photographer FROM filmography WHERE image_id IN ({ph})', img_ids).fetchall():
             film_map[fr['image_id']] = {
                 'title': fr['title'], 'director': fr['director'],
-                'dp': fr['dp'], 'year': fr['year']
+                'dp': fr['dp'], 'year': fr['year'],
+                'painter': fr['painter'], 'photographer': fr['photographer'],
             }
 
     return [
@@ -129,9 +130,12 @@ def _fetch_image_dict(c, image_id, owner_user_id, public=False):
         c.execute('SELECT hex FROM colors WHERE image_id = ? ORDER BY rank ASC', (image_id,)).fetchall()
     ]
     fr = c.execute(
-        'SELECT title, director, dp, year FROM filmography WHERE image_id = ?', (image_id,)
+        'SELECT title, director, dp, year, painter, photographer FROM filmography WHERE image_id = ?', (image_id,)
     ).fetchone()
-    filmography = {'title': fr['title'], 'director': fr['director'], 'dp': fr['dp'], 'year': fr['year']} if fr else None
+    filmography = {
+        'title': fr['title'], 'director': fr['director'], 'dp': fr['dp'], 'year': fr['year'],
+        'painter': fr['painter'], 'photographer': fr['photographer'],
+    } if fr else None
 
     return build_image_dict(row, tags, palette, filmography, public=public)
 

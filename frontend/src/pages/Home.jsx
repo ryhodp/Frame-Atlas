@@ -14,7 +14,7 @@ import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
 import { PAGE_BG, SWATCH_COLORS as PRESET_SWATCHES, accentBlueLight, accentFilm, accentOrange, accentSimilar, accentTeal, accentViolet, accentVioletLight, accentVioletLighter, black, danger, error, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onTertiary, outlineVariant, overlayViolet, primary, primaryDim, success, surfaceContainerDark, surfaceContainerHover, surfaceContainerLow, surfaceContainerLowest, surfaceContainerMuted, tertiary, warning, white, withAlpha } from '../theme';
 
 const PER_PAGE = 60;
-const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP' };
+const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP', painter: 'Painter', photographer: 'Photographer' };
 
 // V24 color search. Keep these in step with DEFAULT_PROMINENCE /
 // DEFAULT_EXACTNESS in backend/app.py.
@@ -83,7 +83,9 @@ export default function Home() {
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [showDuplicates, setShowDuplicates] = useState(false);
-  const [duplicateScanStatus, setDuplicateScanStatus] = useState(null); // null | 'scanning' | { groups: [...] }
+  // null | { scanning: true, phase, processed, total } | { groups: [...] }
+  const [duplicateScanStatus, setDuplicateScanStatus] = useState(null);
+  const duplicateScanPollRef = useRef(null);
 
   // ── Find Similar mode ────────────────────────────────────────────────────
   const [similarTo, setSimilarTo] = useState(null); // {id, filename} or null
@@ -794,25 +796,62 @@ export default function Home() {
   };
 
   // ── Background duplicate scanner ────────────────────────────────────────────
-  const startDuplicateScan = async () => {
-    setDuplicateScanStatus('scanning');
-    try {
-      // Call the duplicate scan API in the background
-      const res = await fetch('/api/duplicates/scan', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        setDuplicateScanStatus({ groups: data.groups || [] });
-        // Show a toast that results are ready
-        if (data.groups && data.groups.length > 0) {
-          // We'll show the modal when user clicks the notification
+  // The scan itself runs server-side (fingerprints → palettes → Drive
+  // reconcile → the actual O(images²) comparison, which is the slow part on
+  // a large library). This polls /api/duplicates/scan-progress every 600ms
+  // for a real percentage instead of one request that silently blocks until
+  // everything is done — that's what read as "keeps waiting and waiting"
+  // with no sign it was actually working.
+  const pollDuplicateProgress = () => {
+    fetch('/api/duplicates/scan-progress')
+      .then(res => res.json())
+      .then(p => {
+        if (p.phase === 'done') {
+          if (p.error) {
+            console.error('Duplicate scan failed', p.error);
+            setDuplicateScanStatus(null);
+          } else {
+            setDuplicateScanStatus({ groups: p.groups || [] });
+          }
+          return;
         }
-      } else {
+        setDuplicateScanStatus({
+          scanning: true, phase: p.phase, processed: p.processed || 0, total: p.total || 0
+        });
+        duplicateScanPollRef.current = setTimeout(pollDuplicateProgress, 600);
+      })
+      .catch(e => {
+        console.error('Duplicate scan progress poll failed', e);
         setDuplicateScanStatus(null);
+      });
+  };
+
+  const startDuplicateScan = async () => {
+    setDuplicateScanStatus({ scanning: true, phase: null, processed: 0, total: 0 });
+    try {
+      const res = await fetch('/api/duplicates/scan', { method: 'POST' });
+      if (!res.ok) {
+        setDuplicateScanStatus(null);
+        return;
       }
+      // Whether this call started a fresh scan or found one already running
+      // (already_running: true), either way the right next step is the same:
+      // start polling for progress.
+      pollDuplicateProgress();
     } catch (e) {
       console.error('Duplicate scan failed', e);
       setDuplicateScanStatus(null);
     }
+  };
+
+  // Stop polling if the page unmounts mid-scan
+  useEffect(() => () => clearTimeout(duplicateScanPollRef.current), []);
+
+  const DUP_PHASE_LABELS = {
+    fingerprints: 'Checking fingerprints',
+    palettes: 'Checking colors',
+    reconcile: 'Syncing with Drive',
+    comparing: 'Comparing photos',
   };
 
   // Dragenter/dragleave fire on every child element the cursor crosses, not
@@ -1093,20 +1132,40 @@ export default function Home() {
 
               <button
                 onClick={startDuplicateScan}
-                disabled={duplicateScanStatus === 'scanning'}
-                title={duplicateScanStatus === 'scanning' ? 'Scanning for duplicates...' : 'Find duplicate images (runs in background)'}
+                disabled={!!duplicateScanStatus?.scanning}
+                title={duplicateScanStatus?.scanning
+                  ? `${DUP_PHASE_LABELS[duplicateScanStatus.phase] || 'Starting…'}${duplicateScanStatus.total ? ` (${duplicateScanStatus.processed}/${duplicateScanStatus.total})` : ''}`
+                  : 'Find duplicate images (runs in background)'}
                 style={{
-                  height: isMobile ? '38px' : '46px', width: isMobile ? '38px' : '46px', flexShrink: 0,
-                  background: duplicateScanStatus === 'scanning' ? withAlpha(primary,0.14) : surfaceContainerDark,
-                  border: `1px solid ${duplicateScanStatus === 'scanning' ? withAlpha(primary,0.5) : withAlpha(white,0.12)}`,
+                  display: 'flex', alignItems: 'center', gap: '7px',
+                  height: isMobile ? '38px' : '46px', flexShrink: 0,
+                  padding: duplicateScanStatus?.scanning ? '0 12px' : 0,
+                  width: duplicateScanStatus?.scanning ? 'auto' : (isMobile ? '38px' : '46px'),
+                  justifyContent: 'center',
+                  background: duplicateScanStatus?.scanning ? withAlpha(primary,0.14) : surfaceContainerDark,
+                  border: `1px solid ${duplicateScanStatus?.scanning ? withAlpha(primary,0.5) : withAlpha(white,0.12)}`,
                   borderRadius: '10px',
-                  cursor: duplicateScanStatus === 'scanning' ? 'default' : 'pointer',
-                  color: duplicateScanStatus === 'scanning' ? primary : onSurfaceMuted,
+                  cursor: duplicateScanStatus?.scanning ? 'default' : 'pointer',
+                  color: duplicateScanStatus?.scanning ? primary : onSurfaceMuted,
                   fontSize: '15px',
-                  opacity: duplicateScanStatus === 'scanning' ? 0.7 : 1
+                  opacity: duplicateScanStatus?.scanning ? 0.9 : 1,
+                  transition: 'width 0.2s ease'
                 }}
               >
-                ⧉
+                {duplicateScanStatus?.scanning ? (
+                  <>
+                    <span style={{
+                      width: '12px', height: '12px', flexShrink: 0,
+                      border: `2px solid ${withAlpha(primary,0.3)}`, borderTopColor: primary,
+                      borderRadius: '50%', display: 'inline-block',
+                      animation: 'spin 0.7s linear infinite'
+                    }} />
+                    <span style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+                      {DUP_PHASE_LABELS[duplicateScanStatus.phase] || 'Starting…'}
+                      {duplicateScanStatus.total > 0 ? ` ${duplicateScanStatus.processed}/${duplicateScanStatus.total}` : ''}
+                    </span>
+                  </>
+                ) : '⧉'}
               </button>
 
               <button
