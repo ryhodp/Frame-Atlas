@@ -292,22 +292,36 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
 
   const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '' });
 
-  // Cmd+S / Ctrl+S saves filmography while editing — so the whole workflow
-  // (type, arrow keys, Enter, type, arrow keys, Enter, Cmd+S) stays
-  // keyboard-only with no mouse click needed. Plain "S" is deliberately NOT
-  // bound to save — it's a letter people type into names ("Steven
-  // Spielberg"), so binding it would break typing instead of helping.
+  // Cmd+S / Ctrl+S finishes editing — tags and/or filmography — with no
+  // mouse needed, so the whole workflow (type, arrow keys, Enter, ...,
+  // Cmd+S) stays keyboard-only. Plain "S" is deliberately NOT bound — it's
+  // a letter people type into names ("Steven Spielberg") and tag values,
+  // so binding it would break typing instead of helping.
+  //
+  // Tags save instantly per add/remove click (there's no draft sitting
+  // around), so when only Edit tags is open, Cmd+S has nothing new to
+  // persist — it just finishes the same way saving filmography does: exit
+  // edit mode and close the whole panel, since the user is done. When
+  // filmography editing is ALSO open, saving that takes priority (it
+  // already closes the whole panel itself), which correctly wraps up both
+  // at once if you had them open together.
   useEffect(() => {
-    if (!editingFilm) return;
+    if (!editingFilm && !editingTags) return;
     const handler = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        saveFilm(filmDraft);
+        if (editingFilm) {
+          saveFilm(filmDraft);
+        } else {
+          setEditingTags(false);
+          showToast('Tags saved.', 'success');
+          setTimeout(() => onClose?.(), 150);
+        }
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [editingFilm, filmDraft]);
+  }, [editingFilm, editingTags, filmDraft]);
 
   // Filmography autocomplete — fetch suggestions as user types
   const fetchFilmSuggestions = async (field, value) => {
