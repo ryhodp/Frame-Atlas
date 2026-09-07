@@ -267,6 +267,9 @@ export default function Home() {
   };
 
   // ── Infinite scroll: load next page when the sentinel nears the viewport ───
+  // Fallback/safety net for the midpoint prefetch below — if that one ever
+  // misses (e.g. a tile ref not yet attached), this still guarantees more
+  // images load once the user actually reaches the bottom.
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
@@ -278,6 +281,32 @@ export default function Home() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [hasMore, fetchPage]);
+
+  // ── Infinite scroll (prefetch): start loading the NEXT page once the user
+  // has scrolled halfway through the page that was loaded LAST — not just
+  // when they hit the very bottom. With PER_PAGE=60: after the first page
+  // loads (60 images), the trigger sits at image 30; once a second page
+  // lands (120 total), it moves to image 90; and so on. Each fetch always
+  // sits half a page behind the current end, so there's no pause waiting
+  // for the next batch while scrolling steadily. Watches the actual tile at
+  // that index via the existing tileRefs map (same one the view-tracking
+  // observer uses) rather than adding a new DOM sentinel.
+  useEffect(() => {
+    if (!hasMore || images.length === 0) return;
+    const midIndex = Math.max(0, images.length - Math.floor(PER_PAGE / 2));
+    const midImage = images[midIndex];
+    if (!midImage) return;
+    const node = tileRefs.current.get(midImage.id);
+    if (!node) return;
+
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !fetchingRef.current) {
+        fetchPage(pageRef.current + 1, true);
+      }
+    }, { rootMargin: '200px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [images, hasMore, fetchPage]);
 
   // ── V14: mark tiles as "seen" once at least half of one is on screen ───────
   useEffect(() => {
