@@ -53,6 +53,10 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   const [filmSuggestions, setFilmSuggestions] = useState({ title: [], director: [], dp: [] });
   const [filmFocused, setFilmFocused] = useState(null); // 'title', 'director', 'dp', or null
   const [filmHighlight, setFilmHighlight] = useState(-1); // index in current field's suggestions
+  // Tracks "user just picked a suggestion, don't reopen the dropdown until they
+  // type again" — separate from filmSuggestions so a picked value with 0 fresh
+  // matches doesn't fall through to the "No X yet" placeholder looking stuck.
+  const [filmDismissed, setFilmDismissed] = useState({ title: false, director: false, dp: false });
 
   // V39: DP technical notes — camera/rig, lens, lens filter, stop, freeform
   // on-set notes. Collapsed by default (Ryan's call — most photos won't have
@@ -255,6 +259,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
       dp: film?.dp || '', year: film?.year || ''
     });
     setEditingFilm(true);
+    setFilmDismissed({ title: false, director: false, dp: false });
   };
 
   const saveFilm = async (draft) => {
@@ -285,6 +290,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
 
   // Filmography autocomplete — fetch suggestions as user types
   const fetchFilmSuggestions = async (field, value) => {
+    setFilmDismissed(prev => ({ ...prev, [field]: false })); // typing reopens the dropdown
     if (!value || value.length < 1) {
       setFilmSuggestions(prev => ({ ...prev, [field]: [] }));
       setFilmHighlight(-1);
@@ -300,10 +306,19 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     }
   };
 
+  // Selecting a suggestion (click or Enter) — fills the field and dismisses
+  // the dropdown until the user types again, instead of leaving it open to
+  // fall through to a confusing "No X yet" placeholder.
+  const pickFilmSuggestion = (field, value) => {
+    setFilmDraft(prev => ({ ...prev, [field]: value }));
+    setFilmDismissed(prev => ({ ...prev, [field]: true }));
+    setFilmHighlight(-1);
+  };
+
   // Handle filmography field keyboard navigation (arrow keys + Enter)
   const handleFilmKeyDown = (e, field) => {
     const current = filmSuggestions[field] || [];
-    if (!current.length) return;
+    if (!current.length || filmDismissed[field]) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -313,9 +328,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
       setFilmHighlight(prev => (prev - 1 + current.length) % current.length);
     } else if (e.key === 'Enter' && filmHighlight >= 0 && filmHighlight < current.length) {
       e.preventDefault();
-      setFilmDraft(prev => ({ ...prev, [field]: current[filmHighlight].value }));
-      setFilmSuggestions(prev => ({ ...prev, [field]: [] }));
-      setFilmHighlight(-1);
+      pickFilmSuggestion(field, current[filmHighlight].value);
     }
   };
 
@@ -818,7 +831,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                           }}
                         />
-                        {filmFocused === 'title' && filmDraft.title.length > 0 && (
+                        {filmFocused === 'title' && filmDraft.title.length > 0 && !filmDismissed.title && (
                           <div style={{
                             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
                             background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
@@ -831,9 +844,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                                   key={i}
                                   onMouseDown={e => {
                                     e.preventDefault();
-                                    setFilmDraft(d => ({ ...d, title: s.value }));
-                                    setFilmSuggestions(prev => ({ ...prev, title: [] }));
-                                    setFilmFocused(null);
+                                    pickFilmSuggestion('title', s.value);
                                   }}
                                   style={{
                                     padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
@@ -884,7 +895,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                           }}
                         />
-                        {filmFocused === 'director' && filmDraft.director.length > 0 && (
+                        {filmFocused === 'director' && filmDraft.director.length > 0 && !filmDismissed.director && (
                           <div style={{
                             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
                             background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
@@ -897,9 +908,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                                   key={i}
                                   onMouseDown={e => {
                                     e.preventDefault();
-                                    setFilmDraft(d => ({ ...d, director: s.value }));
-                                    setFilmSuggestions(prev => ({ ...prev, director: [] }));
-                                    setFilmFocused(null);
+                                    pickFilmSuggestion('director', s.value);
                                   }}
                                   style={{
                                     padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
@@ -938,7 +947,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                           }}
                         />
-                        {filmFocused === 'dp' && filmDraft.dp.length > 0 && (
+                        {filmFocused === 'dp' && filmDraft.dp.length > 0 && !filmDismissed.dp && (
                           <div style={{
                             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
                             background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
@@ -951,9 +960,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                                   key={i}
                                   onMouseDown={e => {
                                     e.preventDefault();
-                                    setFilmDraft(d => ({ ...d, dp: s.value }));
-                                    setFilmSuggestions(prev => ({ ...prev, dp: [] }));
-                                    setFilmFocused(null);
+                                    pickFilmSuggestion('dp', s.value);
                                   }}
                                   style={{
                                     padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
