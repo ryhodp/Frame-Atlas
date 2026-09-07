@@ -1237,25 +1237,39 @@ def autocomplete():
     # Filmography matches — lets the same search bar find "Her" by title or
     # "Spike Jonze" by director/DP, reusing the exact film= filter that
     # clicking a name in the detail panel already applies (see /api/search).
-    like = f'{q}%'
+    #
+    # Matches anywhere in the value, not just the start — "Ozu" finds
+    # "Yasujiro Ozu", "Korra" finds "The Legend of Korra" — since the useful
+    # search word is routinely NOT the first one. Without this, typing a
+    # last name that finds nothing here meant Enter fell through to the NL
+    # interpreter instead of setting the film= filter, silently failing a
+    # search that should have worked (same bug class as the filmography
+    # editor's own autocomplete, fixed separately in
+    # /api/filmography/autocomplete). A true prefix match still ranks above
+    # a same-frequency contains-only match via the prefix_rank tiebreaker.
+    like = f'%{q}%'
+    prefix_like = f'{q}%'
     film_rows = c.execute('''
-        SELECT f.title AS value, 'title' AS field, COUNT(DISTINCT f.image_id) AS cnt
+        SELECT f.title AS value, 'title' AS field, COUNT(DISTINCT f.image_id) AS cnt,
+               CASE WHEN LOWER(f.title) LIKE ? THEN 0 ELSE 1 END AS prefix_rank
         FROM filmography f JOIN images i ON i.id = f.image_id
         WHERE i.user_id = ? AND f.title IS NOT NULL AND LOWER(f.title) LIKE ?
         GROUP BY f.title
         UNION ALL
-        SELECT f.director, 'director', COUNT(DISTINCT f.image_id)
+        SELECT f.director, 'director', COUNT(DISTINCT f.image_id),
+               CASE WHEN LOWER(f.director) LIKE ? THEN 0 ELSE 1 END
         FROM filmography f JOIN images i ON i.id = f.image_id
         WHERE i.user_id = ? AND f.director IS NOT NULL AND LOWER(f.director) LIKE ?
         GROUP BY f.director
         UNION ALL
-        SELECT f.dp, 'dp', COUNT(DISTINCT f.image_id)
+        SELECT f.dp, 'dp', COUNT(DISTINCT f.image_id),
+               CASE WHEN LOWER(f.dp) LIKE ? THEN 0 ELSE 1 END
         FROM filmography f JOIN images i ON i.id = f.image_id
         WHERE i.user_id = ? AND f.dp IS NOT NULL AND LOWER(f.dp) LIKE ?
         GROUP BY f.dp
-        ORDER BY cnt DESC
+        ORDER BY prefix_rank ASC, cnt DESC
         LIMIT 8
-    ''', (uid, like, uid, like, uid, like)).fetchall()
+    ''', (prefix_like, uid, like, prefix_like, uid, like, prefix_like, uid, like)).fetchall()
 
     # V15: aspect-ratio matches — "9:16", "2.35", "scope" etc. suggest format
     # buckets. Counting requires a scan of the user's images, so only do it
