@@ -57,6 +57,11 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   // type again" — separate from filmSuggestions so a picked value with 0 fresh
   // matches doesn't fall through to the "No X yet" placeholder looking stuck.
   const [filmDismissed, setFilmDismissed] = useState({ title: false, director: false, dp: false });
+  // Per-field request counter — typing fast fires overlapping fetches, and
+  // network timing can land an older (e.g. "R") response after a newer one
+  // ("Ry"), silently blanking out correct suggestions. Only the response
+  // whose id still matches the latest fired request for that field gets applied.
+  const filmRequestIdRef = useRef({ title: 0, director: 0, dp: 0 });
 
   // V39: DP technical notes — camera/rig, lens, lens filter, stop, freeform
   // on-set notes. Collapsed by default (Ryan's call — most photos won't have
@@ -287,10 +292,27 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
 
   const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '' });
 
+  // Cmd+S / Ctrl+S saves filmography while editing — so the whole workflow
+  // (type, arrow keys, Enter, type, arrow keys, Enter, Cmd+S) stays
+  // keyboard-only with no mouse click needed. Plain "S" is deliberately NOT
+  // bound to save — it's a letter people type into names ("Steven
+  // Spielberg"), so binding it would break typing instead of helping.
+  useEffect(() => {
+    if (!editingFilm) return;
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveFilm(filmDraft);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [editingFilm, filmDraft]);
 
   // Filmography autocomplete — fetch suggestions as user types
   const fetchFilmSuggestions = async (field, value) => {
     setFilmDismissed(prev => ({ ...prev, [field]: false })); // typing reopens the dropdown
+    const requestId = ++filmRequestIdRef.current[field];
     if (!value || value.length < 1) {
       setFilmSuggestions(prev => ({ ...prev, [field]: [] }));
       setFilmHighlight(-1);
@@ -299,6 +321,11 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     try {
       const res = await fetch(`/api/filmography/autocomplete?field=${field}&q=${encodeURIComponent(value)}`);
       const suggestions = await res.json();
+      // Typing fast fires one request per keystroke; a slower earlier request
+      // (e.g. for "R") can resolve AFTER a faster later one (e.g. "Ry") and
+      // clobber correct results with stale ones. Drop anything but the
+      // latest-fired request for this field.
+      if (filmRequestIdRef.current[field] !== requestId) return;
       setFilmSuggestions(prev => ({ ...prev, [field]: suggestions }));
       setFilmHighlight(-1); // reset highlight when suggestions change
     } catch (err) {
@@ -329,6 +356,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     } else if (e.key === 'Enter' && filmHighlight >= 0 && filmHighlight < current.length) {
       e.preventDefault();
       pickFilmSuggestion(field, current[filmHighlight].value);
+      e.target.blur(); // Picking a suggestion finishes this field — don't leave the cursor sitting in it
     }
   };
 
