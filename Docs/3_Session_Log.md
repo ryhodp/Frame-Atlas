@@ -3687,3 +3687,124 @@ without touching `app.py`. **This is a different risk class from the worker move
 registration, `url_for` endpoint names and decorator availability all change at once, which is
 why each blueprint gets its own session. Note the Days 36–42 plan text estimated app.py would be
 3,500–4,000 lines by now; the real number is 4,565 (timeline updated to say so).
+
+---
+
+## V80 — Filmography Autocomplete, Parallel Uploads, Infinite-Scroll Prefetch
+*Session: September 6–7, 2026 — reactive bug-fix/feature session, NOT part of the Days 36–42
+Route Blueprints work. That work has not started; app.py is untouched at the route level.*
+
+Ryan opened with three unrelated reports, then this grew into a full session as new issues
+surfaced from testing each fix live.
+
+### What We Built
+
+**1. "Edit tags" visibility (turned out not to be a bug).** Ryan reported he couldn't edit
+filmography from the inspector on Recent, only via Select Mode (V). Traced the data path
+end-to-end (`/api/views/recent` and `/api/search` both go through the same
+`hydrate_image_rows()` → `build_image_dict()`, so filmography was never missing) — the real
+issue was that the "Edit tags" button was buried inside the Tags section, easy to miss. Moved
+it to the footer next to Delete/Download, with a `🏷 Edit tags` / `✓ Done` label.
+
+**2. Auto-close inspector after filmography save.** Saving now shows a success toast and closes
+the whole panel ~150ms later — Ryan's explicit ask: "exit out of the edit menu... the image no
+longer needs to be selected because I'm done."
+
+**3. Parallel Drive uploads.** `/api/upload` uploaded files one at a time in a Python list
+comprehension. Now uses the same `ThreadPoolExecutor` + `threading.local()`-per-worker pattern
+V36 already used for bulk-delete's Drive moves (5 workers). Sacrifices within-batch duplicate
+detection for speed (each worker only sees the phash list as it existed at batch start) — an
+explicit tradeoff, not an oversight; the next sync/reconcile pass still catches true duplicates.
+**This closes the V79 Technical Debt item** that flagged exactly this as "the obvious next step
+if uploads still feel slow."
+
+**4. Filmography autocomplete — the bulk of the session.** New `GET
+/api/filmography/autocomplete?field=<title|director|dp>&q=<text>` endpoint, plus a dropdown UI
+in `ImageDetail.jsx`'s filmography editor with arrow-key navigation and Enter-to-select. Went
+through several real rounds of user-reported breakage before it was solid:
+- **Substring matching, not prefix-only.** Original version used `LIKE '{q}%'`, so "Korra" never
+  matched "The Legend of Korra" and "Deakins" never matched "Roger Deakins" — the useful search
+  word is routinely NOT the first word. Switched to `LIKE '%{q}%'` with a `CASE WHEN` prefix-match
+  tiebreaker column so an actual prefix match (e.g. "Yi" → "Yi Yi") still ranks above a
+  same-frequency contains-only match. Verified against an in-memory SQLite table before pushing.
+- **Race condition fixed.** Typing fast fires one fetch per keystroke; with no ordering
+  guarantee, a slower "R" response could resolve AFTER a faster "Ry" response and silently
+  overwrite correct results with stale ones — this is what Ryan described as "inconsistent"
+  (same data, different luck on network timing). Fixed with a per-field monotonic request-id ref;
+  only the response matching the latest-fired request for that field gets applied.
+- **Dropdown-not-closing bug.** Selecting a suggestion via Enter cleared the suggestion list but
+  left the dropdown container open (gated only on focus + non-empty text), so it fell through to
+  render a "No X yet" placeholder right after a successful pick — looking stuck. Fixed with a
+  separate `filmDismissed` flag per field, cleared the moment the user types again.
+- **Cmd+S / Ctrl+S to save.** Works from any filmography field. Plain "S" deliberately not
+  bound — it's a letter people type into names ("Steven Spielberg"). Later extended to also
+  finish **Edit tags** mode (tags save instantly per click, so Cmd+S there just exits + closes
+  the panel, matching the same "I'm done" workflow) — filmography saving takes priority if both
+  edit modes are open at once.
+
+**5. Infinite-scroll prefetch.** Ryan: "when I scroll to the halfway point of the current
+selection, can it already load the next 60." Previously the grid only fetched more once a
+bottom sentinel became visible. Added a second `IntersectionObserver` watching the tile sitting
+at `images.length - PER_PAGE/2` (image 30 after the first page, 90 after the second, etc.),
+reusing the existing `tileRefs` map already populated for the V14 view-tracking observer — no
+new DOM sentinel needed. The original bottom sentinel stays as a fallback. Ryan's read after
+testing: "amazing experience."
+
+### The Three Failed Deploys — a real process gap, now closed
+The **first three pushes of this session all failed to build on Railway** — smart/curly quotes
+(`'POST'` instead of `'POST'`) landed in `saveFilm()` mid-edit (almost certainly an editor
+autocorrect), breaking Vite's esbuild transform with `Unexpected "‘"`. Because this was never
+checked, **the live site kept serving pre-V80 code through two full rounds of Ryan testing and
+reporting "it's still not giving me suggestions"** — his testing was never wrong, the deploy
+just silently never shipped. Found via `mcp__railway__list_deployments` (showed `FAILED` on all
+three) and `mcp__railway__get_logs` (`log_type: build`) pinpointing the exact line. **Process fix
+adopted for the rest of the session and going forward: run `npm run build` locally — same command
+Railway's Docker build runs — before every push that touches frontend code, and confirm
+`mcp__railway__list_deployments` shows `SUCCESS` before telling Ryan to test.** Every fix from
+the quote-correction commit onward followed this and every one of those deploys succeeded.
+
+### Technical Debt / Notes
+- Parallel upload's sacrificed within-batch dedup (see #3 above) — acceptable per Ryan's
+  session-old precedent (V31: "a single bad photo shouldn't hold the other 49 hostage"), but
+  flagged here in case duplicate uploads in one batch ever becomes a real complaint.
+- No dedicated automated test script was added for `/api/filmography/autocomplete` this session
+  (existing `scripts/test_*_locally.py` suite untouched) — worth a script if this endpoint grows
+  more logic (e.g. cross-field suggestions, fuzzy matching) rather than staying a single query.
+- This session did NOT touch `app.py` route structure — Days 36–42 Route Blueprints work is
+  exactly where the Day 35 entry left it.
+
+### Files Changed
+- `backend/app.py` — parallel `/api/upload` (ThreadPoolExecutor), new
+  `/api/filmography/autocomplete` route (substring match + prefix-rank tiebreaker)
+- `frontend/src/components/ImageDetail.jsx` — Edit tags button moved to footer, filmography
+  autocomplete UI (dropdown, arrow keys, `filmDismissed`, per-field request-id guard), Cmd+S for
+  filmography and tags, auto-close-on-save
+- `frontend/src/pages/Home.jsx` — midpoint-tile prefetch observer alongside the existing bottom
+  sentinel
+
+### Commits (chronological, this session)
+- `e61c1e8` V80: Filmography autocomplete + Edit tags visibility + batch uploads — Railway
+  `b89cebd0` **FAILED** (curly-quote syntax error, not yet diagnosed)
+- `9008025` Fix filmography autocomplete click handling — Railway `e592897f` **FAILED** (same
+  root cause, not yet diagnosed)
+- `9d89806` Show autocomplete dropdown even with no results — Railway `c2d43f75` **FAILED** (same
+  root cause; diagnosed immediately after via `list_deployments` + `get_logs`)
+- `7c6c7cf` Fix curly-quote syntax error that broke the last 3 deploys — Railway `4ffeec9c`
+  **SUCCESS** (verified with local `npm run build` before push, per the new process rule)
+- `48b3f3c` Fix filmography autocomplete dropdown not closing after selection — Railway
+  `da61ec52` **SUCCESS**
+- `5cf9d90` Fix flaky filmography autocomplete + keyboard-only workflow (race-condition guard,
+  blur-on-select, Cmd+S) — Railway `eacdf296` **SUCCESS**
+- `8054382` Filmography autocomplete: match anywhere in the name, not just the start — Railway
+  `2ac7f423` **SUCCESS**
+- `f7e8751` Prefetch next page at the halfway point of the last-loaded page — Railway `61d2fc6c`
+  **SUCCESS**. Ryan confirmed live: "amazing experience."
+- `d8c5c0f` Extend Cmd+S to also finish Edit tags mode, not just filmography — Railway `d9bfd7e0`
+  **SUCCESS**
+
+### Starting Point for Next Session
+Days 36–42 Route Blueprints (see the Day 35 entry above) are still exactly where they were —
+this session was entirely reactive bug-fix/feature work on top of V78/V79's completed worker
+extraction, and did not touch route structure. `app.py` is still ~4,565 lines pre-blueprint work,
+plus this session's small additions (parallel upload block, one new route). When Ryan says
+"I'm ready for Day 36," start the Route Blueprints work as planned in the Day 35 entry.
