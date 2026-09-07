@@ -2595,7 +2595,15 @@ def tags_suggestions():
 @app.route('/api/filmography/autocomplete')
 def filmography_autocomplete():
     """Suggest filmography values (title, director, DP) based on what the logged-in
-    user has already entered on other photos. Ordered by frequency."""
+    user has already entered on other photos.
+
+    Matches anywhere in the value, not just the start — "Korra" finds "The
+    Legend of Korra", "Deakins" finds "Roger Deakins" — since film titles and
+    full names routinely put the useful search word after the first one.
+    A value that STARTS with what was typed still ranks above one that merely
+    contains it, so an exact-prefix match like "Yi" -> "Yi Yi" doesn't get
+    buried under unrelated contains-matches; frequency breaks ties within
+    each of those two groups."""
     field = request.args.get('field', '').strip()  # 'title', 'director', or 'dp'
     q = request.args.get('q', '').strip().lower()
 
@@ -2607,13 +2615,14 @@ def filmography_autocomplete():
     c = conn.cursor()
 
     rows = c.execute(f'''
-        SELECT {field} as value, COUNT(DISTINCT f.image_id) as cnt
+        SELECT {field} as value, COUNT(DISTINCT f.image_id) as cnt,
+               CASE WHEN LOWER({field}) LIKE ? THEN 0 ELSE 1 END as prefix_rank
         FROM filmography f JOIN images i ON i.id = f.image_id
         WHERE i.user_id = ? AND f.{field} IS NOT NULL AND LOWER(f.{field}) LIKE ?
         GROUP BY f.{field}
-        ORDER BY cnt DESC
+        ORDER BY prefix_rank ASC, cnt DESC
         LIMIT 20
-    ''', (uid, f'{q}%')).fetchall()
+    ''', (f'{q}%', uid, f'%{q}%')).fetchall()
 
     conn.close()
     return jsonify([{'value': r['value'], 'count': r['cnt']} for r in rows])
