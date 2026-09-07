@@ -817,31 +817,40 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                           }}
                         />
-                        {filmFocused === 'title' && filmSuggestions.title.length > 0 && (
+                        {filmFocused === 'title' && filmDraft.title.length > 0 && (
                           <div style={{
                             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
                             background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
                             borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
                             maxHeight: '150px', overflowY: 'auto'
                           }}>
-                            {filmSuggestions.title.map((s, i) => (
-                              <div
-                                key={i}
-                                onMouseDown={e => {
-                                  e.preventDefault();
-                                  setFilmDraft(d => ({ ...d, title: s.value }));
-                                  setFilmSuggestions(prev => ({ ...prev, title: [] }));
-                                  setFilmFocused(null);
-                                }}
-                                style={{
-                                  padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
-                                  background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
-                                  color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
-                                }}
-                              >
-                                {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                            {filmSuggestions.title.length > 0 ? (
+                              filmSuggestions.title.map((s, i) => (
+                                <div
+                                  key={i}
+                                  onMouseDown={e => {
+                                    e.preventDefault();
+                                    setFilmDraft(d => ({ ...d, title: s.value }));
+                                    setFilmSuggestions(prev => ({ ...prev, title: [] }));
+                                    setFilmFocused(null);
+                                  }}
+                                  style={{
+                                    padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                                    background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                                    color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                                  }}
+                                >
+                                  {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                                </div>
+                              ))
+                            ) : (
+                              <div style={{
+                                padding: '8px 10px', fontSize: '12px', color: onSurfaceFaint,
+                                textAlign: 'center', fontStyle: 'italic'
+                              }}>
+                                No titles yet
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>
@@ -874,31 +883,40 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                           }}
                         />
-                        {filmFocused === 'director' && filmSuggestions.director.length > 0 && (
+                        {filmFocused === 'director' && filmDraft.director.length > 0 && (
                           <div style={{
                             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
                             background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
                             borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
                             maxHeight: '150px', overflowY: 'auto'
                           }}>
-                            {filmSuggestions.director.map((s, i) => (
-                              <div
-                                key={i}
-                                onMouseDown={e => {
-                                  e.preventDefault();
-                                  setFilmDraft(d => ({ ...d, director: s.value }));
-                                  setFilmSuggestions(prev => ({ ...prev, director: [] }));
-                                  setFilmFocused(null);
-                                }}
-                                style={{
-                                  padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
-                                  background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
-                                  color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
-                                }}
-                              >
-                                {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                            {filmSuggestions.director.length > 0 ? (
+                              filmSuggestions.director.map((s, i) => (
+                                <div
+                                  key={i}
+                                  onMouseDown={e => {
+                                    e.preventDefault();
+                                    setFilmDraft(d => ({ ...d, director: s.value }));
+                                    setFilmSuggestions(prev => ({ ...prev, director: [] }));
+                                    setFilmFocused(null);
+                                  }}
+                                  style={{
+                                    padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                                    background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                                    color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                                  }}
+                                >
+                                  {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                                </div>
+                              ))
+                            ) : (
+                              <div style={{
+                                padding: '8px 10px', fontSize: '12px', color: onSurfaceFaint,
+                                textAlign: 'center', fontStyle: 'italic'
+                              }}>
+                                No directors yet
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>
@@ -919,31 +937,40 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
                           }}
                         />
-                        {filmFocused === 'dp' && filmSuggestions.dp.length > 0 && (
+                        {filmFocused === 'dp' && filmDraft.dp.length > 0 && (
                           <div style={{
                             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
                             background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
                             borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
                             maxHeight: '150px', overflowY: 'auto'
                           }}>
-                            {filmSuggestions.dp.map((s, i) => (
-                              <div
-                                key={i}
-                                onMouseDown={e => {
-                                  e.preventDefault();
-                                  setFilmDraft(d => ({ ...d, dp: s.value }));
-                                  setFilmSuggestions(prev => ({ ...prev, dp: [] }));
-                                  setFilmFocused(null);
-                                }}
-                                style={{
-                                  padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
-                                  background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
-                                  color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
-                                }}
-                              >
-                                {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                            {filmSuggestions.dp.length > 0 ? (
+                              filmSuggestions.dp.map((s, i) => (
+                                <div
+                                  key={i}
+                                  onMouseDown={e => {
+                                    e.preventDefault();
+                                    setFilmDraft(d => ({ ...d, dp: s.value }));
+                                    setFilmSuggestions(prev => ({ ...prev, dp: [] }));
+                                    setFilmFocused(null);
+                                  }}
+                                  style={{
+                                    padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                                    background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                                    color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                                  }}
+                                >
+                                  {s.value} {s.count > 1 ? `(${s.count})` : ''}
+                                </div>
+                              ))
+                            ) : (
+                              <div style={{
+                                padding: '8px 10px', fontSize: '12px', color: onSurfaceFaint,
+                                textAlign: 'center', fontStyle: 'italic'
+                              }}>
+                                No cinematographers yet
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>
