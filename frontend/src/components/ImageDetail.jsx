@@ -827,9 +827,11 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             {filmSuggestions.title.map((s, i) => (
                               <div
                                 key={i}
-                                onClick={() => {
+                                onMouseDown={e => {
+                                  e.preventDefault();
                                   setFilmDraft(d => ({ ...d, title: s.value }));
                                   setFilmSuggestions(prev => ({ ...prev, title: [] }));
+                                  setFilmFocused(null);
                                 }}
                                 style={{
                                   padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
@@ -882,9 +884,11 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             {filmSuggestions.director.map((s, i) => (
                               <div
                                 key={i}
-                                onClick={() => {
+                                onMouseDown={e => {
+                                  e.preventDefault();
                                   setFilmDraft(d => ({ ...d, director: s.value }));
                                   setFilmSuggestions(prev => ({ ...prev, director: [] }));
+                                  setFilmFocused(null);
                                 }}
                                 style={{
                                   padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
@@ -925,9 +929,11 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                             {filmSuggestions.dp.map((s, i) => (
                               <div
                                 key={i}
-                                onClick={() => {
+                                onMouseDown={e => {
+                                  e.preventDefault();
                                   setFilmDraft(d => ({ ...d, dp: s.value }));
                                   setFilmSuggestions(prev => ({ ...prev, dp: [] }));
+                                  setFilmFocused(null);
                                 }}
                                 style={{
                                   padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
