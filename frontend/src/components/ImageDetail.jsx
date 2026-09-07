@@ -261,26 +261,27 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     setFilmError(null);
     try {
       const res = await fetch(`/api/images/${image.id}/filmography`, {
-        method: ‘POST’,
-        headers: { ‘Content-Type’: ‘application/json’ },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(draft)
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        throw new Error(data.error || ‘Couldn’t save the film info.’);
+        throw new Error(data.error || "Couldn't save the film info.");
       }
       setFilm(data.filmography);
       onUpdated?.(image.id, { filmography: data.filmography });
       setEditingFilm(false);
-      showToast(‘Film info saved.’, ‘success’);
+      showToast('Film info saved.', 'success');
       setTimeout(() => onClose?.(), 150); // Close inspector after success toast shows
     } catch (e) {
-      setFilmError(e.message || ‘Couldn’t save the film info — try again.’);
-      showToast(e.message || ‘Couldn’t save the film info — try again.’, ‘error’);
+      setFilmError(e.message || "Couldn't save the film info — try again.");
+      showToast(e.message || "Couldn't save the film info — try again.", 'error');
     }
   };
 
   const clearFilm = () => saveFilm({ title: '', director: '', dp: '', year: '' });
+
 
   // Filmography autocomplete — fetch suggestions as user types
   const fetchFilmSuggestions = async (field, value) => {
