@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useFilmAutocomplete } from '../hooks/useFilmAutocomplete';
 import { useToast } from '../ToastContext';
 import CompositionOverlay, { OVERLAY_MODES, OVERLAY_LABELS, OVERLAY_ROTATABLE } from './CompositionOverlay';
 import { fetchDecks, addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
@@ -47,27 +48,16 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
 
   const [film, setFilm] = useState(image?.filmography || null);
   const [editingFilm, setEditingFilm] = useState(false);
-  const [filmDraft, setFilmDraft] = useState({ title: '', director: '', dp: '', year: '', painter: '', photographer: '' });
-  // V81: which pair of creator fields the editor shows — Director/DP for a
-  // film still, a single Painter box for a painting, a single Photographer
-  // box for a photograph. Not stored in the database; inferred fresh each
-  // time editing starts from whichever fields already have values (see
+  // V81: draft values + Obsidian-style autocomplete (type, arrow keys,
+  // Enter), shared with TagModeBar.jsx's bulk panel via one hook so the two
+  // can't drift — see useFilmAutocomplete.js.
+  const filmAC = useFilmAutocomplete();
+  // Which pair of creator fields the editor shows — Director/DP for a film
+  // still, a single Painter box for a painting, a single Photographer box
+  // for a photograph. Not stored in the database; inferred fresh each time
+  // editing starts from whichever fields already have values (see
   // startEditFilm), so a photo never "forgets" which kind it is.
   const [mediaType, setMediaType] = useState('film'); // 'film' | 'painting' | 'photo'
-
-  // Filmography autocomplete state — one suggestion list per field
-  const [filmSuggestions, setFilmSuggestions] = useState({ title: [], director: [], dp: [], painter: [], photographer: [] });
-  const [filmFocused, setFilmFocused] = useState(null); // 'title', 'director', 'dp', 'painter', 'photographer', or null
-  const [filmHighlight, setFilmHighlight] = useState(-1); // index in current field's suggestions
-  // Tracks "user just picked a suggestion, don't reopen the dropdown until they
-  // type again" — separate from filmSuggestions so a picked value with 0 fresh
-  // matches doesn't fall through to the "No X yet" placeholder looking stuck.
-  const [filmDismissed, setFilmDismissed] = useState({ title: false, director: false, dp: false, painter: false, photographer: false });
-  // Per-field request counter — typing fast fires overlapping fetches, and
-  // network timing can land an older (e.g. "R") response after a newer one
-  // ("Ry"), silently blanking out correct suggestions. Only the response
-  // whose id still matches the latest fired request for that field gets applied.
-  const filmRequestIdRef = useRef({ title: 0, director: 0, dp: 0, painter: 0, photographer: 0 });
 
   // V39: DP technical notes — camera/rig, lens, lens filter, stop, freeform
   // on-set notes. Collapsed by default (Ryan's call — most photos won't have
@@ -265,7 +255,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
   };
 
   const startEditFilm = () => {
-    setFilmDraft({
+    filmAC.resetDraft({
       title: film?.title || '', director: film?.director || '',
       dp: film?.dp || '', year: film?.year || '',
       painter: film?.painter || '', photographer: film?.photographer || ''
@@ -277,7 +267,6 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     // this app's most common case.
     setMediaType(film?.painter ? 'painting' : film?.photographer ? 'photo' : 'film');
     setEditingFilm(true);
-    setFilmDismissed({ title: false, director: false, dp: false, painter: false, photographer: false });
   };
 
   const saveFilm = async (draft) => {
@@ -324,7 +313,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (editingFilm) {
-          saveFilm(filmDraft);
+          saveFilm(filmAC.draft);
         } else {
           setEditingTags(false);
           showToast('Tags saved.', 'success');
@@ -334,74 +323,23 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [editingFilm, editingTags, filmDraft]);
-
-  // Filmography autocomplete — fetch suggestions as user types
-  const fetchFilmSuggestions = async (field, value) => {
-    setFilmDismissed(prev => ({ ...prev, [field]: false })); // typing reopens the dropdown
-    const requestId = ++filmRequestIdRef.current[field];
-    if (!value || value.length < 1) {
-      setFilmSuggestions(prev => ({ ...prev, [field]: [] }));
-      setFilmHighlight(-1);
-      return;
-    }
-    try {
-      const res = await fetch(`/api/filmography/autocomplete?field=${field}&q=${encodeURIComponent(value)}`);
-      const suggestions = await res.json();
-      // Typing fast fires one request per keystroke; a slower earlier request
-      // (e.g. for "R") can resolve AFTER a faster later one (e.g. "Ry") and
-      // clobber correct results with stale ones. Drop anything but the
-      // latest-fired request for this field.
-      if (filmRequestIdRef.current[field] !== requestId) return;
-      setFilmSuggestions(prev => ({ ...prev, [field]: suggestions }));
-      setFilmHighlight(-1); // reset highlight when suggestions change
-    } catch (err) {
-      console.error('Filmography autocomplete failed:', err);
-    }
-  };
-
-  // Selecting a suggestion (click or Enter) — fills the field and dismisses
-  // the dropdown until the user types again, instead of leaving it open to
-  // fall through to a confusing "No X yet" placeholder.
-  const pickFilmSuggestion = (field, value) => {
-    setFilmDraft(prev => ({ ...prev, [field]: value }));
-    setFilmDismissed(prev => ({ ...prev, [field]: true }));
-    setFilmHighlight(-1);
-  };
-
-  // Handle filmography field keyboard navigation (arrow keys + Enter)
-  const handleFilmKeyDown = (e, field) => {
-    const current = filmSuggestions[field] || [];
-    if (!current.length || filmDismissed[field]) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setFilmHighlight(prev => (prev + 1) % current.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setFilmHighlight(prev => (prev - 1 + current.length) % current.length);
-    } else if (e.key === 'Enter' && filmHighlight >= 0 && filmHighlight < current.length) {
-      e.preventDefault();
-      pickFilmSuggestion(field, current[filmHighlight].value);
-      e.target.blur(); // Picking a suggestion finishes this field — don't leave the cursor sitting in it
-    }
-  };
+  }, [editingFilm, editingTags, filmAC.draft]);
 
   // One autocomplete-enabled filmography input (title/director/dp/painter/
   // photographer all share this exact behavior) — pulled into one function
   // instead of five copies of the same ~50-line block, so the arrow-key nav,
-  // dismiss-on-pick and race-condition guard only exist in one place.
+  // dismiss-on-pick and race-condition guard only exist in one place. The
+  // actual state/logic lives in useFilmAutocomplete (filmAC), shared with
+  // TagModeBar.jsx's bulk panel — this function is just ImageDetail's own
+  // styling wrapper around it.
   const renderFilmField = (field, placeholder, emptyLabel) => (
     <div style={{ position: 'relative' }}>
       <input
-        value={filmDraft[field]}
-        onChange={e => {
-          setFilmDraft(d => ({ ...d, [field]: e.target.value }));
-          fetchFilmSuggestions(field, e.target.value);
-        }}
-        onKeyDown={e => handleFilmKeyDown(e, field)}
-        onFocus={() => setFilmFocused(field)}
-        onBlur={() => setTimeout(() => setFilmFocused(null), 100)}
+        value={filmAC.draft[field]}
+        onChange={e => filmAC.onFieldChange(field, e.target.value)}
+        onKeyDown={e => filmAC.handleKeyDown(e, field)}
+        onFocus={() => filmAC.setFocused(field)}
+        onBlur={() => setTimeout(() => filmAC.setFocused(null), 100)}
         placeholder={placeholder}
         style={{
           width: '100%', background: surfaceContainerDark, color: onSurfaceWarm,
@@ -409,30 +347,44 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
           padding: '7px 10px', fontSize: '12px', fontFamily: 'inherit', outline: 'none'
         }}
       />
-      {filmFocused === field && filmDraft[field].length > 0 && !filmDismissed[field] && (
+      {filmAC.focused === field && filmAC.draft[field].length > 0 && !filmAC.dismissed[field] && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
           background: surfaceContainerDark, border: `1px solid ${withAlpha(white,0.12)}`,
           borderTop: 'none', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px',
           maxHeight: '150px', overflowY: 'auto'
         }}>
-          {filmSuggestions[field].length > 0 ? (
-            filmSuggestions[field].map((s, i) => (
-              <div
-                key={i}
-                onMouseDown={e => {
-                  e.preventDefault();
-                  pickFilmSuggestion(field, s.value);
-                }}
-                style={{
-                  padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
-                  background: i === filmHighlight ? withAlpha(primaryDim,0.2) : 'transparent',
-                  color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
-                }}
-              >
-                {s.value} {s.count > 1 ? `(${s.count})` : ''}
-              </div>
-            ))
+          {filmAC.suggestions[field].length > 0 ? (
+            filmAC.suggestions[field].map((s, i) => {
+              // Title suggestions carry their previously-recorded credits —
+              // show what picking this one will also fill in, so it's not
+              // a surprise. "if the data for that movie already exists...
+              // those fields would autopopulate."
+              const carried = field === 'title'
+                ? [s.director, s.year].filter(Boolean).join(' · ')
+                : null;
+              return (
+                <div
+                  key={i}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    filmAC.pickSuggestion(field, s);
+                  }}
+                  style={{
+                    padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                    background: i === filmAC.highlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                    color: onSurfaceWarm, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                  }}
+                >
+                  <div>{s.value} {s.count > 1 ? `(${s.count})` : ''}</div>
+                  {carried && (
+                    <div style={{ fontSize: '10.5px', color: onSurfaceFaint, marginTop: '1px' }}>
+                      {carried}
+                    </div>
+                  )}
+                </div>
+              );
+            })
           ) : (
             <div style={{
               padding: '8px 10px', fontSize: '12px', color: onSurfaceFaint,
@@ -986,8 +938,8 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     }}>
                       {renderFilmField('title', mediaType === 'film' ? 'Film title' : 'Title', 'No titles yet')}
                       <input
-                        value={filmDraft.year}
-                        onChange={e => setFilmDraft(d => ({ ...d, year: e.target.value }))}
+                        value={filmAC.draft.year}
+                        onChange={e => filmAC.setField('year', e.target.value)}
                         placeholder="Year"
                         style={{
                           background: surfaceContainerDark, color: onSurfaceWarm,
@@ -1015,7 +967,7 @@ export default function ImageDetail({ image, onClose, onUpdated, onDeleted, onSe
                     )}
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                       <button
-                        onClick={() => saveFilm(filmDraft)}
+                        onClick={() => saveFilm(filmAC.draft)}
                         style={{
                           background: withAlpha(primaryDim,0.12),
                           border: `1px solid ${withAlpha(primaryDim,0.35)}`,

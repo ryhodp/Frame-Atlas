@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SIDEBAR_WIDTH } from './Sidebar';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useFilmAutocomplete } from '../hooks/useFilmAutocomplete';
 import { accentViolet, accentVioletLight, black, error, onPrimary, onSurface, onSurfaceFaint, onSurfaceMuted, onSurfaceVariant, onSurfaceWarm, outline, outlineVariant, primary, primaryDim, surfaceBright, surfaceContainerHigh, surfaceContainerLow, surfaceContainerLowestAlt, tertiary, warning, white, withAlpha } from '../theme';
 import { useToast } from '../ToastContext';
 import { addImagesToDeck, createDeckWithImages, describeAddResult } from '../deckAdd';
@@ -100,11 +101,21 @@ export default function TagModeBar({
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // Set-filmography panel state
-  const [filmTitle, setFilmTitle] = useState('');
-  const [filmDirector, setFilmDirector] = useState('');
-  const [filmDp, setFilmDp] = useState('');
-  const [filmYear, setFilmYear] = useState('');
+  // Set-filmography panel state — draft values + Obsidian-style autocomplete
+  // (type, arrow keys, Enter), shared with ImageDetail.jsx's single-photo
+  // editor via one hook so the two can't drift. Reported gap that led to
+  // this: these boxes used to be plain text inputs with no autocomplete at
+  // all, while ImageDetail's had it — "we have to make sure it's consistent
+  // across the board."
+  const filmAC = useFilmAutocomplete();
+  // Guards against a real race: selecting a photo re-fetches the shared
+  // consensus on a 200ms debounce PLUS a network round trip, so typing/
+  // pasting into one of these boxes right after finishing a selection could
+  // have that background refresh land a moment later and silently wipe out
+  // what was just typed — the button would look enabled, then go dim right
+  // as it was clicked, with no visible error. filmAC.touchedRef (a ref, not
+  // state, for the same reason described in useFilmAutocomplete.js) is
+  // checked before autofilling from the consensus fetch below.
 
   // Add-to-Deck panel state
   const [decks, setDecks] = useState([]);
@@ -167,11 +178,18 @@ export default function TagModeBar({
         // image already agrees on it — lets you glance at "Spike Jonze"
         // already sitting in Director and know the whole batch matches,
         // without having to retype it just to touch the DP field.
+        //
+        // Skipped entirely once the user has touched any field this round —
+        // this fetch can resolve well after the debounce timer fired (a real
+        // network round trip), and unconditionally overwriting here could
+        // silently wipe out a value the user already typed or pasted in the
+        // meantime, disabling "Set on N" with zero visible explanation.
+        if (filmAC.touchedRef.current) return;
         const cf = data.common_filmography || {};
-        setFilmTitle(cf.title || '');
-        setFilmDirector(cf.director || '');
-        setFilmDp(cf.dp || '');
-        setFilmYear(cf.year || '');
+        filmAC.setDraft({
+          title: cf.title || '', director: cf.director || '', dp: cf.dp || '',
+          year: cf.year || '', painter: cf.painter || '', photographer: cf.photographer || '',
+        });
       })
       .catch(() => {});
 
@@ -186,6 +204,9 @@ export default function TagModeBar({
   };
 
   useEffect(() => {
+    // A genuinely new/changed selection always deserves a fresh autofill —
+    // only typing done AFTER this point should be protected.
+    filmAC.touchedRef.current = false;
     clearTimeout(summaryDebounce.current);
     summaryDebounce.current = setTimeout(refetchSelectionData, 200);
     return () => clearTimeout(summaryDebounce.current);
@@ -393,16 +414,76 @@ export default function TagModeBar({
     });
   })();
 
+  // One autocomplete-enabled filmography input — same behavior as
+  // ImageDetail.jsx's own render helper (arrow-key nav, dismiss-on-pick,
+  // race-condition guard, title-picks-carry-siblings), styled to match this
+  // panel's own theme tokens instead of duplicating the logic a second time.
+  const renderFilmField = (field, placeholder, emptyLabel, style) => (
+    <div style={{ position: 'relative', ...style }}>
+      <input
+        value={filmAC.draft[field]}
+        onChange={e => filmAC.onFieldChange(field, e.target.value)}
+        onKeyDown={e => filmAC.handleKeyDown(e, field)}
+        onFocus={() => filmAC.setFocused(field)}
+        onBlur={() => setTimeout(() => filmAC.setFocused(null), 100)}
+        placeholder={placeholder}
+        style={inputStyle()}
+      />
+      {filmAC.focused === field && filmAC.draft[field].length > 0 && !filmAC.dismissed[field] && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+          background: surfaceContainerLowestAlt, border: `1px solid ${outlineVariant}`,
+          borderTop: 'none', borderBottomLeftRadius: '8px', borderBottomRightRadius: '8px',
+          maxHeight: '150px', overflowY: 'auto'
+        }}>
+          {filmAC.suggestions[field].length > 0 ? (
+            filmAC.suggestions[field].map((s, i) => {
+              const carried = field === 'title'
+                ? [s.director, s.year].filter(Boolean).join(' · ')
+                : null;
+              return (
+                <div
+                  key={i}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    filmAC.pickSuggestion(field, s);
+                  }}
+                  style={{
+                    padding: '6px 10px', fontSize: '12px', cursor: 'pointer',
+                    background: i === filmAC.highlight ? withAlpha(primaryDim,0.2) : 'transparent',
+                    color: onSurface, borderBottom: `1px solid ${withAlpha(white,0.06)}`
+                  }}
+                >
+                  <div>{s.value} {s.count > 1 ? `(${s.count})` : ''}</div>
+                  {carried && (
+                    <div style={{ fontSize: '10.5px', color: outline, marginTop: '1px' }}>
+                      {carried}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <div style={{ padding: '8px 10px', fontSize: '12px', color: outline, textAlign: 'center', fontStyle: 'italic' }}>
+              {emptyLabel}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   // ── Set / clear filmography flow ───────────────────────────────────────────
-  const canSetFilm = filmTitle.trim() || filmDirector.trim() || filmDp.trim() || filmYear.trim();
+  const canSetFilm = Object.values(filmAC.draft).some(v => v.trim());
 
   const openFilmSetConfirm = () => {
     if (!canSetFilm) return;
     // Only the fields that actually have something in them get applied —
     // blank fields (whether never touched or left un-autofilled) mean
     // "leave this field as each image already has it," not "clear it."
-    const fields = { title: filmTitle.trim(), director: filmDirector.trim(), dp: filmDp.trim(), year: filmYear.trim() };
-    const touched = Object.fromEntries(Object.entries(fields).filter(([, v]) => v));
+    const touched = Object.fromEntries(
+      Object.entries(filmAC.draft).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v)
+    );
     setConfirm({ kind: 'filmography-set', touched });
   };
 
@@ -443,7 +524,7 @@ export default function TagModeBar({
         onBulkChanged?.(ids, (img) => {
           if (!ids.includes(img.id)) return img;
           const merged = { ...(img.filmography || {}), ...confirm.touched };
-          const hasAny = merged.title || merged.director || merged.dp || merged.year;
+          const hasAny = merged.title || merged.director || merged.dp || merged.year || merged.painter || merged.photographer;
           return { ...img, filmography: hasAny ? merged : null };
         });
       } else if (confirm.kind === 'filmography-clear') {
@@ -649,31 +730,24 @@ export default function TagModeBar({
             <div style={{ }} data-tagmode-area>
               <div style={sectionLabel()}>FILMOGRAPHY</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <input
-                  value={filmTitle}
-                  onChange={e => setFilmTitle(e.target.value)}
-                  placeholder="Title"
-                  style={inputStyle()}
-                />
+                {renderFilmField('title', 'Title', 'No titles yet')}
                 <div style={{ display: 'flex', gap: '6px' }}>
+                  {renderFilmField('director', 'Director', 'No directors yet', { flex: 1 })}
+                  {renderFilmField('dp', 'DP', 'No cinematographers yet', { flex: 1 })}
                   <input
-                    value={filmDirector}
-                    onChange={e => setFilmDirector(e.target.value)}
-                    placeholder="Director"
-                    style={inputStyle()}
-                  />
-                  <input
-                    value={filmDp}
-                    onChange={e => setFilmDp(e.target.value)}
-                    placeholder="DP"
-                    style={inputStyle()}
-                  />
-                  <input
-                    value={filmYear}
-                    onChange={e => setFilmYear(e.target.value)}
+                    value={filmAC.draft.year}
+                    onChange={e => { filmAC.touchedRef.current = true; filmAC.setField('year', e.target.value); }}
                     placeholder="Year"
                     style={{ ...inputStyle(), flex: '0 0 70px' }}
                   />
+                </div>
+                {/* V81: paintings/photographs don't have a Director/DP — these
+                    two are separate credits, left blank (and so left alone
+                    by the backend's per-field merge) on anything that's
+                    actually a film still. */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {renderFilmField('painter', 'Painter', 'No painters yet', { flex: 1 })}
+                  {renderFilmField('photographer', 'Photographer', 'No photographers yet', { flex: 1 })}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
@@ -935,7 +1009,7 @@ export default function TagModeBar({
   );
 }
 
-const FILM_FIELD_LABELS = { title: 'title', director: 'director', dp: 'DP', year: 'year' };
+const FILM_FIELD_LABELS = { title: 'title', director: 'director', dp: 'DP', year: 'year', painter: 'painter', photographer: 'photographer' };
 
 function filmFieldSummary(touched) {
   const parts = Object.entries(touched).map(([field, value]) => `${FILM_FIELD_LABELS[field]} "${value}"`);

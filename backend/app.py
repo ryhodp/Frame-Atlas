@@ -2638,7 +2638,18 @@ def filmography_autocomplete():
     A value that STARTS with what was typed still ranks above one that merely
     contains it, so an exact-prefix match like "Yi" -> "Yi Yi" doesn't get
     buried under unrelated contains-matches; frequency breaks ties within
-    each of those two groups."""
+    each of those two groups.
+
+    Title suggestions carry their other credits along for the ride: if
+    "Tokyo Story" already has director=Yasujiro Ozu / year=1953 recorded
+    somewhere, picking that suggestion elsewhere should offer to fill those
+    in too, not just complete the word. Director/DP/painter/photographer
+    suggestions don't get this treatment the other way — a director made
+    many films, so there's no single title/year to sensibly offer back.
+    MAX() picks one consistent combination per title if photos ever
+    disagree (e.g. a typo fixed on one but not another yet); it doesn't
+    matter which survives since the point is a starting point to edit from,
+    not a promise of authority."""
     field = request.args.get('field', '').strip()  # 'title', 'director', 'dp', 'painter', or 'photographer'
     q = request.args.get('q', '').strip().lower()
 
@@ -2648,6 +2659,25 @@ def filmography_autocomplete():
     uid = session['user_id']
     conn = get_db()
     c = conn.cursor()
+
+    if field == 'title':
+        rows = c.execute('''
+            SELECT title as value, COUNT(DISTINCT f.image_id) as cnt,
+                   CASE WHEN LOWER(title) LIKE ? THEN 0 ELSE 1 END as prefix_rank,
+                   MAX(director) as director, MAX(dp) as dp, MAX(year) as year,
+                   MAX(painter) as painter, MAX(photographer) as photographer
+            FROM filmography f JOIN images i ON i.id = f.image_id
+            WHERE i.user_id = ? AND f.title IS NOT NULL AND LOWER(f.title) LIKE ?
+            GROUP BY f.title
+            ORDER BY prefix_rank ASC, cnt DESC
+            LIMIT 20
+        ''', (f'{q}%', uid, f'%{q}%')).fetchall()
+        conn.close()
+        return jsonify([{
+            'value': r['value'], 'count': r['cnt'],
+            'director': r['director'], 'dp': r['dp'], 'year': r['year'],
+            'painter': r['painter'], 'photographer': r['photographer'],
+        } for r in rows])
 
     rows = c.execute(f'''
         SELECT {field} as value, COUNT(DISTINCT f.image_id) as cnt,
