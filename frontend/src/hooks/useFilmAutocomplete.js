@@ -39,8 +39,29 @@ export function useFilmAutocomplete(initialDraft = EMPTY_FILM_DRAFT) {
   // old value. Exists so a background refresh can never silently overwrite
   // something the user already typed or picked.
   const touchedRef = useRef(false);
+  // Which title string most recently triggered the exact-match autofill
+  // below — guards against re-clobbering a Director/DP/Year the user
+  // deliberately edited AFTER the autofill fired. Without this, retyping
+  // (or even just blurring/refocusing) a title that still resolves to the
+  // same exact match would re-fire the fill and overwrite a correction the
+  // user just made on purpose (e.g. "this print's DP was actually
+  // different"). Only a genuinely NEW exact match re-triggers it.
+  const lastAutoFilledTitleRef = useRef(null);
 
   const setField = (field, value) => setDraft(prev => ({ ...prev, [field]: value }));
+
+  // Shared by pickSuggestion (explicit click/Enter) and the exact-match
+  // autofill below (typed the full correct title, no dropdown interaction
+  // needed) — only overwrites a sibling the record actually has a value
+  // for, so a title with no recorded DP never blanks out one already
+  // typed in by hand.
+  const applyTitleSiblings = (prevDraft, source) => {
+    const next = { ...prevDraft };
+    for (const sibling of ['director', 'dp', 'year', 'painter', 'photographer']) {
+      if (source[sibling]) next[sibling] = source[sibling];
+    }
+    return next;
+  };
 
   const fetchSuggestions = async (field, value) => {
     setDismissed(prev => ({ ...prev, [field]: false })); // typing reopens the dropdown
@@ -56,6 +77,22 @@ export function useFilmAutocomplete(initialDraft = EMPTY_FILM_DRAFT) {
       if (requestIdRef.current[field] !== requestId) return; // a newer request superseded this one
       setSuggestions(prev => ({ ...prev, [field]: data }));
       setHighlight(-1);
+
+      // Title autofill without ever touching the dropdown: correcting a
+      // Gemini mislabel by typing the real title out in full (rather than
+      // picking it from the list) should still pull in that title's
+      // already-recorded Director/DP/Year — "I change the title, I also
+      // want it to change the director, DP and year... to correct
+      // Gemini's work." Fires once per newly-typed exact match, not on
+      // every keystroke of an already-matched title.
+      if (field === 'title') {
+        const typed = value.trim().toLowerCase();
+        const exact = data.find(s => s.value.toLowerCase() === typed);
+        if (exact && lastAutoFilledTitleRef.current !== typed) {
+          lastAutoFilledTitleRef.current = typed;
+          setDraft(prev => applyTitleSiblings(prev, exact));
+        }
+      }
     } catch (err) {
       console.error('Filmography autocomplete failed:', err);
     }
@@ -78,14 +115,10 @@ export function useFilmAutocomplete(initialDraft = EMPTY_FILM_DRAFT) {
   // in by hand.
   const pickSuggestion = (field, suggestion) => {
     touchedRef.current = true;
+    if (field === 'title') lastAutoFilledTitleRef.current = suggestion.value.trim().toLowerCase();
     setDraft(prev => {
-      const next = { ...prev, [field]: suggestion.value };
-      if (field === 'title') {
-        for (const sibling of ['director', 'dp', 'year', 'painter', 'photographer']) {
-          if (suggestion[sibling]) next[sibling] = suggestion[sibling];
-        }
-      }
-      return next;
+      const withValue = { ...prev, [field]: suggestion.value };
+      return field === 'title' ? applyTitleSiblings(withValue, suggestion) : withValue;
     });
     setDismissed(prev => ({ ...prev, [field]: true }));
     setHighlight(-1);
@@ -121,6 +154,7 @@ export function useFilmAutocomplete(initialDraft = EMPTY_FILM_DRAFT) {
     setHighlight(-1);
     setFocused(null);
     touchedRef.current = false;
+    lastAutoFilledTitleRef.current = null;
   };
 
   return {
