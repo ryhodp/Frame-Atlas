@@ -63,6 +63,7 @@ def main():
     print("--- core.py / schema.py split ---")
     import core
     import schema
+    import routes_auth  # Day 36: login/register/etc. moved here as a Blueprint
     check("core.get_db and app.get_db are the same object", mod.get_db is core.get_db)
     check("core.db_path resolves the active FA_DB_PATH", core.db_path() == db_path)
     check("app.DB_PATH is still readable and correct", mod.DB_PATH == db_path)
@@ -86,29 +87,32 @@ def main():
     check("SESSION_COOKIE_SAMESITE unchanged (Lax)", mod.app.config["SESSION_COOKIE_SAMESITE"] == "Lax")
     check("SESSION_COOKIE_SECURE is False while local (FA_DB_PATH set)",
           mod.app.config["SESSION_COOKIE_SECURE"] is False)
-    check("RUNNING_LOCALLY is True in this harness", mod.RUNNING_LOCALLY is True)
+    # Day 36: RUNNING_LOCALLY moved to core.py (every route blueprint needs
+    # the same signal), and _rate_limited/_client_ip/RATE_LIMIT_MAX moved to
+    # routes_auth.py (used only by the routes that live there now).
+    check("RUNNING_LOCALLY is True in this harness", core.RUNNING_LOCALLY is True)
 
     # ---- 2b. rate limiting ----------------------------------------------
     print("\n--- rate limiting on public auth endpoints ---")
     client = mod.app.test_client()
     # local => disabled: hammering register never yields a 429
     codes = []
-    for i in range(mod.RATE_LIMIT_MAX + 4):
+    for i in range(routes_auth.RATE_LIMIT_MAX + 4):
         r = client.post("/api/auth/register", json={
             "invite_code": "bogus", "username": f"u{i}", "email": f"u{i}@x.com", "password": "password1"})
         codes.append(r.status_code)
     check("rate limiting is OFF locally (no 429s)", 429 not in codes)
 
     # flip to production behaviour and exercise the real table
-    mod.RUNNING_LOCALLY = False
+    core.RUNNING_LOCALLY = False
     with mod.app.test_request_context("/", headers={"X-Forwarded-For": "203.0.113.7, 10.0.0.1"}):
-        seq = [mod._rate_limited("probe") for _ in range(mod.RATE_LIMIT_MAX + 2)]
-        check("first RATE_LIMIT_MAX hits pass", seq[:mod.RATE_LIMIT_MAX] == [False] * mod.RATE_LIMIT_MAX)
-        check("the next hits are blocked", seq[mod.RATE_LIMIT_MAX] is True and seq[-1] is True)
-        check("a different scope is counted separately", mod._rate_limited("other") is False)
-        check("_client_ip trusts the LAST X-Forwarded-For entry", mod._client_ip() == "10.0.0.1")
+        seq = [routes_auth._rate_limited("probe") for _ in range(routes_auth.RATE_LIMIT_MAX + 2)]
+        check("first RATE_LIMIT_MAX hits pass", seq[:routes_auth.RATE_LIMIT_MAX] == [False] * routes_auth.RATE_LIMIT_MAX)
+        check("the next hits are blocked", seq[routes_auth.RATE_LIMIT_MAX] is True and seq[-1] is True)
+        check("a different scope is counted separately", routes_auth._rate_limited("other") is False)
+        check("_client_ip trusts the LAST X-Forwarded-For entry", routes_auth._client_ip() == "10.0.0.1")
     with mod.app.test_request_context("/", headers={"X-Forwarded-For": "203.0.113.7, 10.0.0.2"}):
-        check("a different client IP has its own budget", mod._rate_limited("probe") is False)
+        check("a different client IP has its own budget", routes_auth._rate_limited("probe") is False)
 
     # endpoint returns 429 once over the limit
     prod_client = mod.app.test_client()
@@ -118,23 +122,25 @@ def main():
                                   json={"invite_code": "bogus", "username": f"n{i}",
                                         "email": f"n{i}@x.com", "password": "password1"},
                                   headers=with_headers).status_code
-                 for i in range(mod.RATE_LIMIT_MAX + 3)]
+                 for i in range(routes_auth.RATE_LIMIT_MAX + 3)]
     check("register 400s early, 429s once abused", reg_codes[0] == 400 and reg_codes[-1] == 429)
     fp_codes = [prod_client.post("/api/auth/forgot-password", json={"email": "no@x.com"},
                                  headers=with_headers).status_code
-                for i in range(mod.RATE_LIMIT_MAX + 3)]
+                for i in range(routes_auth.RATE_LIMIT_MAX + 3)]
     check("forgot-password 429s once abused", 429 in fp_codes)
 
-    # fails open if the table is unusable
-    mod._orig_get_db = mod.get_db
+    # fails open if the table is unusable — _rate_limited's get_db is patched
+    # on routes_auth (where it now lives), not mod/app.py; app.py's own
+    # get_db is untouched by this.
+    orig_get_db = routes_auth.get_db
     def boom():
         raise RuntimeError("db exploded")
-    mod.get_db = boom
+    routes_auth.get_db = boom
     try:
         with mod.app.test_request_context("/", headers={"X-Forwarded-For": "192.0.2.1"}):
-            check("_rate_limited fails OPEN on a DB error", mod._rate_limited("probe") is False)
+            check("_rate_limited fails OPEN on a DB error", routes_auth._rate_limited("probe") is False)
     finally:
-        mod.get_db = mod._orig_get_db
+        routes_auth.get_db = orig_get_db
 
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)

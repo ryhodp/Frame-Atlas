@@ -71,6 +71,7 @@ def main():
 
     workdir = tempfile.mkdtemp(prefix="frame_atlas_security_test_")
     mod, db_path = boot_app(workdir, encryption_key=enc_key)
+    import routes_auth  # Day 36: login lockout constants/helpers live here now
     print("App imported OK.\n")
 
     conn = sqlite3.connect(db_path)
@@ -96,16 +97,16 @@ def main():
     check("failed_login_count incremented to 1", count == 1, f"got {count}")
 
     # ── 2. Below the threshold, no lock ─────────────────────────────────────
-    for _ in range(mod.LOGIN_LOCK_THRESHOLD - 2):
+    for _ in range(routes_auth.LOGIN_LOCK_THRESHOLD - 2):
         fresh.post('/api/auth/login', json={'username': 'ryan', 'password': 'wrong'})
     row = c.execute("SELECT failed_login_count, login_locked_until FROM users WHERE id = 1").fetchone()
-    check(f"after {mod.LOGIN_LOCK_THRESHOLD - 1} failures still not locked",
+    check(f"after {routes_auth.LOGIN_LOCK_THRESHOLD - 1} failures still not locked",
           row["login_locked_until"] is None, f"locked_until={row['login_locked_until']}")
 
     # ── 3. Crossing the threshold locks the account with a 429 ──────────────
     r = fresh.post('/api/auth/login', json={'username': 'ryan', 'password': 'wrong'})
     row = c.execute("SELECT failed_login_count, login_locked_until FROM users WHERE id = 1").fetchone()
-    check(f"{mod.LOGIN_LOCK_THRESHOLD}th failure sets a lockout",
+    check(f"{routes_auth.LOGIN_LOCK_THRESHOLD}th failure sets a lockout",
           row["login_locked_until"] is not None)
     r = fresh.post('/api/auth/login', json={'username': 'ryan', 'password': 'wrong'})
     check("a locked account returns 429, not 401", r.status_code == 429, r.get_json())
@@ -141,13 +142,13 @@ def main():
     until = c.execute("SELECT login_locked_until FROM users WHERE id = 1").fetchone()[0]
     wait = (datetime.fromisoformat(until) - datetime.now()).total_seconds()
     check("lockout is capped (an account is never bricked outright)",
-          wait <= mod.LOGIN_LOCK_MAX_SECONDS + 5, f"{wait}s")
+          wait <= routes_auth.LOGIN_LOCK_MAX_SECONDS + 5, f"{wait}s")
 
     # ── 7. A corrupted lock timestamp must not brick the account ────────────
     c.execute("UPDATE users SET login_locked_until = 'not-a-timestamp' WHERE id = 1")
     conn.commit()
     check("an unparseable lock timestamp reads as NOT locked",
-          mod._login_lock_remaining('not-a-timestamp') == 0)
+          routes_auth._login_lock_remaining('not-a-timestamp') == 0)
 
     # ── 8. A successful login clears the throttle ───────────────────────────
     c.execute("UPDATE users SET login_locked_until = NULL, failed_login_count = 3 WHERE id = 1")
