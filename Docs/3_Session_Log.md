@@ -3899,3 +3899,40 @@ Day 37 — `routes_search.py`: `/api/search`, `/api/search/ids`, `/api/autocompl
 ### Starting point for next session
 Day 38 — `routes_tags.py`: `/api/tags/*` bulk endpoints + removal preview, `/api/tag-categories`,
 `edit_tags`, `count_tags_for_images`, `_parse_bulk_tag_request`.
+
+---
+
+## Day 38 — Tag routes + auto-tagger controls → `routes_tags.py` (Frame Atlas V85 complete)
+*Completed: September 24, 2026*
+*Status: DAY 38 COMPLETE — marked complete by Ryan. Railway deploy `20516093`, commit `fa72856`,
+SUCCESS; boot logs clean, schema + self-test OK.*
+
+### What was built
+- `Blueprint('tags')` in `backend/routes_tags.py` (513 lines), all 16 blocks verbatim against `HEAD`:
+  tag editing (`/api/images/<id>/tags`, `/api/tags/bulk-apply`, `bulk-remove`, `removal-preview`,
+  `selection-summary`, `suggestions`, `/api/tag-categories`) and the auto-tagger controls that no
+  day had been assigned (`/api/tag/start`, `retry-failed`, `mine`, `/api/tag-progress`, its SSE
+  `/stream`, `/mine`).
+- `_scope_ids_to_user()` → `core.py` (Day 39's bulk filmography routes share it).
+- Dead imports left `app.py` (`json`, `queue`, `Response`, `stream_with_context`, `search_filters`).
+- `app.py` 3,734 → 3,265 lines.
+
+### Decisions (Ryan: A, A, A)
+1. `_scope_ids_to_user` in `core.py`. 2. Auto-tagger controls in the same blueprint.
+3. Thorough verification.
+
+### Verification
+- Suite 44 Python + 3 `.mjs` green before and after; zero test changes.
+- Live-server check, pre-change vs new backend: 100/100, every write cross-checked in the DB, friend
+  scoping confirmed in the DB, SSE stream open/relay/close/cleanup. All 61 responses identical.
+- Harness lesson: PIL fixture JPEGs weren't byte-stable across runs (old code differed from
+  itself); the check now compares thumbnails to the stored DB blob instead.
+
+### Found, not fixed (by design — a move commit must not change behaviour)
+- `/api/tags/suggestions` candidate query has no owner filter: suggestions draw on every library.
+  Reproduced with a friend account. Ryan chose to fix it as Day 39 (below the route plan shifts by
+  one day).
+
+### Starting point for next session
+Day 39 — fix the cross-library suggestions leak (and audit for the same bug class). The original
+Day 39 (`routes_images.py`) moves to Day 40, and every later blueprint day shifts by one.
