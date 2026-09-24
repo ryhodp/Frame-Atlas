@@ -6,7 +6,7 @@ Before this the tag loop lived in app.py and was only ever *disabled* by tests
 (8 scripts set trigger_tagging to a no-op). This gives the module direct
 coverage with a fake Gemini client:
   - split wiring: app.py exposes `tagging`; the moved names are NOT bare globals
-    on app.py; genai_client stays on app.py (interpret/models still use it)
+    on app.py; genai_client stays on app.py (/api/models still uses it)
   - GEMINI_TAGGING_PROMPT still carries all 16 tag categories + "Return ONLY the JSON"
   - _select_pending_for_tagging: pending-before-failed ordering, 'done' excluded,
     keyless owner -> rows returned but images empty
@@ -115,8 +115,10 @@ def main():
         check(f"tagging.{name} exists", hasattr(tagging, name))
     leaked = [n for n in moved if n in vars(mod)]
     check("no moved name left as a bare global on app.py", leaked == [], leaked)
-    check("genai_client stays imported on app.py (interpret/models use it)", hasattr(mod, "genai_client"))
-    check("NL_INTERPRET_PROMPT stays on app.py (search, not tagging)", hasattr(mod, "NL_INTERPRET_PROMPT"))
+    check("genai_client stays imported on app.py (/api/models uses it)", hasattr(mod, "genai_client"))
+    # Day 37: NL_INTERPRET_PROMPT moved to routes_search.py with /api/interpret.
+    check("NL_INTERPRET_PROMPT lives on routes_search (search, not tagging)",
+          hasattr(mod.routes_search, "NL_INTERPRET_PROMPT") and not hasattr(mod, "NL_INTERPRET_PROMPT"))
     check("tagging shares core.get_db", tagging.get_db is mod.get_db)
     check("tagging shares core.normalize_tag_value", tagging.normalize_tag_value is mod.normalize_tag_value)
 

@@ -1173,7 +1173,7 @@ session.
 5. Full suite green before and after; every route's URL unchanged so the frontend needs zero
    changes.
 
-### Day 36 — `routes_auth.py` *(V83 — code complete; awaiting live-site login confirmation)*
+### Day 36 — `routes_auth.py` *(V83 — COMPLETE; live login confirmed Sep 24)*
 Login, logout, register, setup, forgot/reset password, invite codes, `/api/auth/me`. ~250 lines.
 The `require_login` / `admin_required` / `_adopt_session_from_header` helpers move to `core.py`
 here. Highest care: the `@app.before_request` login gate must keep working across all blueprints.
@@ -1188,18 +1188,27 @@ a user's Drive, not log them into Frame Atlas, and belong with Day 41's account/
 2 test scripts repointed; suite 44 Python + 3 `.mjs` green; live-server check 32/32 with a
 database cross-check. `app.py` 4,813 → 4,355 lines.
 
-### Day 37 — `routes_search.py`
+### Day 37 — `routes_search.py` *(V84 — code complete; awaiting live-site search confirmation)*
 `/api/search`, `/api/search/ids`, `/api/autocomplete`, `/api/interpret`, `/api/bookmarks`,
 `build_search_filters()`, `_fts5_match_query()`, `get_similar_images()`, `_cosine_similarity()`.
 ~500 lines. Self-contained — search reads the DB, writes nothing except bookmarks.
 
+**How it actually shipped:** 7 routes + `NL_INTERPRET_PROMPT` + `_cosine_similarity()` moved as
+`bp = Blueprint('search', ...)`, all verbatim, URLs byte-identical. `build_search_filters()` +
+`_fts5_match_query()` went to a separate helper file, `search_filters.py`, so Day 38's
+tag-removal preview can share it without one blueprint importing another. `/api/tag-categories`
+stays for Day 38; `/api/filmography/autocomplete` reassigned to Day 39. 1 test script repointed;
+suite 44 Python + 3 `.mjs` green; live-server check 74/74 with all 50 responses byte-identical
+to the pre-change backend. `app.py` 4,375 → 3,734 lines.
+
 ### Day 38 — `routes_tags.py`
 `/api/tags/*` (bulk apply/remove/preview/summary/suggestions), `/api/tag-categories`,
-`edit_tags`, `count_tags_for_images`, `_parse_bulk_tag_request`. ~350 lines. Pairs naturally with
+`edit_tags`, `count_tags_for_images`, `_parse_bulk_tag_request`. ~350 lines. The removal preview
+imports `build_search_filters` from `search_filters.py` (Day 37), never from `routes_search.py`. Pairs naturally with
 the `tagging.py` worker from Day 32 but stays a separate cut.
 
 ### Day 39 — `routes_images.py`
-Favorite toggle, filmography edit, on-set notes, download, delete, bulk delete, thumbnail serve,
+Favorite toggle, filmography edit + `/api/filmography/autocomplete` (added Day 37), on-set notes, download, delete, bulk delete, thumbnail serve,
 full-res proxy, `regenerate_thumbnails`, `extract_colors`. ~600 lines. Touches Drive (delete →
 `_Removed`) so depends on `drive.py` being done.
 

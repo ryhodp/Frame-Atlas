@@ -95,6 +95,8 @@ frame-atlas/
 │   ├── app.py              # Endpoints, sync (Phase 3 splits this)
 │   ├── core.py             # get_db/db_path, favorite_col, tag normalisation, taxonomy maps, Gemini constants (V70; favorite_col V73); login gate + admin_required + RUNNING_LOCALLY (V83)
 │   ├── routes_auth.py      # Blueprint: setup, login/logout, register, forgot/reset password, invite codes, /api/auth/me (V83)
+│   ├── routes_search.py    # Blueprint: /api/search, /api/search/ids, /api/autocomplete, /api/interpret, /api/bookmarks, /api/images/<id>/similar (V84)
+│   ├── search_filters.py   # build_search_filters() + _fts5_match_query() — shared by routes_search and the tag-removal preview (V84)
 │   ├── schema.py           # init_db + all migrations + check_schema + load_embeddings_seed (V70)
 │   ├── drive.py            # Google Drive: service/OAuth clients, folder listing, _Removed, download (V71)
 │   ├── gemini.py           # Friend Gemini key encryption (Fernet) + per-user spend tracking (V72)
@@ -225,6 +227,16 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - **Harness lesson (don't repeat it):** the first live check was bash, building JSON bodies as `-d "{\"invite_code\":\"$CODE\",...}"` inside `"$(...)"`. Bash brace-expanded those on the commas, so one register call became four malformed fragment requests (all correctly 400'd by the app) — and the harness still reported PASSes for them. The database cross-check caught it. Write live checks in Python, and always verify writes in the DB, not just the response.
 - **Local environment note:** the project lives on an iCloud-synced Desktop, and with ~15GB free macOS had evicted ~36,000 of its files to iCloud (`ls -lO` shows `dataless`) — venv, `node_modules`, `.git` internals, even `backend/*.py`. Reading one blocks until iCloud downloads it, which is what made builds/tests/imports stall for minutes this session. `brctl download <file>` restores a file (it does NOT recurse into folders — request files individually). Production is unaffected: Railway builds from git.
 - Full suite **44 Python + 3 `.mjs` green**. `app.py`: **4,813 → 4,355 lines** (−458). `routes_auth.py` is 418; `core.py` 162 → 267.
+
+**Route blueprints — Day 37 (V84): `routes_search.py` + `search_filters.py`**
+- `/api/search`, `/api/search/ids`, `/api/autocomplete`, `/api/interpret`, `/api/bookmarks` (GET/POST + DELETE), and `/api/images/<id>/similar` moved into `backend/routes_search.py` as `bp = Blueprint('search', __name__)`, along with `NL_INTERPRET_PROMPT` and `_cosine_similarity()`. Every block verified verbatim against `HEAD` (only `@app.route` → `@bp.route`); every URL byte-identical, zero frontend changes.
+- **`build_search_filters()` + `_fts5_match_query()` went to their own helper file, `search_filters.py`, NOT into the blueprint** (Ryan's call). The tag-removal preview (`/api/tags/removal-preview`, Day 38's `routes_tags.py`) uses the same filter builder, and V32's rule is that there is exactly one copy of it. A plain helper module lets both blueprints import it without one blueprint importing another. It has no Flask import — callers pass `request.args` in. `app.py` does `import search_filters` and the removal preview calls it qualified.
+- **`genai_client` is imported in `app.py`, `tagging.py` AND `routes_search.py`** — `/api/models` still uses it in `app.py`. Anything faking Gemini for `/api/interpret` must patch `routes_search.genai_client`, not `mod.genai_client` (same both-files trap as `MediaIoBase*`).
+- `from array import array` left `app.py` (similar-images was its only user).
+- **Deliberately left in `app.py`:** `/api/tag-categories` (plan gives it to Day 38) and `/api/filmography/autocomplete` (assigned to Day 39, next to the filmography editor it serves).
+- 1 test script repointed by hand: `test_tagging_locally.py` (`NL_INTERPRET_PROMPT` now asserted on `mod.routes_search`). No other script referenced a moved name — they all drive search over HTTP.
+- **Verification:** suite 44 Python + 3 `.mjs` green before and after. A live-server check (real port, real cookies, fake Gemini) ran against the pre-change backend AND the new one — 54 behaviour checks + 20 wiring checks, bookmark writes cross-checked in the DB, and **all 50 recorded responses byte-identical before vs after**.
+- `app.py`: **4,375 → 3,734 lines** (−641). `routes_search.py` 491, `search_filters.py` 227.
 
 **CI (V43/Day 25)**
 - `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **44 Python + 3 `.mjs` as of V76** (`test_tagging_locally.py` added Day 32; `test_friend_tag_edit_locally.py` added V75; `test_backup_locally.py` added Day 33). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in

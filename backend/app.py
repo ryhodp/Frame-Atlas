@@ -11,7 +11,6 @@ import threading
 import queue as queue_module
 import concurrent.futures
 import urllib.parse
-from array import array
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context, redirect, session
@@ -93,7 +92,8 @@ import gemini
 # Day 32 (Phase 3): Gemini auto-tag worker + SSE progress state. Call sites are
 # qualified (tagging.trigger_tagging(), tagging._tag_progress, …); the ~8 test
 # scripts that no-op the worker patch tagging.trigger_tagging. genai_client stays
-# imported here too — /api/interpret and /api/models still use it directly.
+# imported here too — /api/models still uses it directly (/api/interpret moved
+# to routes_search.py on Day 37 and imports its own copy).
 import tagging
 
 # Day 31 (Phase 3): image-row hydration (build_image_dict / hydrate_image_rows
@@ -111,6 +111,12 @@ import sync
 # (routes_auth._rate_limited(), …); test scripts patch fakes onto this module
 # the same way they do for drive/sync/etc.
 import routes_auth
+
+# Day 37 (Phase 3): search routes as a Blueprint (routes_search.py), plus the
+# shared filter builder they use (search_filters.py). The tag-removal preview
+# still in this file calls search_filters.build_search_filters() qualified.
+import search_filters
+import routes_search
 
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -149,6 +155,8 @@ DB_PATH = db_path()
 # Blueprint — see routes_auth.py. Every URL path is byte-identical to before
 # the move, so this needed zero frontend changes.
 app.register_blueprint(routes_auth.bp)
+# Day 37: search / autocomplete / NL interpret / bookmarks / similar.
+app.register_blueprint(routes_search.bp)
 
 # Day 35 (Phase 3): the sync_state progress dict moved to sync.py with the
 # worker. Read it qualified as sync.sync_state — it is only ever mutated in
@@ -170,32 +178,8 @@ app.register_blueprint(routes_auth.bp)
 crop.start_crop_worker()
 
 # Day 32 (Phase 3): GEMINI_TAGGING_PROMPT moved to tagging.py with the worker
-# that uses it. NL_INTERPRET_PROMPT stays — /api/interpret (search) still uses it.
-
-NL_INTERPRET_PROMPT = """You translate a cinematographer's search phrase into tags from a fixed taxonomy.
-
-ALLOWED TAGS (use ONLY these, exactly as written):
-mood: lonely, intimate, tense, ominous, serene, chaotic, melancholic, warm, euphoric, epic, mundane, dreamlike, claustrophobic, vast
-lighting_quality: hard, soft, motivated, unmotivated, single-source, practical-heavy, high-key, low-key, no-fill, bounce-heavy, silhouette, chiaroscuro
-lighting_color_temperature: warm-tungsten, cool-daylight, mixed-sources, green-practical, neon, firelight, moonlight
-color_palette: desaturated, high-contrast, monochromatic, warm-palette, cool-palette, earthy, high-saturation, bleach-bypass, golden, teal-orange
-shot_type: extreme-wide, wide, medium-wide, medium, close-up, extreme-close-up, aerial, POV, over-shoulder, two-shot
-framing_composition: centered, rule-of-thirds, dutch-angle, low-angle, high-angle, eye-level, negative-space, symmetrical, foreground-frame
-location_type: interior, exterior, diner, hospital, warehouse, rooftop, forest, urban-street, office, home, car, bar, stage, industrial, desert, water
-time_of_day_weather: golden-hour, magic-hour, midday, blue-hour, night, overcast, dawn, rain, fog, snow, harsh-sun
-source_type: film-still, BTS, production-still, mood-texture, abstract
-subject_count: no-subject, solo, pair, group, crowd
-subject_camera_relationship: looking-at-camera, looking-away, profile, back-to-camera
-performance_emotion: joy, grief, fear, rage, longing, neutral, shock, tenderness, defiance
-genre_aesthetic: horror, western, sci-fi, romance, documentary, thriller, noir, drama, comedy, action
-era_decade: period-piece, 70s, 80s, 90s, contemporary, futuristic
-camera_format: 35mm-film, 16mm-film, anamorphic, spherical, digital, arri, red, sony, blackmagic
-subjects: man, woman, child, couple, wedding, hand, hands, body, face, animal, dog, cat, horse, bird, building, house, car, door, window, street, bridge, fire, water, mirror, glass, weapon, crowd, performance
-
-Pick the 2-5 tags that best capture the FEELING and VISUAL QUALITIES of the phrase.
-Return ONLY a JSON array of tag strings, e.g. ["lonely","low-key","night"]. No markdown, no explanation.
-
-Phrase: """
+# that uses it. Day 37: NL_INTERPRET_PROMPT moved to routes_search.py with
+# /api/interpret, the only route that uses it.
 
 # ============================================================================
 # BOOT-TIME SELF-TEST
@@ -333,7 +317,8 @@ def require_login():
 #   _broadcast_progress, _select_pending_for_tagging, _run_tagging_job[_inner],
 #   trigger_tagging — the tag-progress routes below read tagging._tag_progress
 #   etc. and call tagging.trigger_tagging(). genai_client stays imported in
-#   app.py too: /api/interpret and /api/models still call it directly.
+#   app.py too: /api/models still calls it directly (/api/interpret moved to
+#   routes_search.py on Day 37).
 
 # ============================================================================
 # GOOGLE DRIVE & SYNC FUNCTIONS
@@ -741,191 +726,8 @@ def billing_spend():
         'cost_usd': round(row['cost_usd'], 4) if row else 0.0,
     })
 
-@app.route('/api/interpret', methods=['POST'])
-def interpret_nl():
-    phrase = (request.get_json() or {}).get('phrase', '').strip()
-    if not phrase:
-        return jsonify({'error': 'No phrase provided'}), 400
-
-    uid = current_user_id()
-    gemini_api_key = gemini.get_user_gemini_key(uid)
-    if not gemini_api_key:
-        return jsonify({'error': 'Add your Gemini API key in Account settings to use natural-language search.'}), 400
-
-    try:
-        client = genai_client.Client(api_key=gemini_api_key)
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=[NL_INTERPRET_PROMPT + phrase]
-        )
-        gemini.record_gemini_usage(uid, getattr(response, 'usage_metadata', None))
-        raw = response.text.strip()
-        if raw.startswith('```'):
-            raw = raw.split('\n', 1)[1].rsplit('```', 1)[0].strip()
-        tags = json.loads(raw)
-        if not isinstance(tags, list):
-            return jsonify({'error': 'Bad interpretation'}), 500
-        tags = [str(t).strip() for t in tags if str(t).strip()][:5]
-        return jsonify({'phrase': phrase, 'tags': tags})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/autocomplete')
-def autocomplete():
-    q = request.args.get('q', '').strip().lower()
-    active_chips = [t.strip() for t in request.args.get('chips', '').split(',') if t.strip()]
-
-    if not q:
-        return jsonify([])
-
-    uid = session['user_id']
-    conn = get_db()
-    c = conn.cursor()
-
-    if active_chips:
-        placeholders = ','.join('?' * len(active_chips))
-        rows = c.execute(f'''
-            SELECT t.value, t.category, COUNT(*) as cnt
-            FROM tags t
-            WHERE t.user_id = ?
-            AND t.image_id IN (
-                SELECT image_id FROM tags
-                WHERE value IN ({placeholders})
-                GROUP BY image_id
-                HAVING COUNT(DISTINCT value) = ?
-            )
-            AND LOWER(t.value) LIKE ?
-            AND t.value NOT IN ({placeholders})
-            GROUP BY t.value, t.category
-            ORDER BY cnt DESC
-            LIMIT 20
-        ''', [uid] + active_chips + [len(active_chips), f'{q}%'] + active_chips).fetchall()
-    else:
-        rows = c.execute('''
-            SELECT value, category, COUNT(*) as cnt
-            FROM tags
-            WHERE user_id = ? AND LOWER(value) LIKE ?
-            GROUP BY value, category
-            ORDER BY cnt DESC
-            LIMIT 20
-        ''', (uid, f'{q}%')).fetchall()
-
-    # Filmography matches — lets the same search bar find "Her" by title,
-    # "Spike Jonze" by director/DP, "Rembrandt" by painter, or "Ansel Adams"
-    # by photographer — reusing the exact film= filter that clicking a name
-    # in the detail panel already applies (see /api/search).
-    #
-    # Matches anywhere in the value, not just the start — "Ozu" finds
-    # "Yasujiro Ozu", "Korra" finds "The Legend of Korra" — since the useful
-    # search word is routinely NOT the first one. Without this, typing a
-    # last name that finds nothing here meant Enter fell through to the NL
-    # interpreter instead of setting the film= filter, silently failing a
-    # search that should have worked (same bug class as the filmography
-    # editor's own autocomplete, fixed separately in
-    # /api/filmography/autocomplete). A true prefix match still ranks above
-    # a same-frequency contains-only match via the prefix_rank tiebreaker.
-    like = f'%{q}%'
-    prefix_like = f'{q}%'
-    film_rows = c.execute('''
-        SELECT f.title AS value, 'title' AS field, COUNT(DISTINCT f.image_id) AS cnt,
-               CASE WHEN LOWER(f.title) LIKE ? THEN 0 ELSE 1 END AS prefix_rank
-        FROM filmography f JOIN images i ON i.id = f.image_id
-        WHERE i.user_id = ? AND f.title IS NOT NULL AND LOWER(f.title) LIKE ?
-        GROUP BY f.title
-        UNION ALL
-        SELECT f.director, 'director', COUNT(DISTINCT f.image_id),
-               CASE WHEN LOWER(f.director) LIKE ? THEN 0 ELSE 1 END
-        FROM filmography f JOIN images i ON i.id = f.image_id
-        WHERE i.user_id = ? AND f.director IS NOT NULL AND LOWER(f.director) LIKE ?
-        GROUP BY f.director
-        UNION ALL
-        SELECT f.dp, 'dp', COUNT(DISTINCT f.image_id),
-               CASE WHEN LOWER(f.dp) LIKE ? THEN 0 ELSE 1 END
-        FROM filmography f JOIN images i ON i.id = f.image_id
-        WHERE i.user_id = ? AND f.dp IS NOT NULL AND LOWER(f.dp) LIKE ?
-        GROUP BY f.dp
-        UNION ALL
-        SELECT f.painter, 'painter', COUNT(DISTINCT f.image_id),
-               CASE WHEN LOWER(f.painter) LIKE ? THEN 0 ELSE 1 END
-        FROM filmography f JOIN images i ON i.id = f.image_id
-        WHERE i.user_id = ? AND f.painter IS NOT NULL AND LOWER(f.painter) LIKE ?
-        GROUP BY f.painter
-        UNION ALL
-        SELECT f.photographer, 'photographer', COUNT(DISTINCT f.image_id),
-               CASE WHEN LOWER(f.photographer) LIKE ? THEN 0 ELSE 1 END
-        FROM filmography f JOIN images i ON i.id = f.image_id
-        WHERE i.user_id = ? AND f.photographer IS NOT NULL AND LOWER(f.photographer) LIKE ?
-        GROUP BY f.photographer
-        ORDER BY prefix_rank ASC, cnt DESC
-        LIMIT 8
-    ''', (prefix_like, uid, like, prefix_like, uid, like, prefix_like, uid, like,
-          prefix_like, uid, like, prefix_like, uid, like)).fetchall()
-
-    # V15: aspect-ratio matches — "9:16", "2.35", "scope" etc. suggest format
-    # buckets. Counting requires a scan of the user's images, so only do it
-    # when the query actually looks like a ratio (ar_query_labels is pure
-    # string logic and returns [] for normal tag searches).
-    ar_results = []
-    ar_labels = ar_query_labels(q)
-    if ar_labels:
-        bucket_counts = {}
-        for row in c.execute('SELECT aspect_ratio FROM images WHERE user_id = ?', (uid,)).fetchall():
-            label = normalize_ar_label(ar_float_from_str(row['aspect_ratio']))
-            bucket_counts[label] = bucket_counts.get(label, 0) + 1
-        ar_results = [{
-            'type': 'ar',
-            'value': label,
-            'count': bucket_counts[label]
-        } for label in ar_labels if bucket_counts.get(label)]
-
-    # V39: on-set notes — live suggestion, not a list of discrete values like
-    # tags/film. There's no fixed vocabulary to suggest FROM (notes are
-    # freeform prose), so this checks whether the CURRENT typed text has any
-    # match at all and, if so, offers exactly one entry: "run this phrase as
-    # a notes search." A prefix MATCH (see _fts5_match_query) so it updates
-    # as Ryan keeps typing, same as everything else in this dropdown.
-    # Deliberately NOT scoped by active_chips co-occurrence like tag
-    # suggestions are — a global per-user count is enough for v1.
-    note_results = []
-    match_query = _fts5_match_query(q, prefix=True)
-    if match_query:
-        # FTS5's special MATCH binding only recognizes the table by its real
-        # name, not an alias — `n MATCH ?` throws "no such column: n" even
-        # though `n` is a valid alias for notes_fts everywhere else in this
-        # query (verified directly against sqlite3, not assumed).
-        note_count = c.execute('''
-            SELECT COUNT(DISTINCT n.rowid) AS cnt
-            FROM notes_fts n JOIN images i ON i.id = n.rowid
-            WHERE i.user_id = ? AND notes_fts MATCH ?
-        ''', (uid, match_query)).fetchone()['cnt']
-        if note_count:
-            note_results = [{'type': 'note', 'value': q, 'count': note_count}]
-
-    conn.close()
-
-    tag_results = [{
-        'type': 'tag',
-        'value': row['value'],
-        'category': row['category'],
-        'catLabel': CAT_LABELS.get(row['category'], row['category']),
-        'color': CAT_COLORS.get(row['category'], '#9c988d'),
-        'count': row['cnt']
-    } for row in rows]
-
-    film_results = [{
-        'type': 'film',
-        'value': row['value'],
-        'field': row['field'],
-        'count': row['cnt']
-    } for row in film_rows]
-
-    # An exact match (typed "Tenet", there's a film called Tenet) should
-    # always sit at the very top regardless of type or how many images carry
-    # it — otherwise a popular tag that merely starts with the same letters
-    # can bury the one result you actually typed for.
-    combined = tag_results + film_results + ar_results + note_results
-    combined.sort(key=lambda r: (r['value'].lower() != q, -r['count']))
-    return jsonify(combined)
+# Day 37 (Phase 3): /api/interpret and /api/autocomplete moved to
+# routes_search.py. /api/tag-categories stays here until Day 38 (tags).
 
 @app.route('/api/tag-categories')
 def tag_categories():
@@ -937,329 +739,12 @@ def tag_categories():
         'color': CAT_COLORS.get(key, '#9c988d')
     } for key in CAT_LABELS])
 
-def _fts5_match_query(phrase, prefix=False):
-    """Turns a raw user phrase into a safe notes_fts MATCH query. A raw
-    phrase can't go straight into MATCH — FTS5's query syntax gives meaning
-    to characters like -, ", *, : — so every token is quoted to be treated
-    literally. A bareword sequence of quoted tokens implicitly ANDs them,
-    which is exactly the "forgiving of word order" behavior Ryan wants
-    (an Omnisearch-style match, not a rigid substring/phrase match).
+# Day 37 (Phase 3): _fts5_match_query() + build_search_filters() moved to
+# search_filters.py — shared by routes_search.py and the tag-removal
+# preview below (called qualified as search_filters.build_search_filters).
 
-    prefix=True additionally leaves the LAST token unquoted with a trailing
-    * (FTS5 prefix syntax), for live-typing autocomplete against a query
-    that isn't finished yet. Embedded double-quote characters are stripped
-    from every token first — otherwise one could break out of the quoting."""
-    tokens = [t.replace('"', '') for t in phrase.split() if t.replace('"', '')]
-    if not tokens:
-        return None
-    if prefix:
-        *head, last = tokens
-        parts = [f'"{t}"' for t in head]
-        # The trailing token is deliberately left UNQUOTED so the * prefix
-        # wildcard means anything to FTS5 — but that also means every OTHER
-        # FTS5-meaningful character (-, *, :, (, ), ^) is live here too, not
-        # neutralized by quoting the way it is for every other token above.
-        # Strip to alphanumerics before appending the wildcard (verified: a
-        # raw token like `weird"-*query` 500'd the endpoint before this).
-        last_clean = ''.join(ch for ch in last if ch.isalnum())
-        if last_clean:
-            parts.append(f'{last_clean}*')
-        if not parts:
-            return None
-    else:
-        parts = [f'"{t}"' for t in tokens]
-    return ' '.join(parts)
-
-def build_search_filters(c, uid, args):
-    """Turn the search query params into (conditions, params, is_unfiltered)
-    for a WHERE clause over the `images` table.
-
-    V32: pulled out of search() so /api/search, /api/search/ids and the tag
-    removal preview all filter through ONE piece of code. A "select all 118
-    results" button that quietly disagreed with the 118 results on screen
-    would be worse than having no button at all, and a second hand-copied
-    version of five filter types (chips / natural language / colour /
-    aspect ratio / film) will drift apart the first time one of them changes.
-
-    Every condition here refers to plain `images` columns (`user_id`, `id`),
-    never a table alias, so callers can also drop the whole WHERE clause
-    inside a `SELECT id FROM images ...` subquery.
-    """
-    chips_raw = args.get('chips', '').strip()
-    nl_raw = args.get('nl', '').strip()
-    notes_raw = args.get('notes', '').strip()  # V39: JSON array of on-set-notes phrases
-    color_raw = args.get('color', '').strip()
-    film_raw = args.get('film', '').strip()
-    ar_raw = args.get('ar', '').strip()  # V15: aspect-ratio bucket, e.g. "2.39:1"
-    # V24: color search knobs. Absent (old bookmarks, old clients) = the new
-    # defaults, which is the agreed behaviour — a saved search returns fewer,
-    # cleaner results than it used to rather than keeping the old noise.
-    try:
-        prominence = float(args.get('prom', DEFAULT_PROMINENCE))
-    except ValueError:
-        prominence = DEFAULT_PROMINENCE
-    try:
-        exactness = float(args.get('exact', DEFAULT_EXACTNESS))
-    except ValueError:
-        exactness = DEFAULT_EXACTNESS
-    prominence = max(0.0, min(100.0, prominence))
-    active_chips = [t.strip() for t in chips_raw.split(',') if t.strip()] if chips_raw else []
-
-    # NL groups: JSON array of tag arrays. Image must match >=1 tag per group.
-    nl_groups = []
-    if nl_raw:
-        try:
-            parsed = json.loads(nl_raw)
-            nl_groups = [[str(t) for t in g] for g in parsed if isinstance(g, list) and g]
-        except Exception:
-            nl_groups = []
-
-    # V39: notes phrases. JSON array of plain strings — each is its own
-    # AND'd notes_fts MATCH, same shape as an nl_groups entry above. Invalid
-    # JSON or a non-list just means no notes filter, never a 500.
-    notes_phrases = []
-    if notes_raw:
-        try:
-            parsed = json.loads(notes_raw)
-            notes_phrases = [str(p) for p in parsed if isinstance(p, str) and p.strip()]
-        except Exception:
-            notes_phrases = []
-
-    conditions = ['user_id = ?']
-    params = [uid]
-
-    if active_chips:
-        placeholders = ','.join('?' * len(active_chips))
-        conditions.append(f'''id IN (
-            SELECT image_id FROM tags WHERE value IN ({placeholders})
-            GROUP BY image_id HAVING COUNT(DISTINCT value) = ?
-        )''')
-        params.extend(active_chips + [len(active_chips)])
-
-    for group in nl_groups:
-        gph = ','.join('?' * len(group))
-        conditions.append(f'id IN (SELECT image_id FROM tags WHERE value IN ({gph}))')
-        params.extend(group)
-
-    for phrase in notes_phrases:
-        match_query = _fts5_match_query(phrase)
-        if not match_query:
-            continue
-        conditions.append('id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)')
-        params.append(match_query)
-
-    if color_raw:
-        # Small library — compute color matches in Python.
-        # V24: an image matches when the palette entries close enough in hue
-        # to the picked color TOGETHER cover at least `prominence` percent of
-        # the frame. This is what kills the old false positives: a lipstick-
-        # sized patch of red is a real red, but it's ~1% of the frame, so it
-        # only survives at a low prominence setting.
-        hue_tol = exactness_to_hue_tol(exactness)
-        value_tol = exactness_to_value_tol(exactness)
-        min_share = prominence / 100.0
-
-        entries_by_image = {}
-        legacy_rank_hits = set()  # pre-V24 rows: share unknown
-        for row in c.execute(
-            'SELECT image_id, hex, rank, share FROM colors WHERE user_id = ?', (uid,)
-        ).fetchall():
-            entries_by_image.setdefault(row['image_id'], []).append((row['hex'], row['share']))
-            if row['share'] is None and row['rank'] is not None and row['rank'] <= 5:
-                legacy_rank_hits.add(row['image_id'])
-
-        matched_ids = set()
-        for image_id, entries in entries_by_image.items():
-            if color_match_share(color_raw, entries, hue_tol, value_tol) >= min_share:
-                matched_ids.add(image_id)
-                continue
-            # Graceful degradation: palettes extracted before V24 have no
-            # share, so prominence can't be judged. Rather than have color
-            # search go silently empty until the backfill runs, fall back to
-            # the old hue-only test on the top ranks for those images.
-            if image_id in legacy_rank_hits and any(
-                s is None and color_matches(color_raw, h, hue_tol, value_tol)
-                for h, s in entries
-            ):
-                matched_ids.add(image_id)
-
-        if matched_ids:
-            cph = ','.join('?' * len(matched_ids))
-            conditions.append(f'id IN ({cph})')
-            params.extend(list(matched_ids))
-        else:
-            conditions.append('1 = 0')
-
-    if ar_raw:
-        # V15: aspect-ratio filter. Same trick as the color filter above —
-        # small library, so snap every image to its nearest standard format
-        # in Python (identical math to the ar_label shown on tiles) and pass
-        # the matching ids into SQL.
-        ar_ids = [
-            row['id'] for row in c.execute(
-                'SELECT id, aspect_ratio FROM images WHERE user_id = ?', (uid,)
-            ).fetchall()
-            if normalize_ar_label(ar_float_from_str(row['aspect_ratio'])) == ar_raw
-        ]
-        if ar_ids:
-            aph = ','.join('?' * len(ar_ids))
-            conditions.append(f'id IN ({aph})')
-            params.extend(ar_ids)
-        else:
-            conditions.append('1 = 0')
-
-    if film_raw:
-        # Clicking a name in the detail panel sends the exact string, so try an
-        # exact (case-insensitive) match first. Only fall back to substring
-        # matching when nothing matches exactly — otherwise a short title like
-        # "Her" would also return every "Christopher Nolan" film.
-        #
-        # V81: painter/photographer joined title/director/dp here — clicking
-        # "Rembrandt" or "Ansel Adams" in the detail panel needs to filter the
-        # same way clicking a director already does.
-        exact_hit = c.execute('''
-            SELECT 1 FROM filmography
-            WHERE title = ? COLLATE NOCASE OR director = ? COLLATE NOCASE
-               OR dp = ? COLLATE NOCASE OR painter = ? COLLATE NOCASE
-               OR photographer = ? COLLATE NOCASE LIMIT 1
-        ''', (film_raw, film_raw, film_raw, film_raw, film_raw)).fetchone()
-        if exact_hit:
-            conditions.append('''id IN (
-                SELECT image_id FROM filmography
-                WHERE title = ? COLLATE NOCASE OR director = ? COLLATE NOCASE
-                   OR dp = ? COLLATE NOCASE OR painter = ? COLLATE NOCASE
-                   OR photographer = ? COLLATE NOCASE
-            )''')
-            params.extend([film_raw, film_raw, film_raw, film_raw, film_raw])
-        else:
-            like = f'%{film_raw}%'
-            conditions.append('''id IN (
-                SELECT image_id FROM filmography
-                WHERE title LIKE ? OR director LIKE ? OR dp LIKE ?
-                   OR painter LIKE ? OR photographer LIKE ?
-            )''')
-            params.extend([like, like, like, like, like])
-
-    is_unfiltered = not (active_chips or nl_groups or notes_phrases or color_raw or film_raw or ar_raw)
-    return conditions, params, is_unfiltered
-
-@app.route('/api/search')
-def search():
-    page = int(request.args.get('page', 0))
-    per = int(request.args.get('per', 50))
-
-    uid = session['user_id']
-    conn = get_db()
-    c = conn.cursor()
-
-    conditions, params, is_unfiltered = build_search_filters(c, uid, request.args)
-    where = 'WHERE ' + ' AND '.join(conditions)
-
-    # V14: shuffled home feed. When the default (unfiltered) grid sends a seed,
-    # order by a seeded shuffle instead of newest-first. Any active filter
-    # switches back to the normal newest-first ordering.
-    #
-    # V35: dropped the "seen in the last 7 days sinks to the bottom" bucket.
-    # Once most of the library has been viewed recently (Ryan's case: 3496 of
-    # 3499 images), that bucket swallows almost everything and only the tiny
-    # unseen leftover ever occupies the top of the feed — so the "shuffle"
-    # stops looking random, since day to day the same few unseen images keep
-    # winning the top slots. A straight seeded shuffle stays fresh regardless
-    # of view history.
-    seed = request.args.get('seed', '').strip()
-    if seed and is_unfiltered:
-        order_by = 'shuffle_key(?, images.id)'
-        order_params = [seed]
-    else:
-        order_by = 'date_added DESC'
-        order_params = []
-
-    rows = c.execute(f'''
-        SELECT id, filename, thumbnail_blob, caption, aspect_ratio, md5_checksum,
-               camera_rig, lens, lens_filter, stop, onset_notes, {favorite_col(uid)}
-        FROM images {where}
-        ORDER BY {order_by} LIMIT ? OFFSET ?
-    ''', params + order_params + [per, page * per]).fetchall()
-    total = c.execute(f'SELECT COUNT(*) FROM images {where}', params).fetchone()[0]
-
-    images_out = images_common.hydrate_image_rows(c, rows)
-    conn.close()
-
-    return jsonify({'images': images_out, 'total': total, 'page': page, 'per': per, 'has_more': (page + 1) * per < total})
-
-@app.route('/api/search/ids')
-def search_ids():
-    """Every image id matching the current filter — not just the page the
-    browser happens to have scrolled to (V32).
-
-    Select Mode's old "Select all loaded" only ever selected the thumbnails
-    already in the grid, so on a 118-result search that had loaded 60 it
-    silently grabbed 60 and said nothing. Sending ids instead of forcing the
-    grid to fetch every remaining page is what makes "select all" cheap: a
-    few kilobytes of numbers versus tens of megabytes of base64 thumbnails.
-
-    Takes exactly the same query params as /api/search and shares
-    build_search_filters() with it, so the ids returned here are precisely
-    the images on screen — they cannot drift apart. No `seed` handling:
-    ordering is irrelevant to a selection, and the shuffle only ever applies
-    to the unfiltered grid anyway."""
-    uid = session['user_id']
-    conn = get_db()
-    c = conn.cursor()
-    conditions, params, _ = build_search_filters(c, uid, request.args)
-    where = 'WHERE ' + ' AND '.join(conditions)
-    rows = c.execute(f'SELECT id FROM images {where} ORDER BY date_added DESC', params).fetchall()
-    conn.close()
-    ids = [r['id'] for r in rows]
-    return jsonify({'ids': ids, 'total': len(ids)})
-
-@app.route('/api/bookmarks', methods=['GET', 'POST'])
-def bookmarks():
-    user_id = session['user_id']
-
-    if request.method == 'GET':
-        conn = get_db()
-        c = conn.cursor()
-        rows = c.execute('''
-            SELECT id, name, chips_json, created_at FROM saved_searches
-            WHERE user_id = ? ORDER BY created_at DESC
-        ''', (user_id,)).fetchall()
-        conn.close()
-        out = []
-        for r in rows:
-            try:
-                state = json.loads(r['chips_json'] or '{}')
-            except Exception:
-                state = {}
-            out.append({'id': r['id'], 'name': r['name'], 'state': state, 'created_at': r['created_at']})
-        return jsonify(out)
-
-    data = request.get_json() or {}
-    name = (data.get('name') or '').strip()
-    state = data.get('state') or {}
-    if not name:
-        return jsonify({'error': 'Name required'}), 400
-
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('INSERT INTO saved_searches (user_id, name, chips_json) VALUES (?, ?, ?)',
-              (user_id, name, json.dumps(state)))
-    conn.commit()
-    new_id = c.lastrowid
-    conn.close()
-    return jsonify({'success': True, 'id': new_id})
-
-@app.route('/api/bookmarks/<int:bookmark_id>', methods=['DELETE'])
-def delete_bookmark(bookmark_id):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('DELETE FROM saved_searches WHERE id = ? AND user_id = ?', (bookmark_id, session['user_id']))
-    found = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    if not found:
-        return jsonify({'error': 'Bookmark not found'}), 404
-    return jsonify({'success': True})
+# Day 37 (Phase 3): /api/search, /api/search/ids and /api/bookmarks moved to
+# routes_search.py.
 
 @app.route('/api/images', methods=['GET'])
 def get_images():
@@ -1342,134 +827,8 @@ def get_image_thumb(image_id):
     resp.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
     return resp
 
-def _cosine_similarity(vec_a, vec_b):
-    """Plain-Python cosine similarity between two equal-length float lists.
-    Re-normalizes defensively (the seed vectors are already L2-normalized,
-    but we don't want to trust that blindly), and guards against a
-    zero-magnitude vector blowing up with a divide-by-zero."""
-    dot = 0.0
-    mag_a = 0.0
-    mag_b = 0.0
-    for a, b in zip(vec_a, vec_b):
-        dot += a * b
-        mag_a += a * a
-        mag_b += b * b
-    mag_a = mag_a ** 0.5
-    mag_b = mag_b ** 0.5
-    if mag_a == 0 or mag_b == 0:
-        return 0.0
-    return dot / (mag_a * mag_b)
-
-@app.route('/api/images/<int:image_id>/similar')
-def get_similar_images(image_id):
-    """Visual + tag similarity for the 'more like this' feature. Combines a
-    CLIP embedding cosine similarity (how visually alike two images are) with
-    a tag overlap score (how much cinematography vocabulary they share):
-    combined = 0.7 * cosine + 0.3 * tag_overlap.
-    Requires embeddings_seed.json.gz to have been loaded (see
-    load_embeddings_seed) — if the source image has no vector yet, this
-    returns 404 rather than guessing."""
-    limit = request.args.get('limit', 40, type=int)
-    if not limit or limit <= 0:
-        limit = 40
-    limit = min(limit, 100)
-
-    uid = session['user_id']
-    conn = get_db()
-    c = conn.cursor()
-
-    c.execute('SELECT filename FROM images WHERE id = ? AND user_id = ?', (image_id, uid))
-    source_img = c.fetchone()
-    if not source_img:
-        conn.close()
-        return jsonify({'error': 'Image not found'}), 404
-
-    c.execute('SELECT clip_vector FROM embeddings WHERE image_id = ?', (image_id,))
-    source_row = c.fetchone()
-    if not source_row or not source_row['clip_vector']:
-        conn.close()
-        return jsonify({'error': 'no_embedding'}), 404
-
-    source_vec = array('f', source_row['clip_vector']).tolist()
-
-    # All embeddings, joined to the columns build_image_dict() needs — one
-    # query, no per-candidate lookups. Scoped to this user's own images.
-    candidates = c.execute(f'''
-        SELECT e.image_id, e.clip_vector,
-               i.id, i.filename, i.thumbnail_blob, i.caption, i.aspect_ratio, i.md5_checksum,
-               i.camera_rig, i.lens, i.lens_filter, i.stop, i.onset_notes,
-               {favorite_col(uid, alias='i')}
-        FROM embeddings e
-        JOIN images i ON i.id = e.image_id
-        WHERE e.image_id != ? AND e.clip_vector IS NOT NULL AND i.user_id = ?
-    ''', (image_id, uid)).fetchall()
-
-    # Tags for the source image plus every candidate, in one query — grouped
-    # by image_id in Python instead of one query per candidate. Keep both the
-    # full {'category','value'} dicts (for the response, same shape as
-    # /api/search) and a plain set of values (for the overlap score).
-    all_ids = [image_id] + [row['image_id'] for row in candidates]
-    tags_by_image = {}
-    tag_values_by_image = {}
-    if all_ids:
-        ph = ','.join('?' * len(all_ids))
-        for tr in c.execute(f'SELECT image_id, category, value FROM tags WHERE image_id IN ({ph})', all_ids).fetchall():
-            tags_by_image.setdefault(tr['image_id'], []).append({'category': tr['category'], 'value': tr['value']})
-            tag_values_by_image.setdefault(tr['image_id'], set()).add(tr['value'])
-
-    source_tag_values = tag_values_by_image.get(image_id, set())
-
-    scored = []
-    for row in candidates:
-        cand_vec = array('f', row['clip_vector']).tolist()
-        cosine = _cosine_similarity(source_vec, cand_vec)
-
-        cand_tag_values = tag_values_by_image.get(row['image_id'], set())
-        if source_tag_values and cand_tag_values:
-            overlap = len(source_tag_values & cand_tag_values) / min(len(source_tag_values), len(cand_tag_values))
-        else:
-            overlap = 0.0
-
-        combined = 0.7 * cosine + 0.3 * overlap
-        scored.append((combined, row))
-
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    top = scored[:limit]
-
-    # Build response dicts only for the images we're actually returning —
-    # no point base64-encoding thumbnails we're about to throw away.
-    top_ids = [row['image_id'] for _, row in top]
-    colors_map = {}
-    if top_ids:
-        ph = ','.join('?' * len(top_ids))
-        for cr in c.execute(f'SELECT image_id, hex FROM colors WHERE image_id IN ({ph}) ORDER BY rank ASC', top_ids).fetchall():
-            colors_map.setdefault(cr['image_id'], []).append(cr['hex'])
-        film_map = {}
-        for fr in c.execute(f'SELECT image_id, title, director, dp, year FROM filmography WHERE image_id IN ({ph})', top_ids).fetchall():
-            film_map[fr['image_id']] = {
-                'title': fr['title'], 'director': fr['director'],
-                'dp': fr['dp'], 'year': fr['year']
-            }
-    else:
-        film_map = {}
-
-    conn.close()
-
-    images_out = []
-    for combined, row in top:
-        img_dict = images_common.build_image_dict(
-            row,
-            tags_by_image.get(row['image_id'], []),
-            colors_map.get(row['image_id'], []),
-            film_map.get(row['image_id'])
-        )
-        img_dict['similarity'] = round(combined, 3)
-        images_out.append(img_dict)
-
-    return jsonify({
-        'source': {'id': image_id, 'filename': source_img['filename']},
-        'images': images_out
-    })
+# Day 37 (Phase 3): _cosine_similarity() + /api/images/<id>/similar ("more
+# like this") moved to routes_search.py.
 
 @app.route('/api/regenerate-thumbnails', methods=['POST'])
 @admin_required
@@ -2051,7 +1410,7 @@ def tag_removal_preview():
 
     conn = get_db()
     c = conn.cursor()
-    conditions, params, _ = build_search_filters(c, uid, request.args)
+    conditions, params, _ = search_filters.build_search_filters(c, uid, request.args)
     where = 'WHERE ' + ' AND '.join(conditions)
 
     # The filter clause goes in as a subquery so it stays byte-for-byte the
