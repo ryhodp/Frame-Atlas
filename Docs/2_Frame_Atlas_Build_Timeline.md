@@ -1173,10 +1173,20 @@ session.
 5. Full suite green before and after; every route's URL unchanged so the frontend needs zero
    changes.
 
-### Day 36 — `routes_auth.py`
+### Day 36 — `routes_auth.py` *(V83 — code complete; awaiting live-site login confirmation)*
 Login, logout, register, setup, forgot/reset password, invite codes, `/api/auth/me`. ~250 lines.
 The `require_login` / `admin_required` / `_adopt_session_from_header` helpers move to `core.py`
 here. Highest care: the `@app.before_request` login gate must keep working across all blueprints.
+
+**How it actually shipped:** 11 routes moved as `bp = Blueprint('auth', ...)`, URLs byte-identical.
+The block was ~458 lines, not ~250 — the V44 login-lockout and Day 28 rate-limit helpers came with
+it (used only by these routes). `PUBLIC_API_ROUTES`, `RUNNING_LOCALLY`, `current_user_id`,
+`admin_required`, `adopt_session_from_header(app)` and a new `check_login_required(app)` went to
+`core.py`; `app.py` keeps only the 2-line `@app.before_request` wrapper. The Google Drive OAuth
+routes that share the `/api/auth/google/*` prefix were deliberately left in `app.py` — they connect
+a user's Drive, not log them into Frame Atlas, and belong with Day 41's account/sync routes.
+2 test scripts repointed; suite 44 Python + 3 `.mjs` green; live-server check 32/32 with a
+database cross-check. `app.py` 4,813 → 4,355 lines.
 
 ### Day 37 — `routes_search.py`
 `/api/search`, `/api/search/ids`, `/api/autocomplete`, `/api/interpret`, `/api/bookmarks`,
@@ -1287,7 +1297,7 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job + scheduler isolated; first-ever test (23 checks); app.py −66 lines ✅ *(V76)* |
 | 34 | Crop worker → `crop.py` | Background crop queue + worker thread; app.py −203 lines ✅ *(V77)* |
 | 35 | Drive sync → `sync.py` | Folder-sync worker + ingest; app.py −350 lines; workers done ✅ *(V78)* |
-| 36 | Routes → `routes_auth.py` | Login/register/invite routes as a blueprint *(planned)* |
+| 36 | Routes → `routes_auth.py` | Login/register/invite routes as a blueprint; gate + `admin_required` → `core.py`; app.py −458 lines *(V83 — code complete)* |
 | 37 | Routes → `routes_search.py` | Search/autocomplete/bookmarks/similar as a blueprint *(planned)* |
 | 38 | Routes → `routes_tags.py` | Bulk tag ops + tag editing as a blueprint *(planned)* |
 | 39 | Routes → `routes_images.py` | Favorite/filmography/notes/download/delete/thumb *(planned)* |
