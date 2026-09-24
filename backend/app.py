@@ -1,5 +1,4 @@
 import os
-import json
 import base64
 import secrets
 import io
@@ -8,12 +7,11 @@ import sqlite3
 import time
 import zlib
 import threading
-import queue as queue_module
 import concurrent.futures
 import urllib.parse
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, jsonify, request, send_file, send_from_directory, Response, stream_with_context, redirect, session
+from flask import Flask, jsonify, request, send_file, send_from_directory, redirect, session
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from PIL import Image
@@ -74,6 +72,7 @@ from core import (
     TAG_PLURAL_STRIP_EXCEPTIONS, normalize_tag_value, clear_ai_tags,
     _shuffle_key, get_db, db_path, favorite_col,
     RUNNING_LOCALLY, admin_required, current_user_id, check_login_required,
+    _scope_ids_to_user,
 )
 from schema import (
     _is_duplicate_column_error, EXPECTED_COLUMNS, missing_columns,
@@ -113,10 +112,12 @@ import sync
 import routes_auth
 
 # Day 37 (Phase 3): search routes as a Blueprint (routes_search.py), plus the
-# shared filter builder they use (search_filters.py). The tag-removal preview
-# still in this file calls search_filters.build_search_filters() qualified.
-import search_filters
+# shared filter builder they use (search_filters.py; app.py itself no longer
+# calls it — the tag-removal preview moved to routes_tags.py on Day 38).
 import routes_search
+
+# Day 38 (Phase 3): tag editing + auto-tagger control routes as a Blueprint.
+import routes_tags
 
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -157,6 +158,8 @@ DB_PATH = db_path()
 app.register_blueprint(routes_auth.bp)
 # Day 37: search / autocomplete / NL interpret / bookmarks / similar.
 app.register_blueprint(routes_search.bp)
+# Day 38: tag editing (single + bulk + cleanup preview) and auto-tagger controls.
+app.register_blueprint(routes_tags.bp)
 
 # Day 35 (Phase 3): the sync_state progress dict moved to sync.py with the
 # worker. Read it qualified as sync.sync_state — it is only ever mutated in
@@ -164,8 +167,8 @@ app.register_blueprint(routes_search.bp)
 # /api/regenerate-thumbnails borrows it for its own progress + running-lock
 # (pre-existing behaviour, not introduced by the split).
 # Day 32 (Phase 3): _tag_progress / _tag_progress_lock / _sse_queues / _sse_lock
-# moved to tagging.py with the worker. The tag-progress routes below reach them
-# qualified as tagging._tag_progress etc.
+# moved to tagging.py with the worker. The tag-progress routes (routes_tags.py
+# since Day 38) reach them qualified as tagging._tag_progress etc.
 
 # Day 34 (Phase 3): CROP_SAVE_FORMATS, the _crop_queue/_crop_progress/_crop_lock/
 # _crop_job_counter state, and _process_crop_jobs() all moved to crop.py — the
@@ -315,9 +318,9 @@ def require_login():
 #   record_gemini_usage, ENCRYPTED_PREFIX — call sites here qualified gemini.*
 # tagging.py: _tag_progress / _sse_queues (+ their locks), GEMINI_TAGGING_PROMPT,
 #   _broadcast_progress, _select_pending_for_tagging, _run_tagging_job[_inner],
-#   trigger_tagging — the tag-progress routes below read tagging._tag_progress
-#   etc. and call tagging.trigger_tagging(). genai_client stays imported in
-#   app.py too: /api/models still calls it directly (/api/interpret moved to
+#   trigger_tagging — the tag-progress routes (routes_tags.py since Day 38) read
+#   tagging._tag_progress etc.; upload/clip here call tagging.trigger_tagging().
+#   genai_client stays imported in app.py too: /api/models still calls it directly (/api/interpret moved to
 #   routes_search.py on Day 37).
 
 # ============================================================================
@@ -358,19 +361,7 @@ def require_login():
 def health():
     return jsonify({'status': 'ok'})
 
-@app.route('/api/tag/retry-failed', methods=['POST'])
-@admin_required
-def retry_failed():
-    """Reset only failed images to pending and trigger retag. Cheaper than force=true."""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("UPDATE images SET tagging_status = 'pending' WHERE tagging_status = 'failed'")
-    affected = c.rowcount
-    conn.commit()
-    conn.close()
-    if affected > 0:
-        tagging.trigger_tagging()
-    return jsonify({'success': True, 'reset': affected, 'message': f'Reset {affected} failed images, tagging started'})
+# Day 38 (Phase 3): /api/tag/retry-failed moved to routes_tags.py.
 
 @app.route('/api/config', methods=['GET'])
 def config():
@@ -566,73 +557,8 @@ def sync_status():
     return jsonify({'in_progress': sync.sync_state['in_progress'], 'yours': False,
                     'processed': 0, 'total': 0, 'current_file': '', 'errors': []})
 
-@app.route('/api/tag-progress/stream')
-@admin_required
-def tag_progress_stream():
-    def generate():
-        q = queue_module.Queue(maxsize=50)
-        with tagging._sse_lock:
-            tagging._sse_queues.append(q)
-        try:
-            with tagging._tag_progress_lock:
-                data = dict(tagging._tag_progress)
-            pct = int(data['done'] / data['total'] * 100) if data['total'] > 0 else 0
-            yield f"data: {json.dumps({**data, 'pct': pct})}\n\n"
-
-            while True:
-                try:
-                    payload = q.get(timeout=30)
-                    yield f"data: {payload}\n\n"
-                    parsed = json.loads(payload)
-                    if parsed.get('status') in ('complete', 'error'):
-                        break
-                except queue_module.Empty:
-                    yield ": keepalive\n\n"
-        finally:
-            with tagging._sse_lock:
-                if q in tagging._sse_queues:
-                    tagging._sse_queues.remove(q)
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype='text/event-stream',
-        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
-    )
-
-@app.route('/api/tag-progress')
-@admin_required
-def tag_progress_snapshot():
-    with tagging._tag_progress_lock:
-        data = dict(tagging._tag_progress)
-    pct = int(data['done'] / data['total'] * 100) if data['total'] > 0 else 0
-
-    conn = get_db()
-    c = conn.cursor()
-    counts = {}
-    for row in c.execute("SELECT tagging_status, COUNT(*) as n FROM images GROUP BY tagging_status").fetchall():
-        counts[row['tagging_status']] = row['n']
-    tag_rows = c.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
-    conn.close()
-
-    return jsonify({**data, 'pct': pct, 'status_counts': counts, 'total_tag_rows': tag_rows})
-
-@app.route('/api/tag/start', methods=['POST'])
-@admin_required
-def tag_start():
-    force = request.args.get('force') == 'true'
-    with tagging._tag_progress_lock:
-        if tagging._tag_progress['running']:
-            return jsonify({'error': 'Tagging already in progress'}), 400
-
-    if force:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("UPDATE images SET tagging_status = 'pending'")
-        conn.commit()
-        conn.close()
-
-    tagging.trigger_tagging()
-    return jsonify({'success': True, 'message': 'Tagging started', 'force': force})
+# Day 38 (Phase 3): /api/tag-progress/stream, /api/tag-progress and
+# /api/tag/start moved to routes_tags.py.
 
 @app.route('/api/account/gemini-key', methods=['GET', 'POST'])
 def account_gemini_key():
@@ -660,43 +586,8 @@ def account_gemini_key():
     key = gemini.decrypt_secret(row['gemini_api_key']) if row and row['gemini_api_key'] else None
     return jsonify({'has_key': bool(key), 'key_last4': key[-4:] if key else None})
 
-@app.route('/api/tag/mine', methods=['POST'])
-def tag_mine():
-    """A friend's own 'Tag my photos' trigger — scoped to just their library,
-    always using their own saved key (never the admin's)."""
-    uid = current_user_id()
-    if uid == 1:
-        return jsonify({'error': 'Admin tagging runs automatically after sync.'}), 400
-
-    if not gemini.get_user_gemini_key(uid):
-        return jsonify({'error': 'Add your Gemini API key in Account settings first.'}), 400
-
-    with tagging._tag_progress_lock:
-        if tagging._tag_progress['running']:
-            return jsonify({'error': 'Tagging already in progress'}), 400
-
-    tagging.trigger_tagging(user_id=uid)
-    return jsonify({'success': True, 'message': 'Tagging started'})
-
-@app.route('/api/tag-progress/mine')
-def tag_progress_mine():
-    """Same shape as the admin-only /api/tag-progress, but scoped so a friend
-    can poll their own 'Tag my photos' run without the admin_required gate."""
-    uid = current_user_id()
-    with tagging._tag_progress_lock:
-        data = dict(tagging._tag_progress)
-    pct = int(data['done'] / data['total'] * 100) if data['total'] > 0 else 0
-
-    conn = get_db()
-    c = conn.cursor()
-    counts = {}
-    for row in c.execute(
-        "SELECT tagging_status, COUNT(*) as n FROM images WHERE user_id = ? GROUP BY tagging_status", (uid,)
-    ).fetchall():
-        counts[row['tagging_status']] = row['n']
-    conn.close()
-
-    return jsonify({**data, 'pct': pct, 'status_counts': counts})
+# Day 38 (Phase 3): /api/tag/mine and /api/tag-progress/mine moved to
+# routes_tags.py.
 
 @app.route('/api/billing/spend')
 def billing_spend():
@@ -727,21 +618,11 @@ def billing_spend():
     })
 
 # Day 37 (Phase 3): /api/interpret and /api/autocomplete moved to
-# routes_search.py. /api/tag-categories stays here until Day 38 (tags).
-
-@app.route('/api/tag-categories')
-def tag_categories():
-    """Full fixed list of tag categories (not just ones currently in use),
-    so the frontend can always show a complete category picker."""
-    return jsonify([{
-        'key': key,
-        'label': CAT_LABELS[key],
-        'color': CAT_COLORS.get(key, '#9c988d')
-    } for key in CAT_LABELS])
+# routes_search.py. Day 38: /api/tag-categories moved to routes_tags.py.
 
 # Day 37 (Phase 3): _fts5_match_query() + build_search_filters() moved to
-# search_filters.py — shared by routes_search.py and the tag-removal
-# preview below (called qualified as search_filters.build_search_filters).
+# search_filters.py — shared by routes_search.py and routes_tags.py's
+# tag-removal preview.
 
 # Day 37 (Phase 3): /api/search, /api/search/ids and /api/bookmarks moved to
 # routes_search.py.
@@ -1201,366 +1082,16 @@ def toggle_favorite(image_id):
         return jsonify({'error': 'Image not found'}), 404
     return jsonify({'success': True, 'is_favorite': result})
 
-@app.route('/api/images/<int:image_id>/tags', methods=['POST', 'DELETE'])
-def edit_tags(image_id):
-    data = request.get_json(force=True) or {}
-    # No category picked -> misc. Kept out of CAT_LABELS/CAT_COLORS on
-    # purpose so it never shows up as a pickable option in the category
-    # dropdown, but renders fine everywhere via the existing .get(x, x)
-    # fallbacks (label becomes literally "misc", color a neutral gray).
-    category = (data.get('category') or '').strip() or 'misc'
-    value = normalize_tag_value(data.get('value'))
-    if not value:
-        return jsonify({'error': 'value is required'}), 400
+# Day 38 (Phase 3): /api/images/<id>/tags (single-photo tag edit) moved to
+# routes_tags.py.
 
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT user_id FROM images WHERE id = ?', (image_id,))
-    row = c.fetchone()
-    # V75: tag editing is owner-or-admin, not admin-only — a friend can fix the
-    # tags on their OWN photos (same rule as the On-Set Notes editor, V39). A
-    # non-owner gets a plain 404, never a 403, so the endpoint doesn't confirm
-    # the image exists to someone who can't touch it.
-    if not row or (row['user_id'] != session['user_id'] and session.get('role') != 'admin'):
-        conn.close()
-        return jsonify({'error': 'Image not found'}), 404
+# Day 38 (Phase 3): _scope_ids_to_user() moved to core.py (imported above) —
+# the bulk filmography routes below still use it.
 
-    if request.method == 'POST':
-        c.execute('''
-            SELECT 1 FROM tags WHERE image_id = ? AND category = ? AND value = ?
-        ''', (image_id, category, value))
-        if not c.fetchone():
-            c.execute('''
-                INSERT INTO tags (image_id, user_id, category, value)
-                VALUES (?, ?, ?, ?)
-            ''', (image_id, row['user_id'], category, value))
-    else:
-        c.execute('''
-            DELETE FROM tags WHERE image_id = ? AND category = ? AND value = ?
-        ''', (image_id, category, value))
-
-    conn.commit()
-    c.execute('SELECT category, value FROM tags WHERE image_id = ? ORDER BY category, value', (image_id,))
-    tags = [{'category': t[0], 'value': t[1]} for t in c.fetchall()]
-    conn.close()
-    return jsonify({'success': True, 'tags': tags})
-
-def _scope_ids_to_user(c, image_ids):
-    """Cut a client-supplied image_id list down to the photos the current user
-    is allowed to edit metadata on: an admin keeps the whole list (byte-for-
-    byte — no query runs), a friend keeps only the ids their own user_id owns.
-
-    Every bulk tag / filmography endpoint runs its id list through this (V75),
-    so 'apply this to my selection' from a friend can never reach into another
-    person's library even if the request body is hand-tampered. Chunked for the
-    same reason count_tags_for_images() is — a friend's whole-library selection
-    can exceed SQLite's placeholder limit just like the admin's can."""
-    if session.get('role') == 'admin':
-        return list(image_ids)
-    uid = session.get('user_id')
-    owned = set()
-    for batch in chunked(image_ids):
-        placeholders = ','.join('?' * len(batch))
-        for row in c.execute(
-            f'SELECT id FROM images WHERE id IN ({placeholders}) AND user_id = ?',
-            list(batch) + [uid]
-        ).fetchall():
-            owned.add(row['id'])
-    return [i for i in image_ids if i in owned]
-
-def count_tags_for_images(c, image_ids):
-    """{(category, value): how many of these images carry it}, highest first.
-
-    Shared by the selection summary and the suggestions endpoint — they were
-    running the identical query. Chunked (V32) because select-all can now put
-    a whole library's worth of ids in one selection, past what SQLite will
-    accept as placeholders in a single statement. Chunks are disjoint sets of
-    image ids, so adding the per-chunk counts gives the same answer one big
-    query would."""
-    counts = {}
-    for batch in chunked(image_ids):
-        placeholders = ','.join('?' * len(batch))
-        for row in c.execute(f'''
-            SELECT category, value, COUNT(DISTINCT image_id) as cnt
-            FROM tags WHERE image_id IN ({placeholders})
-            GROUP BY category, value
-        ''', batch).fetchall():
-            key = (row['category'], row['value'])
-            counts[key] = counts.get(key, 0) + row['cnt']
-    return dict(sorted(counts.items(), key=lambda kv: kv[1], reverse=True))
-
-def _parse_bulk_tag_request(data):
-    """Shared validation for the bulk-apply/bulk-remove endpoints. Returns
-    (image_ids, category, value, error_response). error_response is None
-    if validation passed."""
-    image_ids = data.get('image_ids')
-    # Blank category -> misc, same as the single-image tag editor.
-    category = (data.get('category') or '').strip() or 'misc'
-    value = normalize_tag_value(data.get('value'))
-
-    if not isinstance(image_ids, list) or not image_ids or \
-            not all(isinstance(i, int) for i in image_ids):
-        return None, None, None, (jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400)
-    if category != 'misc' and category not in CAT_LABELS:
-        return None, None, None, (jsonify({'error': 'invalid category'}), 400)
-    if not value:
-        return None, None, None, (jsonify({'error': 'value is required'}), 400)
-
-    return image_ids, category, value, None
-
-@app.route('/api/tags/bulk-apply', methods=['POST'])
-def bulk_apply_tags():
-    data = request.get_json(force=True) or {}
-    image_ids, category, value, error = _parse_bulk_tag_request(data)
-    if error:
-        return error
-
-    conn = get_db()
-    c = conn.cursor()
-    # V75: friends may bulk-tag in Select Mode, but only their own photos. An
-    # admin's list is returned untouched; a friend's is trimmed to what they
-    # own, and anything dropped is reported back in invalid_ids.
-    requested_ids = image_ids
-    image_ids = _scope_ids_to_user(c, image_ids)
-    scoped = set(image_ids)
-    invalid_ids = [i for i in requested_ids if i not in scoped]
-
-    applied = 0
-    already_had = 0
-
-    for image_id in image_ids:
-        c.execute('SELECT user_id FROM images WHERE id = ?', (image_id,))
-        row = c.fetchone()
-        if not row:
-            invalid_ids.append(image_id)
-            continue
-
-        c.execute('''
-            SELECT 1 FROM tags WHERE image_id = ? AND category = ? AND value = ?
-        ''', (image_id, category, value))
-        if c.fetchone():
-            already_had += 1
-        else:
-            c.execute('''
-                INSERT INTO tags (image_id, user_id, category, value)
-                VALUES (?, ?, ?, ?)
-            ''', (image_id, row['user_id'], category, value))
-            applied += 1
-
-    conn.commit()
-    conn.close()
-    return jsonify({'applied': applied, 'already_had': already_had, 'invalid_ids': invalid_ids})
-
-@app.route('/api/tags/bulk-remove', methods=['POST'])
-def bulk_remove_tags():
-    data = request.get_json(force=True) or {}
-    image_ids, category, value, error = _parse_bulk_tag_request(data)
-    if error:
-        return error
-
-    conn = get_db()
-    c = conn.cursor()
-    # V75: friends may bulk-remove a shared tag from their OWN selection in
-    # Select Mode. The library-wide "remove this tag everywhere" cleanup (V32)
-    # stays admin-only — that path is gated at /api/tags/removal-preview, which
-    # keeps its @admin_required.
-    image_ids = _scope_ids_to_user(c, image_ids)
-    # Chunked because V32's "remove this tag from every result" can hand this
-    # the whole filtered library at once, and SQLite caps how many `?`
-    # placeholders one statement may carry. The delete is scoped to the exact
-    # category+value pair either way — it can never touch another tag, and it
-    # never touches the images themselves.
-    removed = 0
-    for i in range(0, len(image_ids), SQL_PARAM_CHUNK):
-        batch = image_ids[i:i + SQL_PARAM_CHUNK]
-        placeholders = ','.join('?' * len(batch))
-        c.execute(f'''
-            DELETE FROM tags WHERE image_id IN ({placeholders}) AND category = ? AND value = ?
-        ''', batch + [category, value])
-        removed += c.rowcount
-    conn.commit()
-    conn.close()
-    return jsonify({'removed': removed})
-
-# How many thumbnails the removal preview sends back per category. The COUNT
-# and the id list are always complete — this only caps the pictures, because
-# 600px base64 thumbnails are ~40KB each and a 2,000-photo preview would be
-# an 80MB response for a strip nobody scrolls to the end of.
-TAG_REMOVAL_PREVIEW_SAMPLES = 60
-
-@app.route('/api/tags/removal-preview')
-@admin_required
-def tag_removal_preview():
-    """Show which photos would lose a tag BEFORE removing it across a whole
-    filtered search (V32) — Ryan's explicit choice over a bare are-you-sure
-    box or an undo window: he wants to look at the photos first.
-
-    Results are grouped by tag category, never merged. 'car (Location)' and
-    'car (Objects)' are two different true facts about a photo (CLAUDE.md,
-    V30), so the person removing gets to pick which one they actually meant
-    instead of wiping both from one button.
-
-    Filtering goes through build_search_filters(), the same code /api/search
-    uses, so "110 photos would lose this" counts the same photos the grid is
-    showing. Read-only — this endpoint never writes anything."""
-    uid = session['user_id']
-    value = normalize_tag_value(request.args.get('value'))
-    if not value:
-        return jsonify({'error': 'value is required'}), 400
-
-    conn = get_db()
-    c = conn.cursor()
-    conditions, params, _ = search_filters.build_search_filters(c, uid, request.args)
-    where = 'WHERE ' + ' AND '.join(conditions)
-
-    # The filter clause goes in as a subquery so it stays byte-for-byte the
-    # clause /api/search runs, with no rewriting for the join.
-    rows = c.execute(f'''
-        SELECT t.category AS category, i.id AS id, i.filename AS filename,
-               i.thumbnail_blob AS thumbnail_blob, i.aspect_ratio AS aspect_ratio
-        FROM images i JOIN tags t ON t.image_id = i.id
-        WHERE t.value = ? AND i.id IN (SELECT id FROM images {where})
-        ORDER BY i.date_added DESC
-    ''', [value] + params).fetchall()
-    conn.close()
-
-    groups = {}
-    for row in rows:
-        g = groups.setdefault(row['category'], {'image_ids': [], 'samples': []})
-        g['image_ids'].append(row['id'])
-        if len(g['samples']) < TAG_REMOVAL_PREVIEW_SAMPLES:
-            ar_float = ar_float_from_str(row['aspect_ratio'] or '16:9')
-            g['samples'].append({
-                'id': row['id'],
-                'filename': row['filename'],
-                'thumbnail': 'data:image/jpeg;base64,' + base64.b64encode(row['thumbnail_blob']).decode('utf-8'),
-                'ar_float': round(ar_float, 4)
-            })
-
-    return jsonify({
-        'value': value,
-        'groups': [{
-            'category': cat,
-            'catLabel': CAT_LABELS.get(cat, cat),
-            'color': CAT_COLORS.get(cat, '#9c988d'),
-            'count': len(g['image_ids']),
-            'image_ids': g['image_ids'],
-            'samples': g['samples'],
-            'sample_limit': TAG_REMOVAL_PREVIEW_SAMPLES
-        } for cat, g in sorted(groups.items(), key=lambda kv: -len(kv[1]['image_ids']))]
-    })
-
-@app.route('/api/tags/selection-summary', methods=['POST'])
-def tags_selection_summary():
-    data = request.get_json(force=True) or {}
-    image_ids = data.get('image_ids')
-    if not isinstance(image_ids, list) or not image_ids or \
-            not all(isinstance(i, int) for i in image_ids):
-        return jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400
-
-    conn = get_db()
-    c = conn.cursor()
-    # V75: the shared-tags panel is available to friends now, scoped to their
-    # own photos (an admin's list passes through untouched).
-    image_ids = _scope_ids_to_user(c, image_ids)
-    if not image_ids:
-        conn.close()
-        return jsonify({'total': 0, 'tags': [],
-                        'common_filmography': {f: None for f in ('title', 'director', 'dp', 'year', 'painter', 'photographer')}})
-    tag_counts = count_tags_for_images(c, image_ids)
-
-    # Filmography consensus: a field only counts as "common" when EVERY
-    # selected image already agrees on the same non-empty value — missing
-    # data on even one image breaks the consensus (so the bulk form doesn't
-    # falsely imply a field's been verified across the whole selection).
-    film_rows = []
-    for batch in chunked(image_ids):
-        placeholders = ','.join('?' * len(batch))
-        film_rows += c.execute(f'''
-            SELECT image_id, title, director, dp, year, painter, photographer FROM filmography
-            WHERE image_id IN ({placeholders})
-        ''', batch).fetchall()
-    conn.close()
-
-    film_by_image = {r['image_id']: r for r in film_rows}
-    common_filmography = {}
-    for field in ('title', 'director', 'dp', 'year', 'painter', 'photographer'):
-        values = {(film_by_image[iid][field] if iid in film_by_image else None) for iid in image_ids}
-        only_value = next(iter(values)) if len(values) == 1 else None
-        common_filmography[field] = only_value or None
-
-    total = len(image_ids)
-    # "Shared tags" means every selected image carries it, not just some of
-    # them — a tag on 4 of 12 selected photos isn't something a bulk-remove
-    # click should be able to touch. cnt == total is the actual intersection.
-    return jsonify({
-        'total': total,
-        'tags': [{
-            'category': cat,
-            'value': val,
-            'catLabel': CAT_LABELS.get(cat, cat),
-            'color': CAT_COLORS.get(cat, '#9c988d'),
-            'count': cnt
-        } for (cat, val), cnt in tag_counts.items() if cnt == total],
-        'common_filmography': common_filmography
-    })
-
-@app.route('/api/tags/suggestions', methods=['POST'])
-def tags_suggestions():
-    data = request.get_json(force=True) or {}
-    image_ids = data.get('image_ids')
-    if not isinstance(image_ids, list) or not image_ids or \
-            not all(isinstance(i, int) for i in image_ids):
-        return jsonify({'error': 'image_ids must be a non-empty list of ints'}), 400
-
-    conn = get_db()
-    c = conn.cursor()
-    # V75: available to friends, scoped to their own photos.
-    image_ids = _scope_ids_to_user(c, image_ids)
-    if not image_ids:
-        conn.close()
-        return jsonify({'suggestions': []})
-    total = len(image_ids)
-    selection_tags = count_tags_for_images(c, image_ids)
-
-    if not selection_tags:
-        conn.close()
-        return jsonify({'suggestions': []})
-
-    # Top 5 seed tags by how many selected images carry them.
-    seed_pairs = sorted(selection_tags.items(), key=lambda kv: kv[1], reverse=True)[:5]
-    seed_values = [pair[0][1] for pair in seed_pairs]
-
-    seed_placeholders = ','.join('?' * len(seed_values))
-    candidate_rows = c.execute(f'''
-        SELECT t2.category, t2.value, COUNT(DISTINCT t2.image_id) as cnt
-        FROM tags t2
-        WHERE t2.image_id IN (
-            SELECT DISTINCT image_id FROM tags WHERE value IN ({seed_placeholders})
-        )
-        AND t2.value NOT IN ({seed_placeholders})
-        GROUP BY t2.category, t2.value
-        ORDER BY cnt DESC
-        LIMIT 30
-    ''', seed_values + seed_values).fetchall()
-    conn.close()
-
-    suggestions = []
-    for row in candidate_rows:
-        key = (row['category'], row['value'])
-        if selection_tags.get(key, 0) >= total:
-            continue
-        suggestions.append({
-            'category': row['category'],
-            'value': row['value'],
-            'catLabel': CAT_LABELS.get(row['category'], row['category']),
-            'color': CAT_COLORS.get(row['category'], '#9c988d'),
-            'count': row['cnt']
-        })
-        if len(suggestions) >= 12:
-            break
-
-    return jsonify({'suggestions': suggestions})
+# Day 38 (Phase 3): count_tags_for_images(), _parse_bulk_tag_request(),
+# TAG_REMOVAL_PREVIEW_SAMPLES and the /api/tags/* routes (bulk-apply,
+# bulk-remove, removal-preview, selection-summary, suggestions) moved to
+# routes_tags.py.
 
 @app.route('/api/filmography/autocomplete')
 def filmography_autocomplete():

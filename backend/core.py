@@ -265,3 +265,30 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+
+# ── V75 owner scoping for bulk metadata edits (moved here Day 38) ───────────
+# Used by routes_tags.py's bulk tag endpoints AND app.py's bulk filmography
+# endpoints (Day 39's routes_images.py), so it lives in core rather than in
+# either blueprint.
+def _scope_ids_to_user(c, image_ids):
+    """Cut a client-supplied image_id list down to the photos the current user
+    is allowed to edit metadata on: an admin keeps the whole list (byte-for-
+    byte — no query runs), a friend keeps only the ids their own user_id owns.
+
+    Every bulk tag / filmography endpoint runs its id list through this (V75),
+    so 'apply this to my selection' from a friend can never reach into another
+    person's library even if the request body is hand-tampered. Chunked for the
+    same reason count_tags_for_images() is — a friend's whole-library selection
+    can exceed SQLite's placeholder limit just like the admin's can."""
+    if session.get('role') == 'admin':
+        return list(image_ids)
+    uid = session.get('user_id')
+    owned = set()
+    for batch in chunked(image_ids):
+        placeholders = ','.join('?' * len(batch))
+        for row in c.execute(
+            f'SELECT id FROM images WHERE id IN ({placeholders}) AND user_id = ?',
+            list(batch) + [uid]
+        ).fetchall():
+            owned.add(row['id'])
+    return [i for i in image_ids if i in owned]

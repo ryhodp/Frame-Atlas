@@ -93,10 +93,11 @@ starting point for next session.
 frame-atlas/
 ├── backend/
 │   ├── app.py              # Endpoints, sync (Phase 3 splits this)
-│   ├── core.py             # get_db/db_path, favorite_col, tag normalisation, taxonomy maps, Gemini constants (V70; favorite_col V73); login gate + admin_required + RUNNING_LOCALLY (V83)
+│   ├── core.py             # get_db/db_path, favorite_col, tag normalisation, taxonomy maps, Gemini constants (V70; favorite_col V73); login gate + admin_required + RUNNING_LOCALLY (V83); _scope_ids_to_user (V85)
 │   ├── routes_auth.py      # Blueprint: setup, login/logout, register, forgot/reset password, invite codes, /api/auth/me (V83)
 │   ├── routes_search.py    # Blueprint: /api/search, /api/search/ids, /api/autocomplete, /api/interpret, /api/bookmarks, /api/images/<id>/similar (V84)
 │   ├── search_filters.py   # build_search_filters() + _fts5_match_query() — shared by routes_search and the tag-removal preview (V84)
+│   ├── routes_tags.py      # Blueprint: /api/images/<id>/tags, /api/tags/* (bulk, preview, summary, suggestions), /api/tag-categories, auto-tagger controls /api/tag/* + /api/tag-progress* (V85)
 │   ├── schema.py           # init_db + all migrations + check_schema + load_embeddings_seed (V70)
 │   ├── drive.py            # Google Drive: service/OAuth clients, folder listing, _Removed, download (V71)
 │   ├── gemini.py           # Friend Gemini key encryption (Fernet) + per-user spend tracking (V72)
@@ -237,6 +238,17 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - 1 test script repointed by hand: `test_tagging_locally.py` (`NL_INTERPRET_PROMPT` now asserted on `mod.routes_search`). No other script referenced a moved name — they all drive search over HTTP.
 - **Verification:** suite 44 Python + 3 `.mjs` green before and after. A live-server check (real port, real cookies, fake Gemini) ran against the pre-change backend AND the new one — 54 behaviour checks + 20 wiring checks, bookmark writes cross-checked in the DB, and **all 50 recorded responses byte-identical before vs after**.
 - `app.py`: **4,375 → 3,734 lines** (−641). `routes_search.py` 491, `search_filters.py` 227.
+
+**Route blueprints — Day 38 (V85): `routes_tags.py`**
+- Two families of tag routes in one blueprint, `Blueprint('tags')` (Ryan's call): **editing tags** — `/api/images/<id>/tags`, `/api/tags/bulk-apply`, `bulk-remove`, `removal-preview` (still `@admin_required`), `selection-summary`, `suggestions`, `/api/tag-categories`, with `count_tags_for_images()`, `_parse_bulk_tag_request()`, `TAG_REMOVAL_PREVIEW_SAMPLES` — and **auto-tagger controls**, which no day's plan had assigned: `/api/tag/start`, `/api/tag/retry-failed`, `/api/tag/mine`, `/api/tag-progress`, `/api/tag-progress/stream` (SSE), `/api/tag-progress/mine`. All 16 blocks verbatim against `HEAD`; URLs byte-identical.
+- **`_scope_ids_to_user()` moved to `core.py`** (Ryan's call), because Day 39's bulk filmography routes use it too and no blueprint imports another. `app.py` re-imports it by name, so `bulk_set_filmography` / `bulk_clear_filmography` are unchanged. It reads `session`, which `core.py` already imported.
+- **Stayed in `app.py`:** `/api/account/gemini-key` and `/api/billing/spend` (they sit between the tagging routes but are account routes, Day 41). `app.py` no longer uses `search_filters` at all, so it stopped importing it.
+- Dead imports removed from `app.py`: `json`, `queue as queue_module`, `Response`, `stream_with_context` (only the moved routes used them; no test referenced them). `ar_float_from_str` / `SQL_PARAM_CHUNK` / `normalize_tag_value` are now unused inside `app.py` but **kept** as re-exports, per the standing rule.
+- **Zero test scripts needed changes.** Scripts no-op the worker via `mod.tagging.trigger_tagging`, which is the same module object the routes call.
+- **Verification:** suite 44 Python + 3 `.mjs` green before and after. Live-server check against the pre-change and new backends: 75 behaviour checks + 25 wiring checks, every write (single + bulk tag edits, force re-tag, retry-failed) cross-checked in the DB, friend scoping confirmed in the DB, the SSE stream opened, relayed a broadcast, closed and cleaned up its listener. **All 61 recorded responses + SSE events identical before vs after.**
+- **Harness lesson:** PIL's JPEG output for a fixture image was NOT byte-stable run to run here (same pixels, different bytes — proven by running the OLD code twice). A before/after diff that records raw thumbnail bytes will show false differences. Compare each thumbnail to the blob actually stored in the DB instead.
+- **Pre-existing bug found, deliberately NOT fixed in the move:** `/api/tags/suggestions`' candidate query has no `user_id` filter, so suggestions (tag words + counts) draw on every library. Reproduced: a friend whose only photo is tagged `lonely, dog` was suggested `low-key`, `car`, `night`, which exist only on the admin's photos.
+- `app.py`: **3,734 → 3,265 lines** (−469). `routes_tags.py` 513, `core.py` 267 → 294.
 
 **CI (V43/Day 25)**
 - `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **44 Python + 3 `.mjs` as of V76** (`test_tagging_locally.py` added Day 32; `test_friend_tag_edit_locally.py` added V75; `test_backup_locally.py` added Day 33). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in

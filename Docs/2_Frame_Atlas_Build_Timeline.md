@@ -1188,7 +1188,7 @@ a user's Drive, not log them into Frame Atlas, and belong with Day 41's account/
 2 test scripts repointed; suite 44 Python + 3 `.mjs` green; live-server check 32/32 with a
 database cross-check. `app.py` 4,813 → 4,355 lines.
 
-### Day 37 — `routes_search.py` *(V84 — code complete; awaiting live-site search confirmation)*
+### Day 37 — `routes_search.py` *(V84 — COMPLETE; live search confirmed Sep 24)*
 `/api/search`, `/api/search/ids`, `/api/autocomplete`, `/api/interpret`, `/api/bookmarks`,
 `build_search_filters()`, `_fts5_match_query()`, `get_similar_images()`, `_cosine_similarity()`.
 ~500 lines. Self-contained — search reads the DB, writes nothing except bookmarks.
@@ -1201,11 +1201,18 @@ stays for Day 38; `/api/filmography/autocomplete` reassigned to Day 39. 1 test s
 suite 44 Python + 3 `.mjs` green; live-server check 74/74 with all 50 responses byte-identical
 to the pre-change backend. `app.py` 4,375 → 3,734 lines.
 
-### Day 38 — `routes_tags.py`
+### Day 38 — `routes_tags.py` *(V85 — code complete; awaiting live-site tag confirmation)*
 `/api/tags/*` (bulk apply/remove/preview/summary/suggestions), `/api/tag-categories`,
 `edit_tags`, `count_tags_for_images`, `_parse_bulk_tag_request`. ~350 lines. The removal preview
-imports `build_search_filters` from `search_filters.py` (Day 37), never from `routes_search.py`. Pairs naturally with
-the `tagging.py` worker from Day 32 but stays a separate cut.
+imports `build_search_filters` from `search_filters.py` (Day 37), never from `routes_search.py`.
+Pairs naturally with the `tagging.py` worker from Day 32 but stays a separate cut.
+
+**How it actually shipped:** 13 routes moved as `Blueprint('tags')`, including the 6 auto-tagger
+control routes (`/api/tag/*`, `/api/tag-progress*`) that no day had been assigned. All verbatim,
+URLs byte-identical. `_scope_ids_to_user()` → `core.py` so Day 39's bulk filmography routes can
+share it. Zero test scripts changed; suite 44 Python + 3 `.mjs` green; live-server check 100/100
+with all 61 responses identical to the pre-change backend. Found (not fixed) a pre-existing
+cross-library leak in `/api/tags/suggestions`. `app.py` 3,734 → 3,265 lines.
 
 ### Day 39 — `routes_images.py`
 Favorite toggle, filmography edit + `/api/filmography/autocomplete` (added Day 37), on-set notes, download, delete, bulk delete, thumbnail serve,
