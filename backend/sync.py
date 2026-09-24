@@ -259,9 +259,12 @@ def sync_folder_worker(folder_id, user_id):
         sync_state['in_progress'] = False
 
 
-def _load_existing_phashes():
+def _load_existing_phashes(user_id):
     """Every already-known image fingerprint plus palette (for the
-    color-overlap check), for near-duplicate checks.
+    color-overlap check), for near-duplicate checks — in ONE user's library
+    (V86). A new photo is only ever a duplicate of something its owner
+    already has; comparing across libraries blocked uploads over another
+    person's photo and showed that person's thumbnail in the warning.
 
     **Deliberately does NOT select `thumbnail_blob` (V79).** It used to, and
     that single column was the dominant cost of an upload: this runs once per
@@ -278,9 +281,9 @@ def _load_existing_phashes():
     """
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, filename, phash FROM images WHERE phash IS NOT NULL')
+    c.execute('SELECT id, filename, phash FROM images WHERE phash IS NOT NULL AND user_id = ?', (user_id,))
     rows = [dict(r) for r in c.fetchall()]
-    c.execute('SELECT image_id, hex, share FROM colors')
+    c.execute('SELECT image_id, hex, share FROM colors WHERE user_id = ?', (user_id,))
     palettes = {}
     for r in c.fetchall():
         palettes.setdefault(r['image_id'], []).append((r['hex'], r['share']))
@@ -310,7 +313,7 @@ def _thumbnail_for(row):
 
 
 def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
-                  force=False, source_url=None):
+                  force=False, source_url=None, user_id=1):
     """Put one image into the library: duplicate check, write to Drive, store
     the row, build the thumbnail + palette.
 
@@ -318,6 +321,9 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
     away from the in-app uploader. `existing` is the phash+palette list from
     _load_existing_phashes(); successful ingests are appended to it so a batch
     also dedupes against itself. Returns the per-file result dict.
+
+    `user_id` owns the new row (V86). Defaults to the admin, which is where
+    /api/upload always writes; /api/clip passes the clipper's own id.
     """
     img_phash = compute_phash(image_data)
     thumbnail = generate_thumbnail(image_data)
@@ -368,8 +374,8 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
     c.execute('''
         INSERT INTO images (user_id, drive_file_id, filename, thumbnail_blob, aspect_ratio,
                             tagging_status, md5_checksum, phash, source_url)
-        VALUES (1, ?, ?, ?, ?, 'pending', ?, ?, ?)
-    ''', (drive_file['id'], filename, thumbnail, aspect_ratio,
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+    ''', (user_id, drive_file['id'], filename, thumbnail, aspect_ratio,
           drive_file.get('md5Checksum'), img_phash, source_url))
     new_id = c.lastrowid
     conn.commit()
@@ -377,7 +383,7 @@ def _ingest_image(service, folder_id, image_data, filename, mimetype, existing,
 
     if thumbnail:
         if new_palette:
-            images_common.save_palette(new_id, 1, new_palette)
+            images_common.save_palette(new_id, user_id, new_palette)
         existing.append({'id': new_id, 'filename': filename,
                          'thumbnail_blob': thumbnail, 'phash': img_phash,
                          'colors': new_palette, 'signature': new_signature})

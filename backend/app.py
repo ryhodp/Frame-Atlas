@@ -888,7 +888,7 @@ def upload_images():
         return jsonify({'error': 'No files provided'}), 400
 
     folder_id = drive.get_root_folder_id(1)
-    existing = sync._load_existing_phashes()
+    existing = sync._load_existing_phashes(1)  # uploads always land in the admin's library
 
     # One Drive service per worker thread, not one shared across all workers
     # or rebuilt per photo — building it is cheap (no network call), and
@@ -1025,15 +1025,25 @@ def clip_image():
             'message': 'Connect Google Drive in Frame Atlas → Settings first.'
         }), 401
 
-    existing = sync._load_existing_phashes()
+    # V86: dedupe against — and file the clip under — the CLIPPER's own
+    # library. Since V25 friends clip into their own Drive folder, but the row
+    # was always written as user 1 (so a friend's clip showed up in Ryan's
+    # grid, never theirs) and the duplicate check compared against every
+    # library (so a friend could be shown a thumbnail of Ryan's photo).
+    existing = sync._load_existing_phashes(user_id)
     result = sync._ingest_image(
         service, drive.get_root_folder_id(user_id), image_data,
         _clip_filename(source_url, mimetype), mimetype,
-        existing, force=force, source_url=source_url,
+        existing, force=force, source_url=source_url, user_id=user_id,
     )
 
     if result['status'] == 'uploaded':
-        tagging.trigger_tagging()
+        # Same handoff as the folder sync (sync.py): admin rides the shared
+        # key; a friend only auto-tags if they've saved their own.
+        if user_id == 1:
+            tagging.trigger_tagging()
+        elif gemini.get_user_gemini_key(user_id):
+            tagging.trigger_tagging(user_id=user_id)
         return jsonify({
             'status': 'clipped',
             'image_id': result['image_id'],
@@ -1764,10 +1774,15 @@ def _set_dup_progress(**kwargs):
         _dup_scan_progress.update(kwargs)
 
 
-def _run_duplicate_scan_job():
+def _run_duplicate_scan_job(owner_id):
     """Runs in a background thread. Mirrors duplicates_scan()'s old
     self-heal-then-compare sequence exactly — only the moment each step
-    reports progress is new, not what any step actually does."""
+    reports progress is new, not what any step actually does.
+
+    V86: `owner_id` is whoever clicked the scan. Steps 1-3 (fingerprint /
+    palette backfill, Drive reconcile) stay library-wide on purpose — they
+    only repair stored data and show nobody anything. Step 4, the comparison
+    itself, looks at ONLY that person's photos."""
     try:
         # 1. Fingerprints — missing ones, and (V30) ones still at the old 8x8
         #    width, rebuilt from the stored thumbnail.
@@ -1808,14 +1823,20 @@ def _run_duplicate_scan_job():
 
         # 4. The actual comparison — the dominant cost for a large library,
         #    and the one phase worth a real per-image percentage.
+        #
+        #    V86: scoped to the scanning user's own library. It used to compare
+        #    every library, so a friend's copy of an image Ryan also had could
+        #    land in his Duplicate Review group — pre-ticked for deletion
+        #    (every photo but the first is), one click from being deleted out
+        #    of the friend's library.
         conn = get_db()
         c = conn.cursor()
         c.execute('''
             SELECT id, filename, thumbnail_blob, md5_checksum, phash, date_added, aspect_ratio
-            FROM images ORDER BY date_added ASC
-        ''')
+            FROM images WHERE user_id = ? ORDER BY date_added ASC
+        ''', (owner_id,))
         rows = c.fetchall()
-        c.execute('SELECT image_id, hex, share FROM colors')
+        c.execute('SELECT image_id, hex, share FROM colors WHERE user_id = ?', (owner_id,))
         palette_map = {}
         for r in c.fetchall():
             palette_map.setdefault(r['image_id'], []).append((r['hex'], r['share']))
@@ -1848,7 +1869,7 @@ def duplicates_scan():
             'active': True, 'phase': None, 'processed': 0, 'total': 0,
             'groups': None, 'error': None,
         })
-    threading.Thread(target=_run_duplicate_scan_job, daemon=True).start()
+    threading.Thread(target=_run_duplicate_scan_job, args=(current_user_id(),), daemon=True).start()
     return jsonify({'started': True})
 
 
@@ -1865,15 +1886,18 @@ def find_duplicates():
     """Plain synchronous duplicate check — no self-heal, no progress
     reporting. Kept for any direct caller that wants results in one request
     against whatever fingerprints/palettes already exist; the Find
-    Duplicates button uses the background /api/duplicates/scan instead."""
+    Duplicates button uses the background /api/duplicates/scan instead.
+
+    V86: scoped to the caller's own library, same as the background scan."""
+    uid = current_user_id()
     conn = get_db()
     c = conn.cursor()
     c.execute('''
         SELECT id, filename, thumbnail_blob, md5_checksum, phash, date_added, aspect_ratio
-        FROM images ORDER BY date_added ASC
-    ''')
+        FROM images WHERE user_id = ? ORDER BY date_added ASC
+    ''', (uid,))
     rows = c.fetchall()
-    c.execute('SELECT image_id, hex, share FROM colors')
+    c.execute('SELECT image_id, hex, share FROM colors WHERE user_id = ?', (uid,))
     palette_map = {}
     for r in c.fetchall():
         palette_map.setdefault(r['image_id'], []).append((r['hex'], r['share']))

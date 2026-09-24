@@ -200,12 +200,19 @@ def build_search_filters(c, uid, args):
         # V81: painter/photographer joined title/director/dp here — clicking
         # "Rembrandt" or "Ansel Adams" in the detail panel needs to filter the
         # same way clicking a director already does.
+        #
+        # V86: the exact-match probe only looks at the caller's OWN photos.
+        # It used to check every library, so another user's exact "Her"
+        # flipped this into exact mode and a friend searching "Her" got zero
+        # results instead of their own "Her Story" — and learned, from the
+        # empty grid, that someone else had a film by that exact name.
         exact_hit = c.execute('''
-            SELECT 1 FROM filmography
-            WHERE title = ? COLLATE NOCASE OR director = ? COLLATE NOCASE
-               OR dp = ? COLLATE NOCASE OR painter = ? COLLATE NOCASE
-               OR photographer = ? COLLATE NOCASE LIMIT 1
-        ''', (film_raw, film_raw, film_raw, film_raw, film_raw)).fetchone()
+            SELECT 1 FROM filmography f JOIN images i ON i.id = f.image_id
+            WHERE i.user_id = ? AND (
+                  f.title = ? COLLATE NOCASE OR f.director = ? COLLATE NOCASE
+               OR f.dp = ? COLLATE NOCASE OR f.painter = ? COLLATE NOCASE
+               OR f.photographer = ? COLLATE NOCASE) LIMIT 1
+        ''', (uid, film_raw, film_raw, film_raw, film_raw, film_raw)).fetchone()
         if exact_hit:
             conditions.append('''id IN (
                 SELECT image_id FROM filmography

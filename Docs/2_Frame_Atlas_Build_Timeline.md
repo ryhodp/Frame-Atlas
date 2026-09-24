@@ -1152,7 +1152,7 @@ confirmed on the live site.
 
 ---
 
-## Days 36–42 — Route Blueprints (backend) *(planned, granular)*
+## Days 36–43 — Route Blueprints (backend) *(planned, granular)*
 
 With the workers out (Day 35), `app.py` should be roughly **routes + startup wiring**, likely in
 the 3,500–4,000-line range (down from ~6,960). *(Actual after Day 35: **4,565 lines** — a few
@@ -1184,7 +1184,7 @@ it (used only by these routes). `PUBLIC_API_ROUTES`, `RUNNING_LOCALLY`, `current
 `admin_required`, `adopt_session_from_header(app)` and a new `check_login_required(app)` went to
 `core.py`; `app.py` keeps only the 2-line `@app.before_request` wrapper. The Google Drive OAuth
 routes that share the `/api/auth/google/*` prefix were deliberately left in `app.py` — they connect
-a user's Drive, not log them into Frame Atlas, and belong with Day 41's account/sync routes.
+a user's Drive, not log them into Frame Atlas, and belong with Day 42's account/sync routes.
 2 test scripts repointed; suite 44 Python + 3 `.mjs` green; live-server check 32/32 with a
 database cross-check. `app.py` 4,813 → 4,355 lines.
 
@@ -1197,11 +1197,11 @@ database cross-check. `app.py` 4,813 → 4,355 lines.
 `bp = Blueprint('search', ...)`, all verbatim, URLs byte-identical. `build_search_filters()` +
 `_fts5_match_query()` went to a separate helper file, `search_filters.py`, so Day 38's
 tag-removal preview can share it without one blueprint importing another. `/api/tag-categories`
-stays for Day 38; `/api/filmography/autocomplete` reassigned to Day 39. 1 test script repointed;
+stays for Day 38; `/api/filmography/autocomplete` reassigned to Day 40. 1 test script repointed;
 suite 44 Python + 3 `.mjs` green; live-server check 74/74 with all 50 responses byte-identical
 to the pre-change backend. `app.py` 4,375 → 3,734 lines.
 
-### Day 38 — `routes_tags.py` *(V85 — code complete; awaiting live-site tag confirmation)*
+### Day 38 — `routes_tags.py` *(V85 — COMPLETE, Sep 24)*
 `/api/tags/*` (bulk apply/remove/preview/summary/suggestions), `/api/tag-categories`,
 `edit_tags`, `count_tags_for_images`, `_parse_bulk_tag_request`. ~350 lines. The removal preview
 imports `build_search_filters` from `search_filters.py` (Day 37), never from `routes_search.py`.
@@ -1209,29 +1209,39 @@ Pairs naturally with the `tagging.py` worker from Day 32 but stays a separate cu
 
 **How it actually shipped:** 13 routes moved as `Blueprint('tags')`, including the 6 auto-tagger
 control routes (`/api/tag/*`, `/api/tag-progress*`) that no day had been assigned. All verbatim,
-URLs byte-identical. `_scope_ids_to_user()` → `core.py` so Day 39's bulk filmography routes can
+URLs byte-identical. `_scope_ids_to_user()` → `core.py` so Day 40's bulk filmography routes can
 share it. Zero test scripts changed; suite 44 Python + 3 `.mjs` green; live-server check 100/100
 with all 61 responses identical to the pre-change backend. Found (not fixed) a pre-existing
 cross-library leak in `/api/tags/suggestions`. `app.py` 3,734 → 3,265 lines.
 
-### Day 39 — `routes_images.py`
+### Day 39 — Library isolation fix *(V86 — unplanned; inserted by Ryan, every later day shifted +1)*
+Found while moving the tag routes on Day 38: five code paths still read across every user's
+library, despite V17's promise of fully isolated personal libraries. Fixed all five:
+`/api/tags/suggestions` (tag words + counts from every library), the film-search exact-vs-substring
+probe in `search_filters.py` (another user's exact title gave a friend zero results), Duplicate
+Review (compared every library; a friend's copy could be pre-ticked for deletion in the admin's
+group), the upload/clip duplicate check (blocked on, and showed a thumbnail of, someone else's
+photo), and `/api/clip` filing a friend's clip under user 1. New permanent test
+`scripts/test_library_isolation_locally.py` (29 checks) fails 14 on the old code, passes on the fix.
+
+### Day 40 — `routes_images.py`
 Favorite toggle, filmography edit + `/api/filmography/autocomplete` (added Day 37), on-set notes, download, delete, bulk delete, thumbnail serve,
 full-res proxy, `regenerate_thumbnails`, `extract_colors`. ~600 lines. Touches Drive (delete →
 `_Removed`) so depends on `drive.py` being done.
 
-### Day 40 — `routes_decks.py`
+### Day 41 — `routes_decks.py`
 The whole decks/scenes/storyboard/share/feedback block — `list_decks` through
 `get_shared_deck` and the V42 client-feedback endpoints. ~900 lines, the single biggest route
 group. Self-contained domain (its own tables, its own `_deck_payload` / `_deck_access` helpers).
 The PDF export endpoint (`export_deck_pdf`) comes here too — the `pdf_export.py` module it calls
 is already split.
 
-### Day 41 — `routes_sync.py`
+### Day 42 — `routes_sync.py`
 `/api/sync/*`, `/api/sync-settings`, `/api/account/*` (folder connect, setup status, Gemini key),
 `/api/backups/*`, `/api/folders`, `/api/models`, `/api/config`. ~400 lines. Thin wrappers over
 the `sync.py` / `drive.py` / `backup.py` workers already extracted.
 
-### Day 42 — `routes_analytics.py` + final cleanup
+### Day 43 — `routes_analytics.py` + final cleanup
 `/api/analytics`, `/api/analytics/users`, `/api/views/*`, `/api/views/log`,
 `get_utility_view()`, `log_image_views()`. ~200 lines. Plus: whatever's left in `app.py` should
 now be just the Flask app object, config, blueprint registration, `before_request` gate, the
@@ -1240,7 +1250,7 @@ lines**. Update CLAUDE.md's file-structure section to reflect the final module l
 
 ---
 
-## Days 43+ — `Home.jsx` breakup (frontend) *(planned, separate track)*
+## Days 44+ — `Home.jsx` breakup (frontend) *(planned, separate track)*
 
 `frontend/src/pages/Home.jsx` is **1,855 lines with 36 separate pieces of state**. The V35
 stale-selection bug and the Day 20 crop-selection bug both lived here. Different language,
@@ -1248,20 +1258,20 @@ different risks — there is no `.jsx` test suite the way there's a `test_*_loca
 the backend, so verification leans harder on live browser checks.
 
 **Rough cut plan (to be scoped properly in its own planning session before starting):**
-- **Day 43** — Extract search/filter state into a `useSearch()` custom hook (chips, NL chips,
+- **Day 44** — Extract search/filter state into a `useSearch()` custom hook (chips, NL chips,
   note chips, colour, aspect ratio, film filter, the `buildFilterParams()` assembler). ~400
   lines of state logic out.
-- **Day 44** — Extract Select Mode / Tag Mode into a `useSelection()` hook (the selection Set,
+- **Day 45** — Extract Select Mode / Tag Mode into a `useSelection()` hook (the selection Set,
   drag-select, shift-click range, the bulk-action handlers). ~350 lines. This is where the two
   historical bugs lived.
-- **Day 45** — Extract the masonry grid + infinite scroll + view-logging into a `<ImageGrid>`
+- **Day 46** — Extract the masonry grid + infinite scroll + view-logging into a `<ImageGrid>`
   component. ~300 lines.
-- **Day 46** — Whatever's left: the page becomes composition — `<Home>` wires the hooks and
+- **Day 47** — Whatever's left: the page becomes composition — `<Home>` wires the hooks and
   components together and owns very little state directly. Target **under 500 lines**.
 
 ---
 
-## After Day 46 — stop, or reassess
+## After Day 47 — stop, or reassess
 
 A ~400-line `app.py` split into ~15 focused modules, and a ~500-line `Home.jsx` composed from
 hooks and components, is a genuinely different codebase to work in. At that point the refactor

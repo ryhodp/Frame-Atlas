@@ -481,18 +481,24 @@ def tags_suggestions():
     seed_pairs = sorted(selection_tags.items(), key=lambda kv: kv[1], reverse=True)[:5]
     seed_values = [pair[0][1] for pair in seed_pairs]
 
+    # V86: both halves scoped to the caller's OWN library (admin included —
+    # Ryan's call). Before this the candidate query read every user's tags,
+    # so a friend was offered tag words and counts that existed only on the
+    # admin's photos, and vice versa. tags.user_id is always the image owner
+    # (every INSERT writes the owner's id), so filtering on it is exact.
+    uid = session['user_id']
     seed_placeholders = ','.join('?' * len(seed_values))
     candidate_rows = c.execute(f'''
         SELECT t2.category, t2.value, COUNT(DISTINCT t2.image_id) as cnt
         FROM tags t2
-        WHERE t2.image_id IN (
-            SELECT DISTINCT image_id FROM tags WHERE value IN ({seed_placeholders})
+        WHERE t2.user_id = ? AND t2.image_id IN (
+            SELECT DISTINCT image_id FROM tags WHERE user_id = ? AND value IN ({seed_placeholders})
         )
         AND t2.value NOT IN ({seed_placeholders})
         GROUP BY t2.category, t2.value
         ORDER BY cnt DESC
         LIMIT 30
-    ''', seed_values + seed_values).fetchall()
+    ''', [uid, uid] + seed_values + seed_values).fetchall()
     conn.close()
 
     suggestions = []
