@@ -3855,3 +3855,47 @@ plus this session's small additions (parallel upload block, one new route). When
 ### Starting point for next session
 Day 37 — `routes_search.py`: `/api/search`, `/api/search/ids`, `/api/autocomplete`,
 `/api/interpret`, `/api/bookmarks` and their helpers, same blueprint pattern as Day 36.
+
+---
+
+## Day 37 — Search routes → `routes_search.py` + `search_filters.py` (Frame Atlas V84 complete)
+*Completed: September 24, 2026*
+*Status: DAY 37 COMPLETE — Ryan confirmed search works on the live site (Railway deploy
+`f93c79e7`, commit `673c8d0`, SUCCESS; boot logs clean, schema + self-test OK).*
+
+### What was built
+- `/api/search`, `/api/search/ids`, `/api/autocomplete`, `/api/interpret`, `/api/bookmarks`
+  (GET/POST + DELETE) and `/api/images/<id>/similar` moved into `backend/routes_search.py` as
+  `Blueprint('search')`, with `NL_INTERPRET_PROMPT` and `_cosine_similarity()`. Cut by a script
+  that located each block by anchor text and asserted it (the first run aborted on an unexpected
+  blank line before writing anything, which is what the asserts were for).
+- `build_search_filters()` + `_fts5_match_query()` → new `backend/search_filters.py` (no Flask).
+  `app.py`'s tag-removal preview calls `search_filters.build_search_filters()` qualified.
+- `from array import array` left `app.py`. `app.py` 4,375 → 3,734 lines; `routes_search.py` 491,
+  `search_filters.py` 227.
+
+### Decisions (Ryan: A, A, A, A)
+1. Filter builder in its own helper file, so Day 38's `routes_tags.py` imports it without one
+   blueprint importing another.
+2. "More like this" moved with search despite its `/api/images/...` URL.
+3. `/api/tag-categories` left for Day 38; `/api/filmography/autocomplete` reassigned to Day 39.
+4. Thorough verification (below).
+
+### Verification
+- Suite 44 Python + 3 `.mjs` green before and after. Both new files pyflakes-clean; no new
+  undefined names in `app.py`. Every moved block confirmed verbatim against `HEAD`.
+- Live-server check (real port, `requests.Session` cookies, fake Gemini) run against a `git
+  archive` of the pre-change backend (54/54) and the new one (74/74, +20 wiring checks). **All 50
+  recorded responses byte-identical before vs after.** Bookmark create/delete cross-checked in the DB.
+- 1 test repointed by hand: `test_tagging_locally.py` (`NL_INTERPRET_PROMPT` now on
+  `mod.routes_search`).
+
+### Technical debt / notes
+- `genai_client` is now imported in `app.py`, `tagging.py` and `routes_search.py`; faking Gemini for
+  `/api/interpret` means patching `routes_search.genai_client`.
+- Harness note: macOS has no `timeout` command — a suite loop wrapped in it fails every script
+  instantly (looked like 44 failures). Run the scripts bare.
+
+### Starting point for next session
+Day 38 — `routes_tags.py`: `/api/tags/*` bulk endpoints + removal preview, `/api/tag-categories`,
+`edit_tags`, `count_tags_for_images`, `_parse_bulk_tag_request`.
