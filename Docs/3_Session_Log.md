@@ -3808,3 +3808,50 @@ this session was entirely reactive bug-fix/feature work on top of V78/V79's comp
 extraction, and did not touch route structure. `app.py` is still ~4,565 lines pre-blueprint work,
 plus this session's small additions (parallel upload block, one new route). When Ryan says
 "I'm ready for Day 36," start the Route Blueprints work as planned in the Day 35 entry.
+
+---
+
+## Day 36 — Auth routes → `routes_auth.py`, first route blueprint (Frame Atlas V83 complete)
+*Completed: September 24, 2026*
+*Status: DAY 36 COMPLETE — Ryan confirmed login works on the live site (Railway deploy
+`cb101c96`, commit `108de95`, SUCCESS).*
+
+### Also shipped since the V80 entry (logged here, never got their own entries)
+- **V81 (`d7b3c97`, Sep 7):** duplicate scan runs in a background thread with a real progress bar
+  (`GET /api/duplicates/scan-progress`); `_compute_duplicate_groups()` shared by the background job
+  and the plain GET. Painter/Photographer credits — new nullable `filmography.painter` /
+  `photographer` columns, Film/Painting/Photograph switch in `ImageDetail.jsx`, full search +
+  autocomplete parity with Director/DP.
+- **V82 (`f0d5e70`, Sep 7):** fixed the bulk "Set on N" button silently doing nothing (a debounced
+  consensus fetch overwrote a just-pasted value — fixed with a `touched` ref); title-triggered
+  autofill of director/DP/year; one shared `useFilmAutocomplete.js` hook for both `ImageDetail.jsx`
+  and `TagModeBar.jsx`. Also killed 9 runaway busy-loop background processes that had pushed the
+  machine's load average to 179.
+- **`dd819d1` (Sep 8):** title autofill also fires when a title is typed out in full, not only when
+  picked; `lastAutoFilledTitleRef` stops it re-firing and clobbering later manual corrections.
+
+### What was built (V83)
+- Setup, login, logout, `/api/auth/me`, register, forgot/reset password and the 3 invite-code
+  routes moved into `backend/routes_auth.py` as `bp = Blueprint('auth', __name__)`. Route bodies
+  character-for-character the original; every URL byte-identical, so zero frontend changes.
+- Shared gate helpers moved to `core.py`: `PUBLIC_API_ROUTES`, `RUNNING_LOCALLY`,
+  `current_user_id()`, `admin_required`, `adopt_session_from_header(app)`, new
+  `check_login_required(app)`. `app.py` keeps only a 2-line `@app.before_request` wrapper.
+- Auth-only helpers (login lockout + rate limit + `_client_ip` + `current_user_row`) moved with the
+  routes. `routes_auth.py` reads `core.RUNNING_LOCALLY` qualified so test overrides are seen.
+- 2 test scripts repointed by hand; suite 44 Python + 3 `.mjs` green; live-server check 32/32 with
+  a database cross-check.
+
+### Decisions
+- Google Drive OAuth routes under `/api/auth/google/*` deliberately stayed in `app.py` — they
+  connect Drive, not log in to Frame Atlas; they belong with Day 41's account/sync routes.
+
+### Technical debt / notes
+- Line-count correction: the V83 commit message and timeline say `app.py` ended at 4,355 lines; the
+  real committed count is **4,375**. Harmless typo, noted so later deltas start from the right number.
+- Forgot-password still returns the reset token in its JSON (admin-only recovery path; email
+  delivery still deferred, unchanged).
+
+### Starting point for next session
+Day 37 — `routes_search.py`: `/api/search`, `/api/search/ids`, `/api/autocomplete`,
+`/api/interpret`, `/api/bookmarks` and their helpers, same blueprint pattern as Day 36.
