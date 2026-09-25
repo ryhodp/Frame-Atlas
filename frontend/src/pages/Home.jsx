@@ -11,15 +11,15 @@ import { useAuth } from '../AuthContext';
 import { useSync } from '../SyncContext';
 import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
+import { useSearch } from '../hooks/useSearch';
+import { DEFAULT_PROM, DEFAULT_EXACT } from '../searchParams';
 import { PAGE_BG, SWATCH_COLORS as PRESET_SWATCHES, accentBlueLight, accentFilm, accentOrange, accentSimilar, accentTeal, accentViolet, accentVioletLight, accentVioletLighter, black, danger, error, onPrimary, onSurfaceFaint, onSurfaceMuted, onSurfaceWarm, onTertiary, outlineVariant, overlayViolet, primary, primaryDim, success, surfaceContainerDark, surfaceContainerHover, surfaceContainerLow, surfaceContainerLowest, surfaceContainerMuted, tertiary, warning, white, withAlpha } from '../theme';
 
 const PER_PAGE = 60;
 const FILM_FIELD_LABELS = { title: 'Title', director: 'Director', dp: 'DP', painter: 'Painter', photographer: 'Photographer' };
 
-// V24 color search. Keep these in step with DEFAULT_PROMINENCE /
-// DEFAULT_EXACTNESS in backend/app.py.
-const DEFAULT_PROM = 6;    // percent of frame
-const DEFAULT_EXACT = 60;  // 0 = any nearby hue, 100 = near-identical hue
+// V24 color search defaults (DEFAULT_PROM / DEFAULT_EXACT) live in
+// searchParams.js since Day 44 — imported above.
 
 // V33: the slider runs 0.5%–95%, not 0.5%–40%. The old 40% ceiling was
 // arbitrary — a real photo's biggest single color reaches 96% of the frame,
@@ -51,26 +51,6 @@ export default function Home() {
   const { isAdmin } = useAuth();
   const sync = useSync();
   const isMobile = useIsMobile();
-  const [chips, setChips] = useState([]);
-  const [nlChips, setNlChips] = useState([]);        // [{phrase, tags[]}]
-  const [noteChips, setNoteChips] = useState([]);    // V39: [phrase, phrase, ...] — on-set-notes search
-  const [color, setColor] = useState(null);           // active hex or null
-  // V24: color search knobs. `prom` = min % of the frame the color must cover,
-  // `exact` = 0-100 hue strictness. The *Applied values are what actually get
-  // searched — they trail the sliders by a beat so a drag fires one request,
-  // not fifty.
-  const [prom, setProm] = useState(DEFAULT_PROM);
-  const [exact, setExact] = useState(DEFAULT_EXACT);
-  const [promApplied, setPromApplied] = useState(DEFAULT_PROM);
-  const [exactApplied, setExactApplied] = useState(DEFAULT_EXACT);
-  const [film, setFilm] = useState(null);             // film/director/DP text filter
-  const [ar, setAr] = useState(null);                 // V15: aspect-ratio bucket, e.g. "2.39:1"
-  const [searchText, setSearchText] = useState('');
-  const [autocomplete, setAutocomplete] = useState([]);
-  const [showAuto, setShowAuto] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [interpreting, setInterpreting] = useState(false);
-  const [nlError, setNlError] = useState('');
   const [images, setImages] = useState([]);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -79,9 +59,6 @@ export default function Home() {
   const [winW, setWinW] = useState(window.innerWidth);
   const [setupStatus, setSetupStatus] = useState(null); // V17: empty-library checklist
 
-  const [bookmarks, setBookmarks] = useState([]);
-  const [showBookmarks, setShowBookmarks] = useState(false);
-  const [saveName, setSaveName] = useState('');
   const [showDuplicates, setShowDuplicates] = useState(false);
   // null | { scanning: true, phase, processed, total } | { groups: [...] }
   const [duplicateScanStatus, setDuplicateScanStatus] = useState(null);
@@ -90,6 +67,29 @@ export default function Home() {
   // ── Find Similar mode ────────────────────────────────────────────────────
   const [similarTo, setSimilarTo] = useState(null); // {id, filename} or null
   const [similarNotice, setSimilarNotice] = useState(null); // dismissible banner text
+
+  // ── Search (Day 44): every filter, the search box + autocomplete +
+  //    describe-it, and bookmarks live in hooks/useSearch.js. Destructured
+  //    under their original names so everything below reads as before.
+  //    Starting a new filter leaves Find Similar mode only if it's active (a
+  //    stale notice survives); Clear all always wipes it.
+  const {
+    chips, setChips, nlChips, setNlChips, noteChips, setNoteChips,
+    color, setColor, prom, setProm, exact, setExact,
+    promApplied, setPromApplied, exactApplied, setExactApplied,
+    film, setFilm, ar, setAr, hasFilters, buildFilterParams,
+    searchText, setSearchText, autocomplete, setAutocomplete,
+    showAuto, setShowAuto, highlightedIndex, setHighlightedIndex,
+    interpreting, nlError, setNlError, searchRef,
+    addChip, selectFilm, selectAr, selectNote,
+    removeChip, removeNlChip, removeNoteChip, pickColor, clearAll,
+    interpretPhrase, handleEnter, handleSearchKeyDown,
+    bookmarks, showBookmarks, setShowBookmarks, saveName, setSaveName,
+    loadBookmarks, saveBookmark, applyBookmark, deleteBookmark,
+  } = useSearch({
+    onBeforeFilter: () => { if (similarTo) { setSimilarTo(null); setSimilarNotice(null); } },
+    onClearAll: () => { setSimilarTo(null); setSimilarNotice(null); },
+  });
 
   // ── Select Mode (was "Tag Mode"): bulk-select images to tag, crop, or deck ──
   const [tagMode, setTagMode] = useState(false);
@@ -117,9 +117,6 @@ export default function Home() {
   const [pageDragOver, setPageDragOver] = useState(false);
   const pageDragDepthRef = useRef(0); // dragenter/dragleave fire on every child too; only the count hitting 0 means "actually left"
 
-  const searchRef = useRef(null);
-  const autoDebounce = useRef(null);
-  const autoRequestId = useRef(0);
   const searchRequestId = useRef(0);
   const pageRef = useRef(0);
   const fetchingRef = useRef(false);
@@ -133,8 +130,6 @@ export default function Home() {
   const seenIdsRef = useRef(new Set());   // every id already queued this visit
   const pendingViewsRef = useRef(new Set()); // queued but not yet sent to the server
 
-  const hasFilters = chips.length > 0 || nlChips.length > 0 || noteChips.length > 0 || !!color || !!film || !!ar;
-
   // V17: brand-new friend with an empty library → fetch what the setup
   // checklist needs (folder connected? key saved?). Only fires in the
   // truly-empty case, never during normal browsing or filtering.
@@ -145,33 +140,6 @@ export default function Home() {
       .then(setSetupStatus)
       .catch(() => {});
   }, [isAdmin, loading, images.length, hasFilters]);
-
-  // Let the slider thumb move freely; commit the value a beat after it settles.
-  useEffect(() => {
-    const t = setTimeout(() => { setPromApplied(prom); setExactApplied(exact); }, 220);
-    return () => clearTimeout(t);
-  }, [prom, exact]);
-
-  // ── The active filter, as query params ─────────────────────────────────────
-  // One place builds this. The grid, the "select all N results" button and the
-  // tag-removal preview all ask the server the SAME question, and if each one
-  // assembled its own params they would drift — a select-all that grabs a
-  // different set of photos than the grid is showing would be worse than
-  // having no select-all at all.
-  const buildFilterParams = useCallback(() => {
-    const params = new URLSearchParams();
-    if (chips.length) params.set('chips', chips.join(','));
-    if (nlChips.length) params.set('nl', JSON.stringify(nlChips.map(n => n.tags)));
-    if (noteChips.length) params.set('notes', JSON.stringify(noteChips));
-    if (color) {
-      params.set('color', color);
-      params.set('prom', promApplied);
-      params.set('exact', exactApplied);
-    }
-    if (film) params.set('film', film);
-    if (ar) params.set('ar', ar);
-    return params;
-  }, [chips, nlChips, noteChips, color, film, ar, promApplied, exactApplied]);
 
   // ── Fetch one page of results; append=true keeps existing images ───────────
   const fetchPage = useCallback(async (pageNum, append) => {
@@ -364,55 +332,6 @@ export default function Home() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // ── Load bookmarks on mount ─────────────────────────────────────────────────
-  const loadBookmarks = useCallback(async () => {
-    try {
-      const res = await fetch('/api/bookmarks');
-      setBookmarks(await res.json());
-    } catch {}
-  }, []);
-
-  useEffect(() => { loadBookmarks(); }, [loadBookmarks]);
-
-  // ── Autocomplete: fire 120ms after user stops typing ────────────────────────
-  useEffect(() => {
-    clearTimeout(autoDebounce.current);
-    if (!searchText.trim()) {
-      setAutocomplete([]);
-      setShowAuto(false);
-      return;
-    }
-    // The debounce timer alone doesn't stop an in-flight fetch for the
-    // PREVIOUS keystroke from resolving after this one's — on a slow or
-    // jittery connection the older, broader-prefix response (e.g. "ten")
-    // can land after the newer, more specific one ("tenet") and silently
-    // overwrite it with worse-ranked results. A monotonic request id lets a
-    // late response recognize it's stale and drop itself instead.
-    const requestId = ++autoRequestId.current;
-    autoDebounce.current = setTimeout(async () => {
-      try {
-        const params = new URLSearchParams({ q: searchText });
-        if (chips.length) params.set('chips', chips.join(','));
-        const res = await fetch(`/api/autocomplete?${params}`);
-        const data = await res.json();
-        if (requestId !== autoRequestId.current) return; // a newer request has since superseded this one
-        setAutocomplete(data);
-        setShowAuto(data.length > 0);
-        setHighlightedIndex(0);
-      } catch {}
-    }, 120);
-  }, [searchText, chips]);
-
-  // ── Close dropdowns when clicking outside ───────────────────────────────────
-  useEffect(() => {
-    const handler = (e) => {
-      if (!e.target.closest('[data-search-area]')) setShowAuto(false);
-      if (!e.target.closest('[data-bookmark-area]')) setShowBookmarks(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
   // ── Safety net: if the mouse is released outside the grid mid-drag, still end it ─
   useEffect(() => {
     if (!tagMode) return;
@@ -453,172 +372,6 @@ export default function Home() {
     return () => document.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tagMode, selectedIds, images, cropImages]);
-
-  const addChip = (tag) => {
-    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
-    if (!chips.includes(tag)) setChips(prev => [...prev, tag]);
-    setSearchText('');
-    setShowAuto(false);
-    setAutocomplete([]);
-    searchRef.current?.focus();
-  };
-
-  // Selecting a film match from the search dropdown — same 🎬 filter as
-  // clicking a title/director/DP in the detail panel (onSearchFilm below).
-  const selectFilm = (name) => {
-    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
-    setFilm(name);
-    setSearchText('');
-    setShowAuto(false);
-    setAutocomplete([]);
-    searchRef.current?.focus();
-  };
-
-  // V15: selecting an aspect-ratio match ("9:16", "2.39:1") from the dropdown
-  const selectAr = (label) => {
-    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
-    setAr(label);
-    setSearchText('');
-    setShowAuto(false);
-    setAutocomplete([]);
-    searchRef.current?.focus();
-  };
-
-  // V39: selecting an on-set-notes match from the dropdown — the suggestion
-  // IS the search (there's no fixed vocabulary of notes values like tags
-  // have), so picking it just locks in the phrase the user already typed.
-  const selectNote = (phrase) => {
-    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
-    if (!noteChips.includes(phrase)) setNoteChips(prev => [...prev, phrase]);
-    setSearchText('');
-    setShowAuto(false);
-    setAutocomplete([]);
-    searchRef.current?.focus();
-  };
-
-  const removeChip = (tag) => setChips(prev => prev.filter(t => t !== tag));
-  const removeNlChip = (phrase) => setNlChips(prev => prev.filter(n => n.phrase !== phrase));
-  const removeNoteChip = (phrase) => setNoteChips(prev => prev.filter(p => p !== phrase));
-
-  // Picking a color while in Find Similar mode exits similar mode first
-  const pickColor = (hex) => {
-    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
-    setColor(hex);
-  };
-
-  const clearAll = () => {
-    setChips([]);
-    setNlChips([]);
-    setNoteChips([]);
-    setColor(null);
-    setProm(DEFAULT_PROM);
-    setExact(DEFAULT_EXACT);
-    setFilm(null);
-    setAr(null);
-    setSimilarTo(null);
-    setSimilarNotice(null);
-  };
-
-  // ── NL fallback: interpret free text via Gemini ─────────────────────────────
-  const interpretPhrase = async (phrase) => {
-    if (similarTo) { setSimilarTo(null); setSimilarNotice(null); }
-    setInterpreting(true);
-    setShowAuto(false);
-    setNlError('');
-    try {
-      const res = await fetch('/api/interpret', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phrase })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setNlError(data.error || 'Could not interpret that phrase.');
-      } else if (data.tags && data.tags.length) {
-        setNlChips(prev =>
-          prev.some(n => n.phrase === phrase) ? prev : [...prev, { phrase, tags: data.tags }]
-        );
-        setSearchText('');
-      }
-    } catch (e) {
-      console.error('Interpret failed', e);
-      setNlError('Could not reach the server.');
-    }
-    setInterpreting(false);
-    searchRef.current?.focus();
-  };
-
-  const handleEnter = () => {
-    const text = searchText.trim();
-    if (!text) return;
-    if (showAuto && autocomplete.length > 0) {
-      const pick = autocomplete[highlightedIndex] || autocomplete[0];
-      if (pick.type === 'film') selectFilm(pick.value);
-      else if (pick.type === 'ar') selectAr(pick.value);
-      else if (pick.type === 'note') selectNote(pick.value);
-      else addChip(pick.value);
-    } else {
-      interpretPhrase(text);
-    }
-  };
-
-  const handleSearchKeyDown = (e) => {
-    if (e.key === 'ArrowDown') {
-      if (!showAuto || !autocomplete.length) return;
-      e.preventDefault();
-      setHighlightedIndex(i => Math.min(i + 1, autocomplete.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      if (!showAuto || !autocomplete.length) return;
-      e.preventDefault();
-      setHighlightedIndex(i => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter') {
-      handleEnter();
-    } else if (e.key === 'Escape') {
-      setShowAuto(false);
-      setSearchText('');
-    }
-  };
-
-  // ── Bookmarks ───────────────────────────────────────────────────────────────
-  const saveBookmark = async () => {
-    const name = saveName.trim();
-    if (!name || !hasFilters) return;
-    try {
-      await fetch('/api/bookmarks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, state: { chips, nlChips, noteChips, color, film, ar, prom, exact } })
-      });
-      setSaveName('');
-      loadBookmarks();
-    } catch (e) {
-      console.error('Save bookmark failed', e);
-    }
-  };
-
-  const applyBookmark = (bm) => {
-    setChips(bm.state.chips || []);
-    setNlChips(bm.state.nlChips || []);
-    setNoteChips(bm.state.noteChips || []);
-    setColor(bm.state.color || null);
-    setFilm(bm.state.film || null);
-    setAr(bm.state.ar || null);
-    // Bookmarks saved before V24 carry no knobs — they take the new defaults,
-    // so they come back tighter (and cleaner) than when they were saved.
-    setProm(bm.state.prom ?? DEFAULT_PROM);
-    setExact(bm.state.exact ?? DEFAULT_EXACT);
-    setPromApplied(bm.state.prom ?? DEFAULT_PROM);
-    setExactApplied(bm.state.exact ?? DEFAULT_EXACT);
-    setShowBookmarks(false);
-  };
-
-  const deleteBookmark = async (id, e) => {
-    e.stopPropagation();
-    try {
-      await fetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
-      loadBookmarks();
-    } catch {}
-  };
 
   // ── Detail-panel callbacks: keep grid in sync with edits ────────────────────
   const handleImageUpdated = (id, patch) => {

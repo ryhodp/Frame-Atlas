@@ -122,8 +122,11 @@ frame-atlas/
 ├── frontend/
 │   └── src/
 │       ├── pages/
-│       │   ├── Home.jsx    # Main image grid + search
+│       │   ├── Home.jsx    # Main image grid + search (being broken up, Days 44–48)
 │       │   └── Sync.jsx    # Sync manager UI
+│       ├── hooks/
+│       │   └── useSearch.js  # Every search filter, the search box + autocomplete + describe-it, bookmarks (V92)
+│       ├── searchParams.js   # Pure: filter -> server query, bookmark save/restore; tested by scripts/test_search_params.mjs (V92)
 │       └── components/     # Reusable UI pieces
 ├── docs/                   # Planning documents (read at session start)
 ├── CLAUDE.md               # This file
@@ -315,6 +318,18 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - Test re-exports kept deliberately (Ryan's call): the `colors`/`fingerprint`/`imaging`/`perspective`/`core`/`schema` by-name imports, `Image`, `base64`, `drive`, `gemini`, `tagging`, `decks_common` — ~30 scripts read them as `mod.<name>`. Removed as truly dead (no test reaches them): `sqlite3`, `zlib`, `timedelta`, `wraps`, `request`, `session`.
 - **Proof of no unintended change:** a script stripped comments/blank lines from the old and new `app.py` (after removing the 4 analytics blocks, each confirmed verbatim) and diffed the CODE — the only differences were the dead imports, the new blueprint import/registration, and the startup restructure. Suite 46 Python + 3 `.mjs` green (clean old-code baseline re-run in an isolated snapshot, after an earlier background baseline overlapped the edit). **Railway-style boot** (`python app.py` on a fresh DB): health answers, every startup log line appears exactly once, and the log is identical to the old code's. Analytics live check: old 20/20, new 25/25, all 22 responses identical ×3.
 - `app.py`: **560 → 228 lines** — from ~6,960 at the start of Phase 3 (and 7,337 before V45). Target was under 400.
+
+**Frontend breakup — Day 44 (V92): `useSearch()` + `searchParams.js`**
+- First frontend day of the `Home.jsx` breakup (Days 44–48; Day 45 = the search bar's on-screen components, inserted by Ryan when the plan turned out to have never assigned that ~740 lines of JSX).
+- **`hooks/useSearch.js`** holds all 20 pieces of search state, the slider debounce, autocomplete (with its request-id race guard), the outside-click closer, describe-it, and bookmarks. **Home destructures every returned name under its ORIGINAL name**, so Home's JSX was untouched — the lowest-risk way to move React state. 55 names, checked by script to match in both directions.
+- **Find Similar stays in Home.** The hook takes two callbacks and the difference is real: `onBeforeFilter` (Home exits Similar mode *only if active*, so a stale "not fingerprinted yet" notice survives adding a tag — the old `if (similarTo)` guard) and `onClearAll` (always wipes it). Verified live in both builds.
+- **`searchParams.js`** (pure, no React): `DEFAULT_PROM`/`DEFAULT_EXACT` (moved from Home), `hasActiveFilters`, `filterParams` (the ONE query builder — V32's rule), `bookmarkState` (key order is the stored JSON's contract), `filtersFromBookmark` (defaults for pre-V24/V39 bookmarks; `??` keeps a saved 0). **`scripts/test_search_params.mjs`** (24 checks) includes a VERBATIM copy of the pre-V92 inline logic and compares on 5,000 random states. Added to CI's explicit `.mjs` list.
+- **FRONTEND VERIFICATION METHOD (reuse it for Days 45–48):**
+  1. **`npm run build` does NOT catch a missing/undefined name** — it builds fine and the page throws on click. Use a Babel scope check (`@babel/parser` + `@babel/traverse`, already in node_modules via the React plugin): list every referenced-but-unbound identifier in old vs new; only browser globals may appear. Also cross-check a hook's returned names against the destructure.
+  2. **Browser before/after, same idea as the backend days:** build old → save `dist`; build new → save `dist`. Run `scripts/run_local_for_browser_check.py` (serves `frontend/dist` from the same origin) with each build in turn — a wrapper seeded tags/film/notes and faked Gemini. In the built-in browser, install a `window.fetch` wrapper that logs `{method, url, body}`, run the SAME scripted actions on both builds, and diff the logs (normalise the shuffle `seed` and which photo was first). Day 44: 30 requests, identical in content, order and bodies.
+  3. Use element refs (`find`/`read_page`), not raw coordinates, for clicks — the screenshot's coordinate frame and the viewport differ, and a coordinate click silently missed once.
+- Known, harmless difference: effects declared inside a hook run before the component's own later effects, so mount-time effect ORDER can shift. Checked in the server log: the same page-load requests, same order.
+- `Home.jsx`: **2,318 → 2,071 lines**. `useSearch.js` 305, `searchParams.js` 70.
 
 **CI (V43/Day 25)**
 - `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **44 Python + 3 `.mjs` as of V76** (`test_tagging_locally.py` added Day 32; `test_friend_tag_edit_locally.py` added V75; `test_backup_locally.py` added Day 33). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in

@@ -72,3 +72,4 @@ jobs:
       - run: node scripts/test_presentation_order.mjs
       - run: node scripts/test_selection_range.mjs
       - run: node scripts/test_deck_add_result.mjs
+      - run: node scripts/test_search_params.mjs

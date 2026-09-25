@@ -1265,7 +1265,7 @@ separate commit, **V90** closed the Day 39 debt: `/api/clip` now respects the fr
 (new `test_clip_library_cap_locally.py` fails 6 on V89, passes on V90). Thin wrappers over
 the `sync.py` / `drive.py` / `backup.py` workers already extracted.
 
-### Day 43 — `routes_analytics.py` + final cleanup *(V91 — code complete; awaiting live-site confirmation)*
+### Day 43 — `routes_analytics.py` + final cleanup *(V91 — COMPLETE, Sep 25)*
 `/api/analytics`, `/api/analytics/users`, `/api/views/*`, `/api/views/log`,
 `get_utility_view()`, `log_image_views()`. ~200 lines. Plus: whatever's left in `app.py` should
 now be just the Flask app object, config, blueprint registration, `before_request` gate, the
@@ -1282,26 +1282,36 @@ work is done** (~6,960 at the start of Phase 3).
 
 ## Days 44+ — `Home.jsx` breakup (frontend) *(planned, separate track)*
 
-`frontend/src/pages/Home.jsx` is **1,855 lines with 36 separate pieces of state**. The V35
+`frontend/src/pages/Home.jsx` is **1,855 lines with 36 separate pieces of state** *(when this
+plan was written — by Day 44 it had grown to **2,318 lines / 42 pieces of state**)*. The V35
 stale-selection bug and the Day 20 crop-selection bug both lived here. Different language,
 different risks — there is no `.jsx` test suite the way there's a `test_*_locally.py` suite for
 the backend, so verification leans harder on live browser checks.
 
-**Rough cut plan (to be scoped properly in its own planning session before starting):**
-- **Day 44** — Extract search/filter state into a `useSearch()` custom hook (chips, NL chips,
-  note chips, colour, aspect ratio, film filter, the `buildFilterParams()` assembler). ~400
-  lines of state logic out.
-- **Day 45** — Extract Select Mode / Tag Mode into a `useSelection()` hook (the selection Set,
+**Cut plan (scoped on Day 44; Ryan inserted a search-bar UI day, so the rest shifted +1):**
+- **Day 44** *(V92 — code complete; awaiting live-site confirmation)* — search/filter logic →
+  `hooks/useSearch.js` (20 pieces of state, ~15 actions, bookmarks, autocomplete, describe-it) +
+  the silently-wrong-able pure parts → `searchParams.js` with `scripts/test_search_params.mjs`.
+  **How it actually shipped:** logic only was ~250 lines, not ~400 (the plan's estimate included
+  UI it never named). Home destructures every hook name under its original name, so its JSX is
+  untouched. "Find Similar" stays in Home: the hook takes `onBeforeFilter` (exit Similar only if
+  active — a stale notice survives adding a tag) and `onClearAll` (always wipe it). Verified by a
+  browser before/after: the same 30-request scripted session against the old and new builds —
+  every request, order and body identical. `Home.jsx` 2,318 → 2,071 lines.
+- **Day 45** *(inserted Day 44)* — the search bar's ON-SCREEN part → components (search box +
+  autocomplete dropdown, colour picker + sliders, the chips row, the bookmarks menu). ~740 lines
+  of JSX the original plan never assigned a day.
+- **Day 46** — Extract Select Mode / Tag Mode into a `useSelection()` hook (the selection Set,
   drag-select, shift-click range, the bulk-action handlers). ~350 lines. This is where the two
   historical bugs lived.
-- **Day 46** — Extract the masonry grid + infinite scroll + view-logging into a `<ImageGrid>`
+- **Day 47** — Extract the masonry grid + infinite scroll + view-logging into a `<ImageGrid>`
   component. ~300 lines.
-- **Day 47** — Whatever's left: the page becomes composition — `<Home>` wires the hooks and
+- **Day 48** — Whatever's left: the page becomes composition — `<Home>` wires the hooks and
   components together and owns very little state directly. Target **under 500 lines**.
 
 ---
 
-## After Day 47 — stop, or reassess
+## After Day 48 — stop, or reassess
 
 A ~400-line `app.py` split into ~15 focused modules, and a ~500-line `Home.jsx` composed from
 hooks and components, is a genuinely different codebase to work in. At that point the refactor
@@ -1360,8 +1370,9 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 40 | Routes → `routes_images.py` + `routes_maintenance.py` | Photo routes + admin library tools; app.py −922 lines ✅ *(V87)* |
 | 41 | Routes → `routes_decks.py` + `routes_share.py` | Decks + public share surface split; app.py −1,213 lines ✅ *(V88)* |
 | 42 | Routes → `routes_sync.py` + `routes_account.py` | Photos-in + account/Google routes; app.py −570 lines; clip cap fixed ✅ *(V89, V90)* |
-| 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views out; one startup sequence; app.py 560 → 228 lines *(V91 — code complete)* |
-| 44 | `Home.jsx` → `useSearch()` hook | Search/filter state extracted from the 1,855-line page *(planned)* |
-| 45 | `Home.jsx` → `useSelection()` hook | Select/Tag Mode logic out (where 2 historical bugs lived) *(planned)* |
-| 46 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |
-| 47 | `Home.jsx` final composition | Page becomes wiring; target <500 lines *(planned)* |
+| 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views out; one startup sequence; app.py 560 → 228 lines ✅ *(V91)* |
+| 44 | `Home.jsx` → `useSearch()` hook | Search logic out + `searchParams.js` test; Home 2,318 → 2,071 lines *(V92 — code complete)* |
+| 45 | `Home.jsx` search bar → components | Search box, colour picker, chips row, bookmarks menu (~740 lines of JSX) *(planned — inserted Day 44)* |
+| 46 | `Home.jsx` → `useSelection()` hook | Select/Tag Mode logic out (where 2 historical bugs lived) *(planned)* |
+| 47 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |
+| 48 | `Home.jsx` final composition | Page becomes wiring; target <500 lines *(planned)* |
