@@ -57,6 +57,18 @@ REMOVED_FOLDER_NAME = '_Removed'
 # no unverified-app warning screens, no 7-day token expiry.
 PERSONAL_LIBRARY_CAP = 1000  # max images per non-admin library (soft cap)
 
+# Day 40: moved here from app.py's bulk-delete block. Shared by bulk delete
+# (routes_images.py) and parallel /api/upload (app.py; Day 42's routes_sync.py),
+# so it lives with the other Drive settings rather than in either route file.
+# V36: bulk delete moves each admin photo on its own Drive API round trip
+# (get current parents, then move into _Removed) — sequentially, 16 photos
+# was taking 10-20+ seconds, long enough that the browser sometimes gave up
+# on the request before it finished. This many workers run those moves at
+# once; the underlying Drive HTTP client isn't safe to share across threads,
+# so BULK_DELETE_WORKERS also caps how many separate service objects (one
+# per thread, via threading.local in bulk_delete_images) get created.
+BULK_DELETE_WORKERS = 5
+
 def get_service_account_email():
     """The service account's email — what friends paste into Drive's Share
     box so Frame Atlas can read their folder."""

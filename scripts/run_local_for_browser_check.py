@@ -290,6 +290,10 @@ class FakeMediaUpload:
 
 mod.drive.get_drive_service = lambda: drive
 mod.MediaIoBaseDownload = FakeDownloader
+# Day 40: the full-res view, download and regenerate-thumbnails routes moved
+# into blueprints that import their own MediaIoBaseDownload.
+mod.routes_images.MediaIoBaseDownload = FakeDownloader
+mod.routes_maintenance.MediaIoBaseDownload = FakeDownloader
 # Day 29: download_drive_file() (used by the crop worker and reconcile) moved
 # to drive.py — patch its MediaIoBaseDownload reference there too.
 mod.drive.MediaIoBaseDownload = FakeDownloader

@@ -1214,7 +1214,7 @@ share it. Zero test scripts changed; suite 44 Python + 3 `.mjs` green; live-serv
 with all 61 responses identical to the pre-change backend. Found (not fixed) a pre-existing
 cross-library leak in `/api/tags/suggestions`. `app.py` 3,734 → 3,265 lines.
 
-### Day 39 — Library isolation fix *(V86 — unplanned; inserted by Ryan, every later day shifted +1)*
+### Day 39 — Library isolation fix *(V86 — COMPLETE, Sep 24; unplanned, inserted by Ryan — every later day shifted +1)*
 Found while moving the tag routes on Day 38: five code paths still read across every user's
 library, despite V17's promise of fully isolated personal libraries. Fixed all five:
 `/api/tags/suggestions` (tag words + counts from every library), the film-search exact-vs-substring
@@ -1224,10 +1224,18 @@ group), the upload/clip duplicate check (blocked on, and showed a thumbnail of, 
 photo), and `/api/clip` filing a friend's clip under user 1. New permanent test
 `scripts/test_library_isolation_locally.py` (29 checks) fails 14 on the old code, passes on the fix.
 
-### Day 40 — `routes_images.py`
+### Day 40 — `routes_images.py` + `routes_maintenance.py` *(V87 — code complete; awaiting live-site confirmation)*
 Favorite toggle, filmography edit + `/api/filmography/autocomplete` (added Day 37), on-set notes, download, delete, bulk delete, thumbnail serve,
 full-res proxy, `regenerate_thumbnails`, `extract_colors`. ~600 lines. Touches Drive (delete →
 `_Removed`) so depends on `drive.py` being done.
+
+**How it actually shipped:** two blueprints (Ryan's call). `routes_images.py` = the planned list
+plus the unassigned bulk film credits, `/api/images` and crop routes; `routes_maintenance.py` =
+Duplicate Review + regenerate thumbnails + re-extract colours (admin tools). `BULK_DELETE_WORKERS`
+→ `drive.py` after pyflakes caught `/api/upload` depending on it (multi-photo uploads would have
+crashed). Upload/clip reassigned to Day 42. 1 test repointed; suite green; live-server check 85/85
+with every response, Drive move and queued crop job identical to the pre-change backend.
+`app.py` 3,265 → 2,343 lines.
 
 ### Day 41 — `routes_decks.py`
 The whole decks/scenes/storyboard/share/feedback block — `list_decks` through
@@ -1238,7 +1246,9 @@ is already split.
 
 ### Day 42 — `routes_sync.py`
 `/api/sync/*`, `/api/sync-settings`, `/api/account/*` (folder connect, setup status, Gemini key),
-`/api/backups/*`, `/api/folders`, `/api/models`, `/api/config`. ~400 lines. Thin wrappers over
+`/api/backups/*`, `/api/folders`, `/api/models`, `/api/config`, plus (assigned Day 40) `/api/upload`
++ `/api/clip` (+ `_clip_filename`, `CLIP_*`) and the Google Drive OAuth routes (`/api/auth/status`,
+`/api/auth/google/*`, `/api/drive/picker-token` — assigned Day 36). ~750 lines. Thin wrappers over
 the `sync.py` / `drive.py` / `backup.py` workers already extracted.
 
 ### Day 43 — `routes_analytics.py` + final cleanup
@@ -1323,14 +1333,15 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 33 | Monthly backup → `backup.py` | Snapshot-to-Drive job + scheduler isolated; first-ever test (23 checks); app.py −66 lines ✅ *(V76)* |
 | 34 | Crop worker → `crop.py` | Background crop queue + worker thread; app.py −203 lines ✅ *(V77)* |
 | 35 | Drive sync → `sync.py` | Folder-sync worker + ingest; app.py −350 lines; workers done ✅ *(V78)* |
-| 36 | Routes → `routes_auth.py` | Login/register/invite routes as a blueprint; gate + `admin_required` → `core.py`; app.py −458 lines *(V83 — code complete)* |
-| 37 | Routes → `routes_search.py` | Search/autocomplete/bookmarks/similar as a blueprint *(planned)* |
-| 38 | Routes → `routes_tags.py` | Bulk tag ops + tag editing as a blueprint *(planned)* |
-| 39 | Routes → `routes_images.py` | Favorite/filmography/notes/download/delete/thumb *(planned)* |
-| 40 | Routes → `routes_decks.py` | Decks/scenes/storyboard/share/feedback/PDF, biggest group *(planned)* |
-| 41 | Routes → `routes_sync.py` | Sync/account/backups/config route wrappers *(planned)* |
-| 42 | Routes → `routes_analytics.py` + cleanup | Analytics/views + app.py down to <400 lines *(planned)* |
-| 43 | `Home.jsx` → `useSearch()` hook | Search/filter state extracted from the 1,855-line page *(planned)* |
-| 44 | `Home.jsx` → `useSelection()` hook | Select/Tag Mode logic out (where 2 historical bugs lived) *(planned)* |
-| 45 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |
-| 46 | `Home.jsx` final composition | Page becomes wiring; target <500 lines *(planned)* |
+| 36 | Routes → `routes_auth.py` | Login/register/invite routes as a blueprint; gate + `admin_required` → `core.py`; app.py −458 lines ✅ *(V83)* |
+| 37 | Routes → `routes_search.py` | Search/autocomplete/bookmarks/similar + `search_filters.py`; app.py −641 lines ✅ *(V84)* |
+| 38 | Routes → `routes_tags.py` | Tag editing + auto-tagger controls; `_scope_ids_to_user` → `core.py`; app.py −469 lines ✅ *(V85)* |
+| 39 | *Inserted:* library isolation fix | 5 cross-library leaks closed; permanent 29-check isolation test ✅ *(V86)* |
+| 40 | Routes → `routes_images.py` | Favorite/filmography/notes/download/delete/thumb *(planned)* |
+| 41 | Routes → `routes_decks.py` | Decks/scenes/storyboard/share/feedback/PDF, biggest group *(planned)* |
+| 42 | Routes → `routes_sync.py` | Sync/account/backups/config route wrappers *(planned)* |
+| 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views + app.py down to <400 lines *(planned)* |
+| 44 | `Home.jsx` → `useSearch()` hook | Search/filter state extracted from the 1,855-line page *(planned)* |
+| 45 | `Home.jsx` → `useSelection()` hook | Select/Tag Mode logic out (where 2 historical bugs lived) *(planned)* |
+| 46 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |
+| 47 | `Home.jsx` final composition | Page becomes wiring; target <500 lines *(planned)* |

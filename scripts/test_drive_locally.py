@@ -72,8 +72,13 @@ def main():
     # The whole point of qualifying: these are NOT bare attributes on app.py.
     leaked = [n for n in moved if n in vars(mod)]
     check("no moved name leaked back onto app.py's namespace", leaked == [], leaked)
-    check("app.py still imports MediaIoBaseDownload (sync worker uses it)",
-          hasattr(mod, "MediaIoBaseDownload"))
+    # Day 40: its last app.py users (full-res view, download, regenerate
+    # thumbnails) moved to blueprints that import their own copy; the sync
+    # worker has had its own since Day 35.
+    check("routes_images / routes_maintenance / sync each import their own MediaIoBaseDownload",
+          all(hasattr(m, "MediaIoBaseDownload") for m in (mod.routes_images, mod.routes_maintenance, mod.sync)))
+    check("app.py no longer imports MediaIoBaseDownload (nothing left there uses it)",
+          not hasattr(mod, "MediaIoBaseDownload"))
     check("drive.py has its own MediaIoBaseDownload (download_drive_file uses it)",
           hasattr(drive, "MediaIoBaseDownload"))
 
