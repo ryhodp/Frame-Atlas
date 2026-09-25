@@ -4058,3 +4058,32 @@ Natural three-way split; fix the clip cap as its own commit after the move; thor
 
 ### Starting point for next session
 Day 43 — `routes_analytics.py` + final cleanup (target: `app.py` under 400 lines).
+
+---
+
+## Day 43 — Analytics → `routes_analytics.py` + final `app.py` cleanup (Frame Atlas V91 complete)
+*Completed: September 25, 2026*
+*Status: DAY 43 COMPLETE — deployed (Railway `92a3978c`, commit `62e2c41`, SUCCESS; the new single
+startup sequence ran on Railway with each boot line once). Ryan moved on to Day 44 without a
+specific live check. **Phase 3 backend route work is complete.***
+
+### What was built
+- `routes_analytics.py`: `/api/analytics`, `/api/analytics/users`, `/api/views/*`, `/api/views/log`.
+- ONE startup sequence (was written twice: `__main__` copy for Railway, module-level copy for tests).
+- ~150 lines of "moved to X" comments → a backend-map module docstring. Dead imports removed; test
+  re-exports kept.
+- `app.py` 560 → **228 lines** (~6,960 at the start of Phase 3).
+
+### Decisions (Ryan: A, A, A, A)
+Merge startup; replace pointer comments with a map; keep test re-exports; thorough verification.
+
+### Verification
+- Comment-stripped code diff of old vs new `app.py`: only the intended changes.
+- Suite 46 Python + 3 `.mjs` green. Clean old-code baseline re-run in an isolated snapshot (an
+  earlier background baseline overlapped the edit — don't start editing while a baseline runs).
+- Railway-style `python app.py` boot: each startup step once, log identical to old code.
+- Analytics live check: old 20/20, new 25/25, 22 responses identical ×3.
+
+### Starting point for next session
+Days 44–47 — `Home.jsx` breakup (frontend). The timeline says to scope it in its own planning pass
+before any code: no `.jsx` test suite exists, so verification leans on the browser.
