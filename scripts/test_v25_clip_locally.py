@@ -197,7 +197,7 @@ def main():
     r = admin.post("/api/clip", json={"image": data_url(red, "image/svg+xml")})
     check("SVG is rejected as unsupported", r.status_code == 400 and r.get_json().get("error") == "unsupported_type", r.get_json())
 
-    oversize = data_url(b"\xff\xd8\xff" + b"x" * (mod.CLIP_MAX_BYTES + 10))
+    oversize = data_url(b"\xff\xd8\xff" + b"x" * (mod.routes_sync.CLIP_MAX_BYTES + 10))
     r = admin.post("/api/clip", json={"image": oversize})
     check("Oversized clip is rejected with 413", r.status_code == 413, r.status_code)
 

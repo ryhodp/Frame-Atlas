@@ -11,12 +11,14 @@ Duplicate Review compares ONE library at a time (V86): the scanning user's.
 """
 import base64
 import io
+import os
 import threading
 
 from flask import Blueprint, jsonify, request
 from googleapiclient.http import MediaIoBaseDownload
+from google import genai as genai_client
 
-from core import get_db, admin_required, current_user_id
+from core import GEMINI_MODEL, get_db, admin_required, current_user_id
 from colors import extract_palette, palettes_overlap
 from fingerprint import (
     PHASH_HEX_LEN, PHASH_NEAR_DUP_THRESHOLD, compute_phash, phash_distance,
@@ -25,6 +27,7 @@ from fingerprint import (
 from imaging import generate_thumbnail
 import drive
 import images_common
+import backup
 import sync
 
 bp = Blueprint('maintenance', __name__)
@@ -340,3 +343,43 @@ def find_duplicates():
 
     groups = _compute_duplicate_groups(rows, palette_map)
     return jsonify({'groups': groups, 'count': len(groups)})
+
+
+# ── Moved Day 42: backups + the Gemini model diagnostic (admin tools) ──────
+
+@bp.route('/api/models', methods=['GET'])
+@admin_required
+def list_models():
+    """Diagnostic: list Gemini models this API key can use. Kept on purpose
+    (Day 13 decision) — this is the first-stop check when auto-tagging
+    mass-fails because Google retired the model in GEMINI_MODEL."""
+    gemini_api_key = os.environ.get('GEMINI_API_KEY')
+    if not gemini_api_key:
+        return jsonify({'error': 'GEMINI_API_KEY not set'}), 500
+    try:
+        client = genai_client.Client(api_key=gemini_api_key)
+        names = [m.name for m in client.models.list()]
+        return jsonify({'current': GEMINI_MODEL, 'available': names})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/backups/status', methods=['GET'])
+@admin_required
+def backups_status():
+    """History of automatic monthly database backups, newest first (V27)."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT filename, created_at FROM db_backups ORDER BY created_at DESC')
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return jsonify({'backups': rows, 'keep_count': backup.KEEP_BACKUP_COUNT})
+
+@bp.route('/api/backups/run', methods=['POST'])
+@admin_required
+def backups_run_now():
+    """Manually trigger a database backup right now (V27) — for testing the
+    monthly job without waiting a month, or forcing a fresh copy on demand."""
+    ok = backup.run_db_backup()
+    if not ok:
+        return jsonify({'error': 'Backup failed — check server logs for details.'}), 500
+    return jsonify({'success': True})

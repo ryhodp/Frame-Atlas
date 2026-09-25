@@ -6,7 +6,7 @@ Before this the tag loop lived in app.py and was only ever *disabled* by tests
 (8 scripts set trigger_tagging to a no-op). This gives the module direct
 coverage with a fake Gemini client:
   - split wiring: app.py exposes `tagging`; the moved names are NOT bare globals
-    on app.py; genai_client stays on app.py (/api/models still uses it)
+    on app.py; genai_client is imported where it's used (tagging, routes_search, routes_maintenance)
   - GEMINI_TAGGING_PROMPT still carries all 16 tag categories + "Return ONLY the JSON"
   - _select_pending_for_tagging: pending-before-failed ordering, 'done' excluded,
     keyless owner -> rows returned but images empty
@@ -115,7 +115,9 @@ def main():
         check(f"tagging.{name} exists", hasattr(tagging, name))
     leaked = [n for n in moved if n in vars(mod)]
     check("no moved name left as a bare global on app.py", leaked == [], leaked)
-    check("genai_client stays imported on app.py (/api/models uses it)", hasattr(mod, "genai_client"))
+    # Day 42: /api/models (its last app.py user) moved to routes_maintenance.
+    check("genai_client imported by tagging / routes_search / routes_maintenance",
+          all(hasattr(m, "genai_client") for m in (mod.tagging, mod.routes_search, mod.routes_maintenance)))
     # Day 37: NL_INTERPRET_PROMPT moved to routes_search.py with /api/interpret.
     check("NL_INTERPRET_PROMPT lives on routes_search (search, not tagging)",
           hasattr(mod.routes_search, "NL_INTERPRET_PROMPT") and not hasattr(mod, "NL_INTERPRET_PROMPT"))

@@ -1237,7 +1237,7 @@ crashed). Upload/clip reassigned to Day 42. 1 test repointed; suite green; live-
 with every response, Drive move and queued crop job identical to the pre-change backend.
 `app.py` 3,265 → 2,343 lines.
 
-### Day 41 — `routes_decks.py` + `routes_share.py` + `decks_common.py` *(V88 — code complete; awaiting live-site confirmation)*
+### Day 41 — `routes_decks.py` + `routes_share.py` + `decks_common.py` *(V88 — COMPLETE, Sep 25)*
 The whole decks/scenes/storyboard/share/feedback block — `list_decks` through
 `get_shared_deck` and the V42 client-feedback endpoints. ~900 lines, the single biggest route
 group. Self-contained domain (its own tables, its own `_deck_payload` / `_deck_access` helpers).
@@ -1250,11 +1250,17 @@ routes — the app's whole no-login surface in one small file). 1 test repointed
 (`test_self_test_locally.py`). Suite green; live-server check with a logged-out visitor 72/72, all 77
 responses identical to the pre-change backend. `app.py` 2,343 → 1,130 lines.
 
-### Day 42 — `routes_sync.py`
+### Day 42 — `routes_sync.py` + `routes_account.py` *(V89 — code complete; awaiting live-site confirmation)*
 `/api/sync/*`, `/api/sync-settings`, `/api/account/*` (folder connect, setup status, Gemini key),
 `/api/backups/*`, `/api/folders`, `/api/models`, `/api/config`, plus (assigned Day 40) `/api/upload`
 + `/api/clip` (+ `_clip_filename`, `CLIP_*`) and the Google Drive OAuth routes (`/api/auth/status`,
-`/api/auth/google/*`, `/api/drive/picker-token` — assigned Day 36). ~750 lines. Thin wrappers over
+`/api/auth/google/*`, `/api/drive/picker-token` — assigned Day 36). ~750 lines.
+
+**How it actually shipped:** `routes_sync.py` (photos in: sync, folders, upload, clip) +
+`routes_account.py` (setup checklist, Gemini key/spend, Google connection); backups + `/api/models`
+joined `routes_maintenance.py`; health + config stay in `app.py` (Ryan's call). OAuth redirect URI
+is a fixed path string, so it can't change. 2 tests repointed; suite green; live-server check 84/84,
+all 71 responses identical to the pre-change backend ×4. `app.py` 1,130 → 560 lines. Thin wrappers over
 the `sync.py` / `drive.py` / `backup.py` workers already extracted.
 
 ### Day 43 — `routes_analytics.py` + final cleanup
@@ -1344,8 +1350,8 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 38 | Routes → `routes_tags.py` | Tag editing + auto-tagger controls; `_scope_ids_to_user` → `core.py`; app.py −469 lines ✅ *(V85)* |
 | 39 | *Inserted:* library isolation fix | 5 cross-library leaks closed; permanent 29-check isolation test ✅ *(V86)* |
 | 40 | Routes → `routes_images.py` + `routes_maintenance.py` | Photo routes + admin library tools; app.py −922 lines ✅ *(V87)* |
-| 41 | Routes → `routes_decks.py` + `routes_share.py` | Decks + public share surface split; app.py −1,213 lines *(V88 — code complete)* |
-| 42 | Routes → `routes_sync.py` | Sync/account/backups/config route wrappers *(planned)* |
+| 41 | Routes → `routes_decks.py` + `routes_share.py` | Decks + public share surface split; app.py −1,213 lines ✅ *(V88)* |
+| 42 | Routes → `routes_sync.py` + `routes_account.py` | Photos-in + account/Google routes; app.py −570 lines *(V89 — code complete)* |
 | 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views + app.py down to <400 lines *(planned)* |
 | 44 | `Home.jsx` → `useSearch()` hook | Search/filter state extracted from the 1,855-line page *(planned)* |
 | 45 | `Home.jsx` → `useSelection()` hook | Select/Tag Mode logic out (where 2 historical bugs lived) *(planned)* |
