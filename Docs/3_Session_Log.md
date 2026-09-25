@@ -3936,3 +3936,40 @@ SUCCESS; boot logs clean, schema + self-test OK.*
 ### Starting point for next session
 Day 39 — fix the cross-library suggestions leak (and audit for the same bug class). The original
 Day 39 (`routes_images.py`) moves to Day 40, and every later blueprint day shifts by one.
+
+---
+
+## Day 39 — Library isolation fix (Frame Atlas V86 complete) — *unplanned, inserted by Ryan*
+*Completed: September 24, 2026*
+*Status: DAY 39 COMPLETE — deployed (Railway `4c2b967b`, commit `ca90444`, SUCCESS; boot logs
+clean, schema + self-test OK). Ryan moved on to Day 40 without a specific live check of these
+fixes; no "Done when" criterion required one.*
+
+### What was built
+Five paths read across every user's library despite V17's isolation promise. All fixed:
+1. `/api/tags/suggestions` — scoped to the caller (admin too — Ryan's call).
+2. Film search exact-vs-substring probe (`search_filters.py`) — scoped to the caller's photos.
+3. Duplicate Review (`/api/duplicates` + background scan) — comparison scoped to the scanner
+   (`_run_duplicate_scan_job(owner_id)`); self-heal backfills stay library-wide.
+4. Upload/clip duplicate check — `sync._load_existing_phashes(user_id)` now requires an owner.
+5. `/api/clip` — files the clip under the clipper (`_ingest_image(..., user_id=)`, default 1 for
+   upload) and auto-tags per the folder sync's per-owner key rule.
+Items 4–5 were found during the audit and added under Ryan's 3A choice (same bug class).
+
+### Decisions (Ryan: A, A, A, A)
+Fix both confirmed bugs; admin suggestions own-library only; duplicate scan own-library only;
+permanent regression test.
+
+### Verification
+- New `scripts/test_library_isolation_locally.py` (29 checks). Against the pre-fix code: 14 FAIL
+  across all five bugs (incl. the clip route showing a friend a thumbnail of the admin's photo).
+  Against the fix: 29/29. Suite 45 Python + 3 `.mjs` green.
+
+### Technical debt / notes
+- Friend clips filed under user 1 before V86 self-heal: the admin's next sync deletes rows whose
+  file isn't in the admin's folder (V30), the friend's next sync imports them properly.
+- `PERSONAL_LIBRARY_CAP` is only enforced by the folder sync, not by clipping.
+- `gh` CLI isn't installed on this Mac, so GitHub Actions status wasn't checked from here.
+
+### Starting point for next session
+Day 40 — `routes_images.py` (originally Day 39; every blueprint day shifted +1).
