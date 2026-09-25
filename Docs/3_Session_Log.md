@@ -4031,3 +4031,30 @@ visitor.
 
 ### Starting point for next session
 Day 42 — `routes_sync.py`: sync, account, backups, config, upload/clip, Google Drive OAuth.
+
+---
+
+## Day 42 — Photos-in → `routes_sync.py`, account/Google → `routes_account.py` (Frame Atlas V89 + V90 complete)
+*Completed: September 25, 2026*
+*Status: DAY 42 COMPLETE — deployed together (Railway `f755abb7`, commit `eef52ee`, SUCCESS; boot
+logs clean, schema + self-test OK). Ryan moved on to Day 43 without a specific live check.*
+
+### What was built
+- **V89 (move):** `routes_sync.py` (sync, `/api/folders`, upload, clip), `routes_account.py` (setup
+  checklist, Gemini key + spend, Google Drive connection); backups + `/api/models` →
+  `routes_maintenance.py`; health + config stay in `app.py`. `app.py` 1,130 → 560 lines.
+- **V90 (fix, separate commit):** `/api/clip` respects the friend 1,000-image cap — 409 with a
+  readable message, checked before the Drive write. Closes the Day 39 debt.
+
+### Decisions (Ryan: A, A, A)
+Natural three-way split; fix the clip cap as its own commit after the move; thorough verification.
+
+### Verification
+- V89: live-server check faking only Google (OAuth, Drive, Gemini list) — pre-change 63/63, new
+  84/84, all 71 responses identical ×4. OAuth redirect URI asserted unchanged. 2 tests repointed.
+- V90: `test_clip_library_cap_locally.py` fails 6 on V89, passes on V90. Suite 46 Python + 3 `.mjs`.
+- Harness lessons: parallel-upload row ids are thread-order dependent; the backup scheduler's
+  boot-time check races a patched `run_db_backup` (count calls as a delta).
+
+### Starting point for next session
+Day 43 — `routes_analytics.py` + final cleanup (target: `app.py` under 400 lines).
