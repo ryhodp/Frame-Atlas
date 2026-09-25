@@ -3973,3 +3973,36 @@ permanent regression test.
 
 ### Starting point for next session
 Day 40 — `routes_images.py` (originally Day 39; every blueprint day shifted +1).
+
+---
+
+## Day 40 — Photo routes → `routes_images.py` + admin tools → `routes_maintenance.py` (Frame Atlas V87 complete)
+*Completed: September 25, 2026*
+*Status: DAY 40 COMPLETE — deployed (Railway `ee65cbbf`, commit `ca8274f`, SUCCESS; boot logs
+clean, schema + self-test OK). Ryan moved on to Day 41 without a specific live check.*
+
+### What was built
+- `routes_images.py` (`Blueprint('images')`, 695 lines): `/api/images`, `/full`, `/thumb`, favorite,
+  film credits (autocomplete, single, bulk-set/clear), on-set notes, download, delete, bulk delete,
+  crop + crop-progress routes.
+- `routes_maintenance.py` (`Blueprint('maintenance')`, admin-only, 342 lines): Duplicate Review,
+  regenerate thumbnails, re-extract colours.
+- `BULK_DELETE_WORKERS` → `drive.py`; `MediaIoBaseDownload` + `time` left `app.py`.
+- `app.py` 3,265 → 2,343 lines.
+
+### Decisions (Ryan: A, A, A)
+1. Two blueprints (per-photo vs admin tools), absorbing the unassigned crop / Duplicate Review /
+   photo list / bulk film credit routes. 2. Upload + clip → Day 42's `routes_sync.py`.
+3. Thorough verification.
+
+### Verification
+- Suite 45 Python + 3 `.mjs` green; 1 stale check repointed (`test_drive_locally.py`).
+- Live-server check with a Drive fake recording every `_Removed` move and crop jobs captured:
+  pre-change 61/61, new 85/85, all responses / Drive moves / crop jobs / DB snapshots identical ×3.
+
+### Caught before shipping
+- pyflakes: `/api/upload` used `BULK_DELETE_WORKERS` from the moved bulk-delete block — would have
+  been a `NameError` on multi-photo uploads only.
+
+### Starting point for next session
+Day 41 — `routes_decks.py` (decks/scenes/storyboard/share/feedback/PDF).
