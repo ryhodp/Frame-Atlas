@@ -299,6 +299,22 @@ def clip_image():
     except Exception:
         return jsonify({'error': 'bad_image', 'message': "That file isn't a readable image."}), 400
 
+    # V90: the same soft cap the folder sync enforces (V17) — friends'
+    # thumbnails live in the shared database, so clipping can't be the one
+    # way around it. Checked BEFORE the Drive write, so a refused clip leaves
+    # no orphan file in the friend's folder. 409, not 403: the extension
+    # shows a 403 as "this account cannot clip", but shows a 409's message.
+    if user_id != 1:
+        conn = get_db()
+        count = conn.execute('SELECT COUNT(*) FROM images WHERE user_id = ?', (user_id,)).fetchone()[0]
+        conn.close()
+        if count >= drive.PERSONAL_LIBRARY_CAP:
+            return jsonify({
+                'error': 'library_full',
+                'message': f'Your library is at the {drive.PERSONAL_LIBRARY_CAP}-image limit — '
+                           'remove some photos or ask Ryan if you need more room.'
+            }), 409
+
     try:
         service = drive.get_user_drive_service(user_id)
     except Exception:

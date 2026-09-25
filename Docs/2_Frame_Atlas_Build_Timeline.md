@@ -1260,7 +1260,9 @@ responses identical to the pre-change backend. `app.py` 2,343 → 1,130 lines.
 `routes_account.py` (setup checklist, Gemini key/spend, Google connection); backups + `/api/models`
 joined `routes_maintenance.py`; health + config stay in `app.py` (Ryan's call). OAuth redirect URI
 is a fixed path string, so it can't change. 2 tests repointed; suite green; live-server check 84/84,
-all 71 responses identical to the pre-change backend ×4. `app.py` 1,130 → 560 lines. Thin wrappers over
+all 71 responses identical to the pre-change backend ×4. `app.py` 1,130 → 560 lines. Then, as a
+separate commit, **V90** closed the Day 39 debt: `/api/clip` now respects the friend 1,000-image cap
+(new `test_clip_library_cap_locally.py` fails 6 on V89, passes on V90). Thin wrappers over
 the `sync.py` / `drive.py` / `backup.py` workers already extracted.
 
 ### Day 43 — `routes_analytics.py` + final cleanup
