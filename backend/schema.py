@@ -7,9 +7,10 @@ migration, seed the placeholder admin row, build the FTS index and its
 triggers, then verify the result (check_schema) — all lifted verbatim from
 app.py.
 
-run_self_test() deliberately stayed in app.py: it calls deck helpers
-(_deck_access, touch_deck) that live there, and this module is not allowed to
-import from app.py. app.py passes it in:  init_db(run_self_test=run_self_test).
+run_self_test() lives in decks_common.py (moved from app.py on Day 41), next to
+the deck helpers it exercises (_deck_access, touch_deck). It is still passed in
+rather than imported here — app.py does  init_db(run_self_test=run_self_test)
+— so schema.py keeps no dependency on any deck code.
 """
 import gzip
 import json

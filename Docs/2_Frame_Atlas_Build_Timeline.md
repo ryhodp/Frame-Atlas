@@ -1224,7 +1224,7 @@ group), the upload/clip duplicate check (blocked on, and showed a thumbnail of, 
 photo), and `/api/clip` filing a friend's clip under user 1. New permanent test
 `scripts/test_library_isolation_locally.py` (29 checks) fails 14 on the old code, passes on the fix.
 
-### Day 40 — `routes_images.py` + `routes_maintenance.py` *(V87 — code complete; awaiting live-site confirmation)*
+### Day 40 — `routes_images.py` + `routes_maintenance.py` *(V87 — COMPLETE, Sep 25)*
 Favorite toggle, filmography edit + `/api/filmography/autocomplete` (added Day 37), on-set notes, download, delete, bulk delete, thumbnail serve,
 full-res proxy, `regenerate_thumbnails`, `extract_colors`. ~600 lines. Touches Drive (delete →
 `_Removed`) so depends on `drive.py` being done.
@@ -1237,12 +1237,18 @@ crashed). Upload/clip reassigned to Day 42. 1 test repointed; suite green; live-
 with every response, Drive move and queued crop job identical to the pre-change backend.
 `app.py` 3,265 → 2,343 lines.
 
-### Day 41 — `routes_decks.py`
+### Day 41 — `routes_decks.py` + `routes_share.py` + `decks_common.py` *(V88 — code complete; awaiting live-site confirmation)*
 The whole decks/scenes/storyboard/share/feedback block — `list_decks` through
 `get_shared_deck` and the V42 client-feedback endpoints. ~900 lines, the single biggest route
 group. Self-contained domain (its own tables, its own `_deck_payload` / `_deck_access` helpers).
 The PDF export endpoint (`export_deck_pdf`) comes here too — the `pdf_export.py` module it calls
 is already split.
+
+**How it actually shipped:** three files (Ryan's call): `decks_common.py` (shared helpers + the boot
+self-test), `routes_decks.py` (26 logged-in routes), `routes_share.py` (the 5 public `/api/share/*`
+routes — the app's whole no-login surface in one small file). 1 test repointed by hand
+(`test_self_test_locally.py`). Suite green; live-server check with a logged-out visitor 72/72, all 77
+responses identical to the pre-change backend. `app.py` 2,343 → 1,130 lines.
 
 ### Day 42 — `routes_sync.py`
 `/api/sync/*`, `/api/sync-settings`, `/api/account/*` (folder connect, setup status, Gemini key),
@@ -1337,8 +1343,8 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 37 | Routes → `routes_search.py` | Search/autocomplete/bookmarks/similar + `search_filters.py`; app.py −641 lines ✅ *(V84)* |
 | 38 | Routes → `routes_tags.py` | Tag editing + auto-tagger controls; `_scope_ids_to_user` → `core.py`; app.py −469 lines ✅ *(V85)* |
 | 39 | *Inserted:* library isolation fix | 5 cross-library leaks closed; permanent 29-check isolation test ✅ *(V86)* |
-| 40 | Routes → `routes_images.py` | Favorite/filmography/notes/download/delete/thumb *(planned)* |
-| 41 | Routes → `routes_decks.py` | Decks/scenes/storyboard/share/feedback/PDF, biggest group *(planned)* |
+| 40 | Routes → `routes_images.py` + `routes_maintenance.py` | Photo routes + admin library tools; app.py −922 lines ✅ *(V87)* |
+| 41 | Routes → `routes_decks.py` + `routes_share.py` | Decks + public share surface split; app.py −1,213 lines *(V88 — code complete)* |
 | 42 | Routes → `routes_sync.py` | Sync/account/backups/config route wrappers *(planned)* |
 | 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views + app.py down to <400 lines *(planned)* |
 | 44 | `Home.jsx` → `useSearch()` hook | Search/filter state extracted from the 1,855-line page *(planned)* |

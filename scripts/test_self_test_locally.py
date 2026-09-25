@@ -183,13 +183,18 @@ def test_catches_a_broken_query_with_schema_intact():
     # present, but the function that reads them is wrong. Here, _deck_access
     # is patched to look at the WRONG deck id — same shape of mistake as a
     # backwards WHERE clause or a copy-pasted query with an off-by-one.
-    original = mod._deck_access
+    #
+    # Day 41: run_self_test() and _deck_access() both live in decks_common.py
+    # now, so the patch goes THERE — that's the namespace run_self_test()
+    # resolves _deck_access in. (Patching mod._deck_access would miss it.)
+    # mod.run_self_test is app.py's by-name import of the same function.
+    original = mod.decks_common._deck_access
     def broken_deck_access(c, deck_id, user_id):
         return original(c, deck_id + 999999, user_id)  # always misses
-    mod._deck_access = broken_deck_access
+    mod.decks_common._deck_access = broken_deck_access
 
     results = mod.run_self_test(conn)
-    mod._deck_access = original  # restore before any other check runs
+    mod.decks_common._deck_access = original  # restore before any other check runs
     conn.close()
 
     by_name = {name: (ok, detail) for name, ok, detail in results}
