@@ -1250,7 +1250,7 @@ routes — the app's whole no-login surface in one small file). 1 test repointed
 (`test_self_test_locally.py`). Suite green; live-server check with a logged-out visitor 72/72, all 77
 responses identical to the pre-change backend. `app.py` 2,343 → 1,130 lines.
 
-### Day 42 — `routes_sync.py` + `routes_account.py` *(V89 — code complete; awaiting live-site confirmation)*
+### Day 42 — `routes_sync.py` + `routes_account.py` *(V89 + V90 — COMPLETE, Sep 25)*
 `/api/sync/*`, `/api/sync-settings`, `/api/account/*` (folder connect, setup status, Gemini key),
 `/api/backups/*`, `/api/folders`, `/api/models`, `/api/config`, plus (assigned Day 40) `/api/upload`
 + `/api/clip` (+ `_clip_filename`, `CLIP_*`) and the Google Drive OAuth routes (`/api/auth/status`,
@@ -1265,12 +1265,18 @@ separate commit, **V90** closed the Day 39 debt: `/api/clip` now respects the fr
 (new `test_clip_library_cap_locally.py` fails 6 on V89, passes on V90). Thin wrappers over
 the `sync.py` / `drive.py` / `backup.py` workers already extracted.
 
-### Day 43 — `routes_analytics.py` + final cleanup
+### Day 43 — `routes_analytics.py` + final cleanup *(V91 — code complete; awaiting live-site confirmation)*
 `/api/analytics`, `/api/analytics/users`, `/api/views/*`, `/api/views/log`,
 `get_utility_view()`, `log_image_views()`. ~200 lines. Plus: whatever's left in `app.py` should
 now be just the Flask app object, config, blueprint registration, `before_request` gate, the
 `serve()` catch-all for the React shell, and the `__main__` startup block — target **under 400
 lines**. Update CLAUDE.md's file-structure section to reflect the final module layout.
+
+**How it actually shipped:** analytics/views → `routes_analytics.py` verbatim; the duplicated startup
+sequence merged into ONE (Railway-style `python app.py` boot verified: each step once, log identical
+to before); ~150 lines of "moved to X" comments replaced by a backend-map docstring; test re-exports
+kept. Suite green; analytics live check identical ×3. **`app.py` 560 → 228 lines — Phase 3's route
+work is done** (~6,960 at the start of Phase 3).
 
 ---
 
@@ -1353,8 +1359,8 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 39 | *Inserted:* library isolation fix | 5 cross-library leaks closed; permanent 29-check isolation test ✅ *(V86)* |
 | 40 | Routes → `routes_images.py` + `routes_maintenance.py` | Photo routes + admin library tools; app.py −922 lines ✅ *(V87)* |
 | 41 | Routes → `routes_decks.py` + `routes_share.py` | Decks + public share surface split; app.py −1,213 lines ✅ *(V88)* |
-| 42 | Routes → `routes_sync.py` + `routes_account.py` | Photos-in + account/Google routes; app.py −570 lines *(V89 — code complete)* |
-| 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views + app.py down to <400 lines *(planned)* |
+| 42 | Routes → `routes_sync.py` + `routes_account.py` | Photos-in + account/Google routes; app.py −570 lines; clip cap fixed ✅ *(V89, V90)* |
+| 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views out; one startup sequence; app.py 560 → 228 lines *(V91 — code complete)* |
 | 44 | `Home.jsx` → `useSearch()` hook | Search/filter state extracted from the 1,855-line page *(planned)* |
 | 45 | `Home.jsx` → `useSelection()` hook | Select/Tag Mode logic out (where 2 historical bugs lived) *(planned)* |
 | 46 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |

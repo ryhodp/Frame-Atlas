@@ -92,7 +92,7 @@ starting point for next session.
 ```
 frame-atlas/
 ├── backend/
-│   ├── app.py              # Endpoints, sync (Phase 3 splits this)
+│   ├── app.py              # ~230 lines (Phase 3 done, V91): app object + config, login-gate registration, blueprint registration, /api/health + /api/config, React catch-all, ONE startup sequence. Its docstring is the backend map
 │   ├── core.py             # get_db/db_path, favorite_col, tag normalisation, taxonomy maps, Gemini constants (V70; favorite_col V73); login gate + admin_required + RUNNING_LOCALLY (V83); _scope_ids_to_user (V85)
 │   ├── routes_auth.py      # Blueprint: setup, login/logout, register, forgot/reset password, invite codes, /api/auth/me (V83)
 │   ├── routes_search.py    # Blueprint: /api/search, /api/search/ids, /api/autocomplete, /api/interpret, /api/bookmarks, /api/images/<id>/similar (V84)
@@ -104,6 +104,7 @@ frame-atlas/
 │   ├── routes_share.py     # Blueprint (PUBLIC, no login): /api/share/<token> + its feedback/picks/comments — the app's whole public surface (V88)
 │   ├── routes_sync.py      # Blueprint: photos IN — /api/sync/*, /api/folders, /api/upload, /api/clip (V89)
 │   ├── routes_account.py   # Blueprint: setup checklist, Gemini key + spend, Google Drive connect/disconnect/status/picker (V89)
+│   ├── routes_analytics.py # Blueprint: /api/analytics, /api/analytics/users (admin), /api/views/<favorites|recent>, /api/views/log (V91)
 │   ├── routes_tags.py      # Blueprint: /api/images/<id>/tags, /api/tags/* (bulk, preview, summary, suggestions), /api/tag-categories, auto-tagger controls /api/tag/* + /api/tag-progress* (V85)
 │   ├── schema.py           # init_db + all migrations + check_schema + load_embeddings_seed (V70)
 │   ├── drive.py            # Google Drive: service/OAuth clients, folder listing, _Removed, download (V71)
@@ -306,6 +307,14 @@ These are hard-won lessons from debugging. Don't second-guess them.
 - Reads `drive.PERSONAL_LIBRARY_CAP` qualified at request time, so the test can patch it to 3.
 - `scripts/test_clip_library_cap_locally.py` (18 checks): against V89 it FAILS 6 (a friend's clip went straight past the cap, writing a Drive file and a row); against V90 all pass. Suite now **46 Python + 3 `.mjs`**.
 - Done as its own commit AFTER the V89 move on purpose (Ryan's call): a move commit must not change behaviour, or its before/after comparison proves nothing.
+
+**Route blueprints — Day 43 (V91): `routes_analytics.py` + final cleanup — Phase 3 complete**
+- `/api/analytics`, `/api/analytics/users` (admin), `/api/views/<view>`, `/api/views/log` moved verbatim into `routes_analytics.py` (`Blueprint('analytics')`). `_display_name` now reaches it from `decks_common`.
+- **ONE startup sequence (Ryan's call).** `app.py` used to write the 8 boot steps out twice: an `if __name__ == '__main__':` copy (Railway runs `CMD ["python", "app.py"]`, so this was the production one — it ended in `app.run()`, which blocks, so the module-level copy below it never ran in production) and a module-level copy (the one every test import ran). Now the steps are written once at module level, and `if __name__ == '__main__':` only holds `app.run(...)`. `crop.start_crop_worker()` joined that sequence as its first step (it used to run from mid-file; route decorators in between only register URLs, so nothing depends on the old position). **The many "both boot blocks" notes in the Day 29–35 sections above are now historical — there is one block.**
+- **`app.py`'s ~150 lines of "moved to X" pointer comments were replaced by one module docstring: a map of every backend file and what it holds.** The history lives here and in the session log.
+- Test re-exports kept deliberately (Ryan's call): the `colors`/`fingerprint`/`imaging`/`perspective`/`core`/`schema` by-name imports, `Image`, `base64`, `drive`, `gemini`, `tagging`, `decks_common` — ~30 scripts read them as `mod.<name>`. Removed as truly dead (no test reaches them): `sqlite3`, `zlib`, `timedelta`, `wraps`, `request`, `session`.
+- **Proof of no unintended change:** a script stripped comments/blank lines from the old and new `app.py` (after removing the 4 analytics blocks, each confirmed verbatim) and diffed the CODE — the only differences were the dead imports, the new blueprint import/registration, and the startup restructure. Suite 46 Python + 3 `.mjs` green (clean old-code baseline re-run in an isolated snapshot, after an earlier background baseline overlapped the edit). **Railway-style boot** (`python app.py` on a fresh DB): health answers, every startup log line appears exactly once, and the log is identical to the old code's. Analytics live check: old 20/20, new 25/25, all 22 responses identical ×3.
+- `app.py`: **560 → 228 lines** — from ~6,960 at the start of Phase 3 (and 7,337 before V45). Target was under 400.
 
 **CI (V43/Day 25)**
 - `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **44 Python + 3 `.mjs` as of V76** (`test_tagging_locally.py` added Day 32; `test_friend_tag_edit_locally.py` added V75; `test_backup_locally.py` added Day 33). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in
