@@ -4006,3 +4006,28 @@ clean, schema + self-test OK). Ryan moved on to Day 41 without a specific live c
 
 ### Starting point for next session
 Day 41 — `routes_decks.py` (decks/scenes/storyboard/share/feedback/PDF).
+
+---
+
+## Day 41 — Decks → `decks_common.py` + `routes_decks.py` + `routes_share.py` (Frame Atlas V88 complete)
+*Completed: September 25, 2026*
+*Status: DAY 41 COMPLETE — deployed (Railway `1993ab21`, commit `fd4396c`, SUCCESS; boot logs
+clean, schema + self-test — now running from decks_common.py — OK). Ryan moved on to Day 42
+without a specific live check.*
+
+### What was built
+- `decks_common.py` (shared helpers + `run_self_test`), `routes_decks.py` (26 logged-in routes),
+  `routes_share.py` (the 5 public `/api/share/*` routes — the whole no-login surface).
+- `app.py` 2,343 → 1,130 lines.
+
+### Decisions (Ryan: A, A, A)
+Three-file split; self-test beside the helpers it tests; thorough verification incl. a logged-out
+visitor.
+
+### Verification
+- Suite 45 Python + 3 `.mjs` green; `test_self_test_locally.py` repointed to
+  `decks_common._deck_access` (proved it failed loudly before the repoint).
+- Live-server check: pre-change 66/66, new 72/72, all 77 responses identical ×3.
+
+### Starting point for next session
+Day 42 — `routes_sync.py`: sync, account, backups, config, upload/clip, Google Drive OAuth.
