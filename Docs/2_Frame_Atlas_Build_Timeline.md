@@ -1289,7 +1289,7 @@ different risks — there is no `.jsx` test suite the way there's a `test_*_loca
 the backend, so verification leans harder on live browser checks.
 
 **Cut plan (scoped on Day 44; Ryan inserted a search-bar UI day, so the rest shifted +1):**
-- **Day 44** *(V92 — code complete; awaiting live-site confirmation)* — search/filter logic →
+- **Day 44** *(V92 — COMPLETE, Sep 25)* — search/filter logic →
   `hooks/useSearch.js` (20 pieces of state, ~15 actions, bookmarks, autocomplete, describe-it) +
   the silently-wrong-able pure parts → `searchParams.js` with `scripts/test_search_params.mjs`.
   **How it actually shipped:** logic only was ~250 lines, not ~400 (the plan's estimate included
@@ -1298,9 +1298,14 @@ the backend, so verification leans harder on live browser checks.
   active — a stale notice survives adding a tag) and `onClearAll` (always wipe it). Verified by a
   browser before/after: the same 30-request scripted session against the old and new builds —
   every request, order and body identical. `Home.jsx` 2,318 → 2,071 lines.
-- **Day 45** *(inserted Day 44)* — the search bar's ON-SCREEN part → components (search box +
-  autocomplete dropdown, colour picker + sliders, the chips row, the bookmarks menu). ~740 lines
-  of JSX the original plan never assigned a day.
+- **Day 45** *(inserted Day 44; V93 — code complete; awaiting live-site confirmation)* — the
+  search bar's ON-SCREEN part → components (search box + autocomplete dropdown, colour picker +
+  sliders, the chips row, the bookmarks menu). ~740 lines of JSX the original plan never assigned.
+  **How it actually shipped:** `SearchBox.jsx` (three pieces, because they sit in three places on
+  the page), `BookmarksMenu.jsx`, `ColorFilter.jsx`, `FilterChips.jsx`; each gets the whole
+  `search` object. JSX verbatim. Verified by an 11-state page-structure (DOM) comparison + the
+  22-request diff — all identical, once the mouse pointer was parked before each snapshot (hover
+  styles had made one run differ). `Home.jsx` 2,071 → 1,436 lines.
 - **Day 46** — Extract Select Mode / Tag Mode into a `useSelection()` hook (the selection Set,
   drag-select, shift-click range, the bulk-action handlers). ~350 lines. This is where the two
   historical bugs lived.
@@ -1371,8 +1376,8 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 41 | Routes → `routes_decks.py` + `routes_share.py` | Decks + public share surface split; app.py −1,213 lines ✅ *(V88)* |
 | 42 | Routes → `routes_sync.py` + `routes_account.py` | Photos-in + account/Google routes; app.py −570 lines; clip cap fixed ✅ *(V89, V90)* |
 | 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views out; one startup sequence; app.py 560 → 228 lines ✅ *(V91)* |
-| 44 | `Home.jsx` → `useSearch()` hook | Search logic out + `searchParams.js` test; Home 2,318 → 2,071 lines *(V92 — code complete)* |
-| 45 | `Home.jsx` search bar → components | Search box, colour picker, chips row, bookmarks menu (~740 lines of JSX) *(planned — inserted Day 44)* |
+| 44 | `Home.jsx` → `useSearch()` hook | Search logic out + `searchParams.js` test; Home 2,318 → 2,071 lines ✅ *(V92)* |
+| 45 | `Home.jsx` search bar → components | SearchBox, BookmarksMenu, ColorFilter, FilterChips; Home 2,071 → 1,436 lines *(V93 — code complete)* |
 | 46 | `Home.jsx` → `useSelection()` hook | Select/Tag Mode logic out (where 2 historical bugs lived) *(planned)* |
 | 47 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |
 | 48 | `Home.jsx` final composition | Page becomes wiring; target <500 lines *(planned)* |

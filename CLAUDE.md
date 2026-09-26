@@ -127,7 +127,7 @@ frame-atlas/
 │       ├── hooks/
 │       │   └── useSearch.js  # Every search filter, the search box + autocomplete + describe-it, bookmarks (V92)
 │       ├── searchParams.js   # Pure: filter -> server query, bookmark save/restore; tested by scripts/test_search_params.mjs (V92)
-│       └── components/     # Reusable UI pieces
+│       └── components/     # Reusable UI pieces — incl. (V93) SearchBox.jsx (SearchInput / SearchError / AutocompleteDropdown), BookmarksMenu.jsx, ColorFilter.jsx, FilterChips.jsx
 ├── docs/                   # Planning documents (read at session start)
 ├── CLAUDE.md               # This file
 └── DESIGN.md               # Visual design system
@@ -330,6 +330,15 @@ These are hard-won lessons from debugging. Don't second-guess them.
   3. Use element refs (`find`/`read_page`), not raw coordinates, for clicks — the screenshot's coordinate frame and the viewport differ, and a coordinate click silently missed once.
 - Known, harmless difference: effects declared inside a hook run before the component's own later effects, so mount-time effect ORDER can shift. Checked in the server log: the same page-load requests, same order.
 - `Home.jsx`: **2,318 → 2,071 lines**. `useSearch.js` 305, `searchParams.js` 70.
+
+**Frontend breakup — Day 45 (V93): the search bar's on-screen pieces → components**
+- `components/SearchBox.jsx` exports THREE pieces — `SearchInput`, `SearchError`, `AutocompleteDropdown` — not one component, because on the page they sit in three separate places (the describe-it error ends the top row AFTER the bookmarks button; the dropdown sits below the row). One component can only render one contiguous block, and keeping the page's DOM identical was the rule. `BookmarksMenu.jsx`, `ColorFilter.jsx` (swatches + wheel + both sliders; the slider helpers `PROM_MIN`/`posToProm`/`promToPos`/`promLabel`/`exactLabel` moved with it; gets `total`/`loading` from Home for the live count), `FilterChips.jsx` (chips row + the violet/amber explanation notes; the Find Similar chip's data and × come in as `similarTo`/`onClearSimilar`).
+- **Each component receives the whole useSearch() object as `search`** (Ryan's call) and destructures only what it uses. Home now does `const search = useSearch({...})` and destructures only the 14 names it still uses itself. The Select Mode / Upload / Duplicates / Sync buttons stay in Home's top row (Days 46/48).
+- All 6 JSX blocks and every moved helper are verbatim (indentation aside — JSX trims it) except one intended rename (`onClick={clearSimilar}` → `onClick={onClearSimilar}`).
+- **Caught by the Babel check before anything ran:** SearchBox has three functions each destructuring from `search`; an import-trim pass computed "unused" per FILE, so a name used by `SearchInput` but not `SearchError` was removed from ALL three. The build would have passed and typing would have thrown. Trim per FUNCTION, then re-run the unbound check.
+- **Verification — page-structure (DOM) comparison added to Day 44's request diff:** in the old and new builds, the same scripted session; at 11 states (dropdown open for tags and for a film, colour + moved sliders, every chip type + both notes, bookmarks menu with/without filters and with/without a saved one, applied, reopened, deleted) capture `document.querySelector('[data-search-area]').outerHTML`. **All 11 identical character-for-character, plus all 22 requests.** Self-consistency bonus: "bookmark applied" == "filters first set", "deleted" == "never saved".
+- **Hover trap (cost one re-run):** many elements set inline styles in `onMouseEnter` (bookmark rows get a background, clear/× buttons turn red). Wherever a click leaves the REAL mouse pointer, a later snapshot can include a hover style — the first old-build run's bookmark row was 29 chars longer for exactly this reason. **Park the pointer over the empty sidebar (`hover` action) before every DOM snapshot**, and restart the harness with a FRESH DB for each build. Store the first build's snapshots in `localStorage` (same origin `localhost:8081` survives a server restart) so the second run can diff in-page and print the exact divergent text, instead of shipping 100 KB of HTML out of the browser.
+- `Home.jsx`: **2,071 → 1,436 lines** (2,318 at the start of Day 44). `SearchBox` 165, `BookmarksMenu` 139, `ColorFilter` 180, `FilterChips` 228.
 
 **CI (V43/Day 25)**
 - `.github/workflows/tests.yml` runs on every push/PR: every `scripts/test_*_locally.py` script (Python 3.11, matching Railway's deploy image) plus the pure-logic `.mjs` tests (Node) — **44 Python + 3 `.mjs` as of V76** (`test_tagging_locally.py` added Day 32; `test_friend_tag_edit_locally.py` added V75; `test_backup_locally.py` added Day 33). Every script builds its own throwaway synthetic database, pointed at via `FA_DB_PATH` (V45 part 2), so this needs no fixtures or secrets checked in
