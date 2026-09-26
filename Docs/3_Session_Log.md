@@ -4087,3 +4087,34 @@ Merge startup; replace pointer comments with a map; keep test re-exports; thorou
 ### Starting point for next session
 Days 44–47 — `Home.jsx` breakup (frontend). The timeline says to scope it in its own planning pass
 before any code: no `.jsx` test suite exists, so verification leans on the browser.
+
+---
+
+## Day 44 — `Home.jsx` search logic → `useSearch()` + `searchParams.js` (Frame Atlas V92 complete)
+*Completed: September 25, 2026*
+*Status: DAY 44 COMPLETE — deployed (Railway `362feb78`, commit `19c23ca`, SUCCESS; live site
+serves `index-4ce06f4b.js`, byte-identical to the locally tested build). Ryan moved on to Day 45
+without a specific live check.*
+
+### What was built
+- `frontend/src/hooks/useSearch.js` — all search state/effects/actions + bookmarks; Home
+  destructures every name under its original name, so its JSX is untouched.
+- `frontend/src/searchParams.js` + `scripts/test_search_params.mjs` (24 checks incl. 5,000 random
+  states vs a verbatim copy of the old logic); added to CI.
+- `Home.jsx` 2,318 → 2,071 lines.
+
+### Decisions (Ryan: A, A, A, A)
+1. Find Similar stays in Home via `onBeforeFilter` / `onClearAll` callbacks.
+2. Logic only today; **new Day 45** for the search bar's on-screen components (~740 lines of JSX
+   the plan never assigned); later frontend days shift +1 (now Days 46–48).
+3. Pure helpers + test. 4. Browser before/after.
+
+### Verification
+- `npm run build` clean; Babel scope check: only browser globals unbound; 55 names match hook ↔ Home.
+- Browser before/after (old vs new build, local harness + seeded data + fake Gemini): the same
+  30-request scripted session — identical requests, order and bodies. Find Similar notice rules
+  behave identically. Suite 46 Python + 4 `.mjs` green.
+
+### Starting point for next session
+Day 45 — search bar on-screen part → components (search box + dropdown, colour picker + sliders,
+chips row, bookmarks menu).
