@@ -4118,3 +4118,32 @@ without a specific live check.*
 ### Starting point for next session
 Day 45 — search bar on-screen part → components (search box + dropdown, colour picker + sliders,
 chips row, bookmarks menu).
+
+---
+
+## Day 45 — Search bar on-screen pieces → components (Frame Atlas V93 complete)
+*Completed: September 26, 2026*
+*Status: DAY 45 COMPLETE — deployed (Railway `e80069d8`, commit `ba00c18`, SUCCESS; live site serves
+`index-a5333ad8.js`, identical to the locally tested build). Ryan moved on to Day 46 without a
+specific live check.*
+
+### What was built
+- `components/SearchBox.jsx` (three exports — `SearchInput`, `SearchError`, `AutocompleteDropdown` —
+  because they sit in three separate places on the page), `BookmarksMenu.jsx`, `ColorFilter.jsx`,
+  `FilterChips.jsx`. Each receives the whole `useSearch()` object as `search`.
+- `Home.jsx` 2,071 → 1,436 lines.
+
+### Decisions (Ryan: A, A, A, A)
+Four components; pass the whole `search` object; leave Select Mode/Upload/Duplicates/Sync buttons in
+Home; add a page-structure (DOM) comparison to the verification.
+
+### Verification
+- Babel check caught a per-file trim bug (a name used by one of SearchBox's three pieces was stripped
+  from all three) before anything ran.
+- 11-state DOM comparison + 22-request diff, old vs new build: all identical. The first attempt showed
+  two differences caused by the mouse pointer's hover styles, not the code; after parking the pointer
+  and using a fresh DB per build (Ryan: "Try again"), everything matched, and the new build matched
+  itself across two runs. Suite 46 Python + 4 `.mjs` green.
+
+### Starting point for next session
+Day 46 — Select Mode / Tag Mode → `useSelection()` hook.
