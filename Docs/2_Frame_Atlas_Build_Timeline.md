@@ -1306,7 +1306,7 @@ the backend, so verification leans harder on live browser checks.
   `search` object. JSX verbatim. Verified by an 11-state page-structure (DOM) comparison + the
   22-request diff — all identical, once the mouse pointer was parked before each snapshot (hover
   styles had made one run differ). `Home.jsx` 2,071 → 1,436 lines.
-- **Day 46** *(V94 — code complete; awaiting live-site confirmation)* — Extract Select Mode / Tag
+- **Day 46** *(V94 — COMPLETE, Sep 29)* — Extract Select Mode / Tag
   Mode into a `useSelection()` hook (the selection Set, drag-select, shift-click range, the
   bulk-action handlers). ~350 lines. This is where the two historical bugs lived.
   **How it actually shipped:** `hooks/useSelection.js` incl. the V/T/C/Delete shortcuts; photo
@@ -1383,6 +1383,6 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 43 | Routes → `routes_analytics.py` + cleanup | Analytics/views out; one startup sequence; app.py 560 → 228 lines ✅ *(V91)* |
 | 44 | `Home.jsx` → `useSearch()` hook | Search logic out + `searchParams.js` test; Home 2,318 → 2,071 lines ✅ *(V92)* |
 | 45 | `Home.jsx` search bar → components | SearchBox, BookmarksMenu, ColorFilter, FilterChips; Home 2,071 → 1,436 lines ✅ *(V93)* |
-| 46 | `Home.jsx` → `useSelection()` hook | Select Mode logic + shortcuts out; box-drag test; Home 1,436 → 1,224 lines *(V94 — code complete)* |
+| 46 | `Home.jsx` → `useSelection()` hook | Select Mode logic + shortcuts out; box-drag test; Home 1,436 → 1,224 lines ✅ *(V94)* |
 | 47 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |
 | 48 | `Home.jsx` final composition | Page becomes wiring; target <500 lines *(planned)* |

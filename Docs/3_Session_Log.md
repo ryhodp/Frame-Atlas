@@ -4147,3 +4147,38 @@ Home; add a page-structure (DOM) comparison to the verification.
 
 ### Starting point for next session
 Day 46 — Select Mode / Tag Mode → `useSelection()` hook.
+
+---
+
+## Day 46 — Select Mode logic → `useSelection()` hook (Frame Atlas V94 complete)
+*Completed: September 29, 2026*
+*Status: DAY 46 COMPLETE — deployed (Railway `e7c12c37`, commit `e39e532`, SUCCESS; live site serves
+`index-1f75f0ec.js`, identical to the tested build). Ryan moved on to Day 47 without a specific
+live check.*
+
+### What was built
+- `frontend/src/hooks/useSelection.js`: selection state, click/shift-click/box-drag, both
+  select-all functions, the tag drawer, the V/T/C/Delete shortcuts, the Delete key's confirm-and-
+  delete, the release-outside-the-grid safety net. Photo changes stay in Home as callbacks
+  (`onBulkDeleted`, `onResync`, `onCropSelected`, `cropOpen`).
+- Box-drag hit test → pure `idsInDragRect()` in `selectionRange.js`, +12 checks in
+  `scripts/test_selection_range.mjs` (incl. 5,000 random drags vs the old inline rule).
+- `Home.jsx` 1,436 → 1,224 lines.
+
+### Decisions (Ryan: A, A, A, A)
+Selection-only hook with photo changes as callbacks; shortcuts in the hook; pure box-drag function
+with tests; full browser before/after incl. the V35/V38 rules.
+
+### Verification
+- 17 whole-page snapshots + 31 requests, old vs new build: identical (crop window's random `blob:`
+  address blanked). V38 cancel keeps / start exits Select Mode; V35 Delete clears the selection.
+- Harness fixes: fixed distinct `date_added` for seeded photos (timing-dependent ties had changed the
+  order between runs); keep a filter active when the grid is captured; input dispatched in-page.
+- Suite 46 Python + 4 `.mjs` green.
+
+### Technical debt / notes
+- Two near-duplicate "select all results" functions (header vs drawer) — kept as-is in a move;
+  merging them would change behaviour.
+
+### Starting point for next session
+Day 47 — the masonry grid + infinite scroll + view-logging → `<ImageGrid>` component.
