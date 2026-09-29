@@ -29,3 +29,32 @@ export function rangeIdsBetween(images, anchorId, targetId) {
   const [lo, hi] = from < to ? [from, to] : [to, from];
   return images.slice(lo, hi + 1).map(i => i.id);
 }
+
+/**
+ * Day 46 (V94) — box-select hit test for Select Mode's drag rectangle.
+ *
+ * Pulled out of Home's mouse-move handler for the same reason as
+ * rangeIdsBetween above: browser automation can't reliably perform a drag,
+ * and an off-by-one here (a tile that merely touches the rectangle's edge
+ * counting as selected, or a leftward/upward drag missing tiles) still
+ * "looks like it works" on screen. Tested by scripts/test_selection_range.mjs.
+ *
+ * The overlap rule is STRICT, exactly as it was inline: a tile whose edge
+ * only touches the rectangle's edge is not selected.
+ *
+ * @param {Set<number>} baseSelected  the selection when the drag started —
+ *                                    a drag only ever ADDS to it
+ * @param {{left:number, top:number, right:number, bottom:number}} rect
+ *                                    the drag rectangle, viewport coords
+ * @param {Array<[number, {left:number, top:number, right:number, bottom:number}]>} tiles
+ *                                    [image id, tile's on-screen box] for each tile
+ * @returns {Set<number>} a NEW set: baseSelected plus every overlapping tile
+ */
+export function idsInDragRect(baseSelected, rect, tiles) {
+  const next = new Set(baseSelected);
+  for (const [id, r] of tiles) {
+    const intersects = r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
+    if (intersects) next.add(id);
+  }
+  return next;
+}

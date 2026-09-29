@@ -9,9 +9,9 @@ import TagRemovalPreview from '../components/TagRemovalPreview';
 import CropModal from '../components/CropModal';
 import { useAuth } from '../AuthContext';
 import { useSync } from '../SyncContext';
-import { rangeIdsBetween } from '../selectionRange';
 import { useIsMobile, MOBILE_BREAKPOINT } from '../hooks/useIsMobile';
 import { useSearch } from '../hooks/useSearch';
+import { useSelection } from '../hooks/useSelection';
 import { SearchInput, SearchError, AutocompleteDropdown } from '../components/SearchBox';
 import BookmarksMenu from '../components/BookmarksMenu';
 import ColorFilter from '../components/ColorFilter';
@@ -56,13 +56,6 @@ export default function Home() {
   });
   const { chips, setChips, nlChips, setNlChips, noteChips, color, setColor, film, setFilm, ar, hasFilters, buildFilterParams, setSearchText, clearAll } = search;
 
-  // ── Select Mode (was "Tag Mode"): bulk-select images to tag, crop, or deck ──
-  const [tagMode, setTagMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
-  const [selectingAll, setSelectingAll] = useState(false);
-  const [selectMsg, setSelectMsg] = useState('');
-
   // ── V32: library-wide tag cleanup — the chip whose tag is being removed
   //         from every result of the current search, or null ─────────────────
   const [removingTag, setRemovingTag] = useState(null);
@@ -70,11 +63,27 @@ export default function Home() {
 
   // ── V18: crop review modal — array of images to crop, or null ──────────────
   const [cropImages, setCropImages] = useState(null);
-  const [dragRect, setDragRect] = useState(null); // {left, top, width, height} in viewport coords, or null
-  const tileRefs = useRef(new Map()); // image id -> tile DOM node
-  const dragStateRef = useRef(null); // { startX, startY, dragging, baseSelected }
-  const rangeAnchorRef = useRef(null); // last tile clicked — the far end of a shift-click range
-  const justDraggedRef = useRef(false); // true for the brief window between mouseup-after-drag and the resulting click
+
+  // ── Select Mode (Day 46): selection state, click / shift-click / box-drag,
+  //    select-all, the tag drawer, the V/T/C/Delete shortcuts and the Delete
+  //    key's confirm-and-delete live in hooks/useSelection.js. Destructured
+  //    under their original names so everything below reads as before. What
+  //    happens TO photos stays here and is handed over as callbacks — these
+  //    are called later (never during this render), so it's fine that
+  //    handleBulkDeleted / fetchPage are defined further down.
+  const {
+    tagMode, selectedIds, setSelectedIds, tagDrawerOpen, selectingAll, selectMsg,
+    dragRect, tileRefs, justDraggedRef,
+    toggleTagMode, toggleTileSelection, selectAllResults, handleSelectAllResults,
+    everythingLoaded, allLoadedAndSelected, openTagDrawer, closeTagDrawer,
+    handleBulkDeleteClick, onGridMouseDown, onGridMouseMove, onGridMouseUp,
+  } = useSelection({
+    images, total, similarTo, buildFilterParams,
+    onBulkDeleted: (ids) => handleBulkDeleted(ids),
+    onResync: () => fetchPage(0, false),
+    onCropSelected: (sel) => setCropImages(sel),
+    cropOpen: !!cropImages,
+  });
 
   // ── V48: drop photos anywhere on the page, not just onto the Upload
   //         button's own panel — delegates to the same upload flow ──────────
@@ -297,47 +306,6 @@ export default function Home() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // ── Safety net: if the mouse is released outside the grid mid-drag, still end it ─
-  useEffect(() => {
-    if (!tagMode) return;
-    const onUp = () => endDrag();
-    window.addEventListener('mouseup', onUp);
-    return () => window.removeEventListener('mouseup', onUp);
-  }, [tagMode]);
-
-  // ── Keyboard shortcuts: 'V' toggles Select Mode; with photos selected,
-  //    'T' opens the tag drawer, 'C' crops, Delete/Backspace deletes ─────────
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      // Only trigger if user isn't typing in an input
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'v' || e.key === 'V') {
-        e.preventDefault();
-        toggleTagMode();
-        return;
-      }
-      // The Crop review modal binds its own 'T' (Tighten) and Backspace/Delete
-      // (Skip photo) shortcuts with no stopPropagation — while it's open these
-      // keys must NOT also reach the page underneath (T would fight over the
-      // tag drawer, Delete would pop a bulk-delete confirm mid-review).
-      if (!tagMode || selectedIds.size === 0 || cropImages) return;
-      if (e.key === 't' || e.key === 'T') {
-        e.preventDefault();
-        openTagDrawer();
-      } else if (e.key === 'c' || e.key === 'C') {
-        e.preventDefault();
-        const sel = images.filter(i => selectedIds.has(i.id));
-        if (sel.length) setCropImages(sel);
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault();
-        handleBulkDeleteClick();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tagMode, selectedIds, images, cropImages]);
-
   // ── Detail-panel callbacks: keep grid in sync with edits ────────────────────
   const handleImageUpdated = (id, patch) => {
     setImages(prev => prev.map(img => img.id === id ? { ...img, ...patch } : img));
@@ -361,67 +329,6 @@ export default function Home() {
       console.error('Toggle favorite failed', err);
     }
   };
-
-  // ── Tag Mode: toggling in/out, tile clicks, box-select drag ─────────────────
-  const toggleTagMode = () => {
-    setTagMode(v => {
-      const next = !v;
-      if (!next) {
-        setSelectedIds(new Set()); // turning OFF clears selection
-        setTagDrawerOpen(false); // Also close the drawer
-      }
-      return next;
-    });
-  };
-
-  // Shift-click adds a whole run of photos at once (see selectionRange.js for
-  // why the run follows server order, not screen position). Shift only ever
-  // ADDS; it never unselects, so a mis-aimed shift-click can't quietly wipe a
-  // selection you spent a minute building.
-  const toggleTileSelection = (id, extendRange) => {
-    if (extendRange) {
-      const rangeIds = rangeIdsBetween(images, rangeAnchorRef.current, id);
-      if (rangeIds.length) {
-        setSelectedIds(prev => new Set([...prev, ...rangeIds]));
-        rangeAnchorRef.current = id;
-        return;
-      }
-    }
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-    rangeAnchorRef.current = id;
-  };
-
-  // Select every image the current filter matches, not just the pages the
-  // browser has scrolled far enough to load. Asking the server for the id
-  // list is what makes this cheap and honest: a few kilobytes of numbers
-  // instead of force-loading every remaining page of thumbnails, and it comes
-  // from the same filter code the grid's own results do.
-  const selectAllResults = useCallback(async () => {
-    // Find Similar doesn't go through /api/search and always returns its whole
-    // result set in one shot, so everything is already on screen.
-    if (similarTo) {
-      setSelectedIds(new Set(images.map(i => i.id)));
-      return { ok: true, count: images.length };
-    }
-    try {
-      const res = await fetch(`/api/search/ids?${buildFilterParams()}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'failed');
-      const ids = data.ids || [];
-      setSelectedIds(new Set(ids));
-      return { ok: true, count: ids.length };
-    } catch (e) {
-      console.error('Select all results failed', e);
-      // Deliberately leave the selection untouched rather than quietly
-      // falling back to "the loaded ones" — silently selecting a smaller set
-      // than asked for is the exact trap this feature exists to fix.
-      return { ok: false, count: 0 };
-    }
-  }, [similarTo, images, buildFilterParams]);
 
   // Apply a bulk patch to any currently-loaded images that were part of the bulk op
   const handleBulkTagsChanged = (ids, patchFn) => {
@@ -449,68 +356,6 @@ export default function Home() {
     setImages(prev => prev.filter(img => !idSet.has(img.id)));
     setTotal(t => Math.max(0, t - ids.length));
     setSelectedImage(prev => (prev && idSet.has(prev.id)) ? null : prev);
-  };
-
-  // ── Select all results wrapper for the header ─────────────────────────────
-  const everythingLoaded = !total || images.length >= total;
-  const allLoadedAndSelected = everythingLoaded && selectedIds.size > 0 && selectedIds.size >= images.length;
-
-  const handleSelectAllResults = useCallback(async () => {
-    if (selectingAll) return;
-    setSelectMsg('');
-    // Everything's already on screen — no round trip needed.
-    if (everythingLoaded) {
-      setSelectedIds(new Set(images.map(i => i.id)));
-      return;
-    }
-    setSelectingAll(true);
-    try {
-      const res = await fetch(`/api/search/ids?${buildFilterParams()}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'failed');
-      const ids = data.ids || [];
-      setSelectedIds(new Set(ids));
-    } catch (e) {
-      console.error('Select all results failed', e);
-      // Deliberately leave the selection untouched rather than quietly
-      // falling back to "the loaded ones" — silently selecting a smaller set
-      // than asked for is the exact trap this feature exists to fix.
-      setSelectMsg("Couldn't reach the server — nothing selected.");
-    }
-    setSelectingAll(false);
-  }, [similarTo, images, buildFilterParams, everythingLoaded, selectingAll]);
-
-  const openTagDrawer = () => setTagDrawerOpen(true);
-  const closeTagDrawer = () => setTagDrawerOpen(false);
-
-  const handleBulkDeleteClick = () => {
-    // Delete handler for the header's Delete button
-    const ids = Array.from(selectedIds);
-    if (ids.length === 0) return;
-    // Ask for confirmation, then trigger the delete
-    if (!window.confirm(`Delete ${ids.length} photo${ids.length === 1 ? '' : 's'}? They'll be moved to Drive's _Removed folder.`)) return;
-
-    // Optimistically update UI
-    handleBulkDeleted(ids);
-    setSelectedIds(new Set());
-
-    // Delete in the background
-    (async () => {
-      try {
-        const res = await fetch('/api/images/bulk-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_ids: ids })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          fetchPage(0, false); // Re-sync on error
-        }
-      } catch (e) {
-        console.error('Bulk delete failed', e);
-        fetchPage(0, false); // Re-sync on error
-      }
-    })();
   };
 
   // ── Background duplicate scanner ────────────────────────────────────────────
@@ -600,63 +445,6 @@ export default function Home() {
     pageDragDepthRef.current = 0;
     setPageDragOver(false);
     uploadButtonRef.current?.acceptFiles(e.dataTransfer.files);
-  };
-
-  const DRAG_THRESHOLD = 4;
-
-  const onGridMouseDown = (e) => {
-    if (!tagMode) return;
-    // Only left-click drags start a box-select
-    if (e.button !== 0) return;
-    dragStateRef.current = {
-      startX: e.clientX, startY: e.clientY,
-      dragging: false,
-      baseSelected: new Set(selectedIds)
-    };
-  };
-
-  const onGridMouseMove = (e) => {
-    if (!tagMode || !dragStateRef.current) return;
-    const st = dragStateRef.current;
-    const dx = e.clientX - st.startX;
-    const dy = e.clientY - st.startY;
-    if (!st.dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-    st.dragging = true;
-
-    const left = Math.min(st.startX, e.clientX);
-    const top = Math.min(st.startY, e.clientY);
-    const width = Math.abs(dx);
-    const height = Math.abs(dy);
-    setDragRect({ left, top, width, height });
-
-    // Hit-test every tile against the drag rectangle (both in viewport coords)
-    const rectRight = left + width;
-    const rectBottom = top + height;
-    const next = new Set(st.baseSelected);
-    tileRefs.current.forEach((node, id) => {
-      if (!node) return;
-      const r = node.getBoundingClientRect();
-      const intersects = r.left < rectRight && r.right > left && r.top < rectBottom && r.bottom > top;
-      if (intersects) next.add(id);
-    });
-    setSelectedIds(next);
-  };
-
-  const endDrag = () => {
-    // If a real drag happened, suppress the click that the browser fires right
-    // after mouseup on the tile under the cursor (clear the flag on a timeout
-    // so it doesn't linger and swallow the next legitimate click).
-    if (dragStateRef.current?.dragging) {
-      justDraggedRef.current = true;
-      setTimeout(() => { justDraggedRef.current = false; }, 0);
-    }
-    dragStateRef.current = null;
-    setDragRect(null);
-  };
-
-  const onGridMouseUp = () => {
-    if (!tagMode) return;
-    endDrag();
   };
 
   // ── True masonry: distribute images into columns, shortest-first ────────────
