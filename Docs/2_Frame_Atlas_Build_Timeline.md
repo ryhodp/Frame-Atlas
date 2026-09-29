@@ -1314,8 +1314,12 @@ the backend, so verification leans harder on live browser checks.
   test → pure `idsInDragRect()` + 12 tests. Browser before/after: 17 whole-page snapshots + 31
   requests identical, covering V38 (crop cancel keeps / crop start exits) and V35 (delete clears).
   `Home.jsx` 1,436 → 1,224 lines.
-- **Day 47** — Extract the masonry grid + infinite scroll + view-logging into a `<ImageGrid>`
+- **Day 47** *(V95 — code complete; awaiting live-site confirmation)* — Extract the masonry grid + infinite scroll + view-logging into a `<ImageGrid>`
   component. ~300 lines.
+  **How it actually shipped:** `components/ImageGrid.jsx` (layout maths, tiles, drag overlay,
+  both infinite-scroll triggers, view-logging); fetching, the density slider and the setup/empty
+  states stay in Home. Browser before/after on a 150-photo seed: 7 whole-page snapshots + 9
+  requests identical, incl. the same 18 "seen" photo ids in the view-log. `Home.jsx` 1,224 → 948 lines.
 - **Day 48** — Whatever's left: the page becomes composition — `<Home>` wires the hooks and
   components together and owns very little state directly. Target **under 500 lines**.
 
@@ -1384,5 +1388,5 @@ helper consolidation) is case-by-case, driven by actual friction, not a plan.
 | 44 | `Home.jsx` → `useSearch()` hook | Search logic out + `searchParams.js` test; Home 2,318 → 2,071 lines ✅ *(V92)* |
 | 45 | `Home.jsx` search bar → components | SearchBox, BookmarksMenu, ColorFilter, FilterChips; Home 2,071 → 1,436 lines ✅ *(V93)* |
 | 46 | `Home.jsx` → `useSelection()` hook | Select Mode logic + shortcuts out; box-drag test; Home 1,436 → 1,224 lines ✅ *(V94)* |
-| 47 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out *(planned)* |
+| 47 | `Home.jsx` → `<ImageGrid>` component | Masonry + infinite scroll + view-logging out; Home 1,224 → 948 lines *(V95 — code complete)* |
 | 48 | `Home.jsx` final composition | Page becomes wiring; target <500 lines *(planned)* |
